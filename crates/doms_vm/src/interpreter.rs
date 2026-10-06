@@ -21,12 +21,23 @@ pub enum VmError {
     StackUnderflow,
     #[error("Undefined global variable: {0}")]
     UndefinedGlobal(String),
+    #[error("Syntax error: {0}")]
+    SyntaxError(String),
+    #[error("Reference error: {0}")]
+    ReferenceError(String),
     #[error("Type error: {0}")]
     TypeError(String),
     #[error("Runtime error: {0}")]
     RuntimeError(String),
     #[error("Invalid instruction at ip: {0}")]
     InvalidInstruction(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreferredType {
+    Default,
+    Number,
+    String,
 }
 
 /// Call frame on the execution stack.
@@ -67,6 +78,13 @@ impl fmt::Display for VmValue {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CatchHandler {
+    pub frame_idx: usize,
+    pub target_ip: usize,
+    pub stack_len: usize,
+}
+
 pub struct Vm {
     pub stack: Vec<JsValue>,
     pub frames: Vec<CallFrame>,
@@ -75,10 +93,12 @@ pub struct Vm {
     pub shapes: ShapeRegistry,
     pub inline_caches: Vec<InlineCacheSlot>,
     pub objects: Vec<*mut JsObject>,
-    pub catch_stack: Vec<usize>,
+    pub catch_stack: Vec<CatchHandler>,
     pub microtasks: VecDeque<(JsValue, Vec<JsValue>)>,
     pub modules: HashMap<String, JsValue>,
     pub current_exports: HashMap<String, JsValue>,
+    pub instruction_count: usize,
+    pub max_instructions: Option<usize>,
 }
 
 impl Vm {
@@ -95,6 +115,8 @@ impl Vm {
             microtasks: VecDeque::new(),
             modules: HashMap::new(),
             current_exports: HashMap::new(),
+            instruction_count: 0,
+            max_instructions: None,
         };
         register_builtins(&mut vm);
         vm
@@ -155,7 +177,11 @@ impl Vm {
         let obj = Box::new(JsObject::new_function(ShapeRegistry::ROOT_SHAPE_ID, None, func));
         let ptr = Box::into_raw(obj);
         self.objects.push(ptr);
-        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+        let fn_val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
+        let proto = self.alloc_object();
+        self.set_property(proto, "constructor", fn_val);
+        self.set_property(fn_val, "prototype", proto);
+        fn_val
     }
 
     pub fn alloc_promise(&mut self, state: PromiseState, result: JsValue) -> JsValue {
@@ -228,12 +254,73 @@ impl Vm {
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
 
+    pub fn alloc_date(&mut self, proto: Option<JsValue>, time_ms: f64) -> JsValue {
+        let obj = Box::new(JsObject::new_date(ShapeRegistry::ROOT_SHAPE_ID, proto, time_ms));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_symbol(&mut self, desc: Option<String>) -> JsValue {
+        let obj = Box::new(JsObject::new_symbol(ShapeRegistry::ROOT_SHAPE_ID, None, desc));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_bigint(&mut self, val: i64) -> JsValue {
+        let obj = Box::new(JsObject::new_bigint(ShapeRegistry::ROOT_SHAPE_ID, None, val));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_error(&mut self, name: String, message: String) -> JsValue {
+        let ctor = self.globals.get(&name).copied().unwrap_or(JsValue::undefined());
+        let proto = if ctor.is_object() {
+            let p = self.get_property(ctor, "prototype");
+            if p.is_object() { Some(p) } else { None }
+        } else {
+            None
+        };
+        let obj = Box::new(JsObject::new_error(ShapeRegistry::ROOT_SHAPE_ID, proto, name.clone(), message.clone()));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        let val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
+        let name_val = self.alloc_string(name);
+        let msg_val = self.alloc_string(message);
+        self.set_property(val, "name", name_val);
+        self.set_property(val, "message", msg_val);
+        if ctor.is_object() {
+            self.set_property(val, "constructor", ctor);
+        }
+        val
+    }
+
+    pub fn get_element(&mut self, obj: JsValue, index: usize) -> JsValue {
+        if let Some(ptr) = obj.as_object_ptr() {
+            let jsobj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Array(elements) = &jsobj.kind {
+                if index < elements.len() {
+                    return elements[index];
+                }
+            }
+        }
+        let key = index.to_string();
+        self.get_property(obj, &key)
+    }
+
     pub fn enqueue_microtask(&mut self, callee: JsValue, args: Vec<JsValue>) {
         self.microtasks.push_back((callee, args));
     }
 
     pub fn drain_microtasks(&mut self) -> Result<(), VmError> {
+        let mut count = 0;
         while let Some((callee, args)) = self.microtasks.pop_front() {
+            count += 1;
+            if count > 1000 {
+                return Err(VmError::RuntimeError("Microtask queue limit exceeded".into()));
+            }
             let _ = self.call(callee, JsValue::undefined(), &args);
         }
         Ok(())
@@ -413,6 +500,62 @@ impl Vm {
                 }
             }
 
+            // Special properties on Error
+            if let ObjectKind::Error { name, message } = &obj.kind {
+                match key {
+                    "name" => return self.alloc_string(name.clone()),
+                    "message" => return self.alloc_string(message.clone()),
+                    _ => {}
+                }
+            }
+
+            // Special properties on Function / NativeFunction
+            if matches!(obj.kind, ObjectKind::Function(_) | ObjectKind::NativeFunction(_)) {
+                match key {
+                    "call" => {
+                        let fn_target = target;
+                        return self.alloc_closure_native_function("call", 1, Arc::new(move |vm, _this, args| {
+                            let this_arg = args.first().copied().unwrap_or(JsValue::undefined());
+                            let rest_args = if args.len() > 1 { &args[1..] } else { &[] };
+                            vm.call(fn_target, this_arg, rest_args)
+                        }));
+                    }
+                    "apply" => {
+                        let fn_target = target;
+                        return self.alloc_closure_native_function("apply", 2, Arc::new(move |vm, _this, args| {
+                            let this_arg = args.first().copied().unwrap_or(JsValue::undefined());
+                            let mut call_args = Vec::new();
+                            if let Some(arr_val) = args.get(1) {
+                                if let Some(arr_ptr) = arr_val.as_object_ptr() {
+                                    let arr_obj = unsafe { &*(arr_ptr as *mut JsObject) };
+                                    if let ObjectKind::Array(elems) = &arr_obj.kind {
+                                        call_args.extend_from_slice(elems);
+                                    }
+                                }
+                            }
+                            vm.call(fn_target, this_arg, &call_args)
+                        }));
+                    }
+                    "name" => {
+                        let name_str = match &obj.kind {
+                            ObjectKind::Function(f) => f.name.as_deref().unwrap_or(""),
+                            ObjectKind::NativeFunction(n) => &n.name,
+                            _ => "",
+                        };
+                        return self.alloc_string(name_str.to_string());
+                    }
+                    "length" => {
+                        let len = match &obj.kind {
+                            ObjectKind::Function(f) => f.params.len(),
+                            ObjectKind::NativeFunction(n) => n.length as usize,
+                            _ => 0,
+                        };
+                        return JsValue::from_int32(len as i32);
+                    }
+                    _ => {}
+                }
+            }
+
             // Shape offset lookup
             if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
                 if let Some(val) = obj.get_slot(offset) {
@@ -537,6 +680,42 @@ impl Vm {
                 }
                 Ok(JsValue::from_boolean(false))
             })),
+            "map" => Some(self.alloc_native_function("map", 1, |vm, this, args| {
+                let cb = args.first().copied().unwrap_or(JsValue::undefined());
+                let len_val = vm.get_property(this, "length");
+                let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+                let mut mapped = Vec::with_capacity(len);
+                for i in 0..len {
+                    let el = vm.get_element(this, i);
+                    let res = vm.call(cb, JsValue::undefined(), &[el, JsValue::from_int32(i as i32), this])?;
+                    mapped.push(res);
+                }
+                Ok(vm.alloc_array(mapped))
+            })),
+            "forEach" => Some(self.alloc_native_function("forEach", 1, |vm, this, args| {
+                let cb = args.first().copied().unwrap_or(JsValue::undefined());
+                let len_val = vm.get_property(this, "length");
+                let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+                for i in 0..len {
+                    let el = vm.get_element(this, i);
+                    let _ = vm.call(cb, JsValue::undefined(), &[el, JsValue::from_int32(i as i32), this])?;
+                }
+                Ok(JsValue::undefined())
+            })),
+            "filter" => Some(self.alloc_native_function("filter", 1, |vm, this, args| {
+                let cb = args.first().copied().unwrap_or(JsValue::undefined());
+                let len_val = vm.get_property(this, "length");
+                let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+                let mut filtered = Vec::new();
+                for i in 0..len {
+                    let el = vm.get_element(this, i);
+                    let res = vm.call(cb, JsValue::undefined(), &[el, JsValue::from_int32(i as i32), this])?;
+                    if res.is_truthy() {
+                        filtered.push(el);
+                    }
+                }
+                Ok(vm.alloc_array(filtered))
+            })),
             _ => None,
         }
     }
@@ -585,6 +764,30 @@ impl Vm {
                 let end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len).clamp(0, len) as usize;
                 let sub = if start <= end { &s[start..end] } else { "" };
                 Ok(vm.alloc_string(sub.to_string()))
+            })),
+            "isWellFormed" => Some(self.alloc_native_function("isWellFormed", 0, |vm, this, _args| {
+                let s = vm.to_string_value(this);
+                let mut ok = true;
+                for c in s.chars() {
+                    let u = c as u32;
+                    if (0xD800..=0xDFFF).contains(&u) {
+                        ok = false;
+                        break;
+                    }
+                }
+                Ok(JsValue::from_boolean(ok))
+            })),
+            "toWellFormed" => Some(self.alloc_native_function("toWellFormed", 0, |vm, this, _args| {
+                let s = vm.to_string_value(this);
+                let sanitized: String = s.chars().map(|c| {
+                    let u = c as u32;
+                    if (0xD800..=0xDFFF).contains(&u) {
+                        '\u{FFFD}'
+                    } else {
+                        c
+                    }
+                }).collect();
+                Ok(vm.alloc_string(sanitized))
             })),
             _ => None,
         }
@@ -968,6 +1171,168 @@ impl Vm {
                 }
                 Ok(JsValue::undefined())
             }))),
+            "union" => Some(self.alloc_closure_native_function("union", 1, Arc::new(move |vm, _this, args| {
+                let other = args.first().copied().unwrap_or(JsValue::undefined());
+                let new_set = vm.alloc_set();
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                            if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
+                                    set_elements.push(*el);
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(ptr) = other.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                            if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
+                                    set_elements.push(*el);
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(new_set)
+            }))),
+            "intersection" => Some(self.alloc_closure_native_function("intersection", 1, Arc::new(move |vm, _this, args| {
+                let other = args.first().copied().unwrap_or(JsValue::undefined());
+                let new_set = vm.alloc_set();
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let has_fn = vm.get_property(other, "has");
+                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                            if res.is_truthy() {
+                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                    if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
+                                        set_elements.push(*el);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(new_set)
+            }))),
+            "difference" => Some(self.alloc_closure_native_function("difference", 1, Arc::new(move |vm, _this, args| {
+                let other = args.first().copied().unwrap_or(JsValue::undefined());
+                let new_set = vm.alloc_set();
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let has_fn = vm.get_property(other, "has");
+                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                            if !res.is_truthy() {
+                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                    if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
+                                        set_elements.push(*el);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(new_set)
+            }))),
+            "symmetricDifference" => Some(self.alloc_closure_native_function("symmetricDifference", 1, Arc::new(move |vm, _this, args| {
+                let other = args.first().copied().unwrap_or(JsValue::undefined());
+                let new_set = vm.alloc_set();
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let has_fn = vm.get_property(other, "has");
+                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                            if !res.is_truthy() {
+                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                    if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
+                                        set_elements.push(*el);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(ptr) = other.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let has_fn = vm.get_property(target, "has");
+                            let res = vm.call(has_fn, target, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                            if !res.is_truthy() {
+                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                    if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
+                                        set_elements.push(*el);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(new_set)
+            }))),
+            "isSubsetOf" => Some(self.alloc_closure_native_function("isSubsetOf", 1, Arc::new(move |vm, _this, args| {
+                let other = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let has_fn = vm.get_property(other, "has");
+                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                            if !res.is_truthy() {
+                                return Ok(JsValue::from_boolean(false));
+                            }
+                        }
+                    }
+                }
+                Ok(JsValue::from_boolean(true))
+            }))),
+            "isSupersetOf" => Some(self.alloc_closure_native_function("isSupersetOf", 1, Arc::new(move |vm, _this, args| {
+                let other = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = other.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let has_fn = vm.get_property(target, "has");
+                            let res = vm.call(has_fn, target, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                            if !res.is_truthy() {
+                                return Ok(JsValue::from_boolean(false));
+                            }
+                        }
+                    }
+                }
+                Ok(JsValue::from_boolean(true))
+            }))),
+            "isDisjointFrom" => Some(self.alloc_closure_native_function("isDisjointFrom", 1, Arc::new(move |vm, _this, args| {
+                let other = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        for el in elements {
+                            let has_fn = vm.get_property(other, "has");
+                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                            if res.is_truthy() {
+                                return Ok(JsValue::from_boolean(false));
+                            }
+                        }
+                    }
+                }
+                Ok(JsValue::from_boolean(true))
+            }))),
             _ => None,
         }
     }
@@ -1082,20 +1447,26 @@ impl Vm {
                 ObjectKind::Error { name, message } => {
                     format!("{}: {}", name, message)
                 }
-                ObjectKind::Ordinary => "[object Object]".to_string(),
-                ObjectKind::Promise(_) => "[object Promise]".to_string(),
-                ObjectKind::Generator(_) => "[object Generator]".to_string(),
-                ObjectKind::SharedArrayBuffer(_) => "[object SharedArrayBuffer]".to_string(),
-                ObjectKind::TypedArray(ta) => match ta.kind {
-                    TypedArrayKind::Int32 => "[object Int32Array]".to_string(),
-                    TypedArrayKind::Uint8 => "[object Uint8Array]".to_string(),
-                },
-                ObjectKind::Worker(_) => "[object Worker]".to_string(),
-                ObjectKind::Map(_) => "[object Map]".to_string(),
-                ObjectKind::Set(_) => "[object Set]".to_string(),
-                ObjectKind::WeakRef(_) => "[object WeakRef]".to_string(),
-                ObjectKind::FinalizationRegistry { .. } => "[object FinalizationRegistry]".to_string(),
+                ObjectKind::Date(ms) => format!("Date({})", ms),
+                ObjectKind::Symbol(desc) => format!("Symbol({})", desc.as_deref().unwrap_or("")),
+                ObjectKind::BigInt(b) => format!("{}n", b),
                 ObjectKind::RegExp { pattern, flags } => format!("/{}/{}", pattern, flags),
+                _ => {
+                    let has_name_or_msg = if let Some(shape) = self.shapes.get(obj.shape_id) {
+                        let name = shape.property_offsets.get("name").and_then(|info| obj.get_slot(info.offset));
+                        let msg = shape.property_offsets.get("message").and_then(|info| obj.get_slot(info.offset));
+                        if let Some(msg_val) = msg {
+                            let name_str = if let Some(n_val) = name { self.to_string_value(n_val) } else { "Error".to_string() };
+                            let msg_str = self.to_string_value(msg_val);
+                            Some(format!("{}: {}", name_str, msg_str))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    has_name_or_msg.unwrap_or_else(|| "[object Object]".to_string())
+                }
             }
         } else {
             "undefined".to_string()
@@ -1137,6 +1508,14 @@ impl Vm {
 
     // ── Main Execution Engine ──
 
+    pub fn eval(&mut self, source: &str) -> Result<JsValue, VmError> {
+        let program = doms_parser::parse(source)
+            .map_err(|e| VmError::SyntaxError(e.to_string()))?;
+        let chunk = doms_compiler::compile(&program)
+            .map_err(|e| VmError::TypeError(e.to_string()))?;
+        self.run(&chunk)
+    }
+
     pub fn run(&mut self, chunk: &BytecodeChunk) -> Result<JsValue, VmError> {
         let root_chunk = Arc::new(chunk.clone());
         let target_depth = self.frames.len();
@@ -1152,26 +1531,142 @@ impl Vm {
         Ok(result)
     }
 
-    pub fn call(&mut self, callee: JsValue, this_val: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
+    pub fn is_callable(&self, val: JsValue) -> bool {
+        if let Some(ptr) = val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            matches!(obj.kind, ObjectKind::Function(_) | ObjectKind::NativeFunction(_))
+        } else {
+            false
+        }
+    }
+
+    pub fn to_primitive(&mut self, val: JsValue, hint: PreferredType) -> Result<JsValue, VmError> {
+        if !val.is_object() {
+            return Ok(val);
+        }
+        let ptr = match val.as_object_ptr() {
+            Some(p) => p,
+            None => return Ok(val),
+        };
+        let obj = unsafe { &*(ptr as *mut JsObject) };
+
+        match &obj.kind {
+            ObjectKind::String(_) => Ok(val),
+            ObjectKind::Date(_) => {
+                let actual_hint = if hint == PreferredType::Default {
+                    PreferredType::String
+                } else {
+                    hint
+                };
+                let methods = if actual_hint == PreferredType::String {
+                    ["toString", "valueOf"]
+                } else {
+                    ["valueOf", "toString"]
+                };
+                for m in methods {
+                    let fn_val = self.get_property(val, m);
+                    if self.is_callable(fn_val) {
+                        let res = self.call(fn_val, val, &[])?;
+                        if !res.is_object() || res.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))) {
+                            return Ok(res);
+                        }
+                    }
+                }
+                Ok(val)
+            }
+            _ => {
+                let methods = if hint == PreferredType::String {
+                    ["toString", "valueOf"]
+                } else {
+                    ["valueOf", "toString"]
+                };
+                for m in methods {
+                    let fn_val = self.get_property(val, m);
+                    if self.is_callable(fn_val) {
+                        let res = self.call(fn_val, val, &[])?;
+                        if !res.is_object() || res.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))) {
+                            return Ok(res);
+                        }
+                    }
+                }
+                Ok(val)
+            }
+        }
+    }
+
+    pub fn to_number_value(&mut self, val: JsValue) -> Result<f64, VmError> {
+        let prim = self.to_primitive(val, PreferredType::Number)?;
+        if prim.is_int32() {
+            Ok(prim.as_int32().unwrap() as f64)
+        } else if prim.is_double() {
+            Ok(prim.as_double().unwrap())
+        } else if prim.is_boolean() {
+            Ok(if prim.as_boolean() == Some(true) { 1.0 } else { 0.0 })
+        } else if prim.is_null() {
+            Ok(0.0)
+        } else if prim.is_undefined() {
+            Ok(f64::NAN)
+        } else if let Some(ptr) = prim.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            match &obj.kind {
+                ObjectKind::String(s) => {
+                    let trimmed = s.trim();
+                    if trimmed.is_empty() {
+                        Ok(0.0)
+                    } else if trimmed == "Infinity" || trimmed == "+Infinity" {
+                        Ok(f64::INFINITY)
+                    } else if trimmed == "-Infinity" {
+                        Ok(f64::NEG_INFINITY)
+                    } else if trimmed == "NaN" {
+                        Ok(f64::NAN)
+                    } else if trimmed.starts_with("0x") || trimmed.starts_with("0X") {
+                        Ok(u64::from_str_radix(&trimmed[2..], 16).map(|v| v as f64).unwrap_or(f64::NAN))
+                    } else if trimmed.starts_with("0o") || trimmed.starts_with("0O") {
+                        Ok(u64::from_str_radix(&trimmed[2..], 8).map(|v| v as f64).unwrap_or(f64::NAN))
+                    } else if trimmed.starts_with("0b") || trimmed.starts_with("0B") {
+                        Ok(u64::from_str_radix(&trimmed[2..], 2).map(|v| v as f64).unwrap_or(f64::NAN))
+                    } else {
+                        Ok(trimmed.parse::<f64>().unwrap_or(f64::NAN))
+                    }
+                }
+                ObjectKind::BigInt(b) => Ok(*b as f64),
+                _ => Ok(f64::NAN),
+            }
+        } else {
+            Ok(f64::NAN)
+        }
+    }
+
+    pub fn execute_call_internal(
+        &mut self,
+        callee: JsValue,
+        this_val: JsValue,
+        args: Vec<JsValue>,
+    ) -> Result<Option<JsValue>, VmError> {
         if let Some(ptr) = callee.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
                 ObjectKind::NativeFunction(native) => {
-                    return native.call(self, this_val, args);
+                    let res = native.call(self, this_val, &args)?;
+                    Ok(Some(res))
                 }
                 ObjectKind::Function(f) => {
                     let obj_mut = unsafe { &mut *(ptr as *mut JsObject) };
                     if let ObjectKind::Function(ref mut fn_info) = obj_mut.kind {
-                        if let Some(jit_fn) = &fn_info.jit_entry {
-                            let callable = Arc::clone(&jit_fn.executable);
-                            return (callable)(self, args);
-                        } else {
-                            fn_info.call_count = fn_info.call_count.saturating_add(1);
-                            if fn_info.call_count >= crate::jit::JIT_HOT_THRESHOLD && !fn_info.is_generator && !fn_info.is_async {
-                                if let Some(jit_fn) = crate::jit::JitCompiler::compile(&fn_info.chunk) {
-                                    let callable = Arc::clone(&jit_fn.executable);
-                                    fn_info.jit_entry = Some(jit_fn);
-                                    return (callable)(self, args);
+                        if self.frames.len() < 32 {
+                            if let Some(jit_fn) = &fn_info.jit_entry {
+                                let callable = Arc::clone(&jit_fn.executable);
+                                let res = (callable)(self, this_val, &args)?;
+                                return Ok(Some(res));
+                            } else {
+                                fn_info.call_count = fn_info.call_count.saturating_add(1);
+                                if fn_info.call_count >= crate::jit::JIT_HOT_THRESHOLD && !fn_info.is_generator && !fn_info.is_async {
+                                    if let Some(jit_fn) = crate::jit::JitCompiler::compile(&fn_info.chunk) {
+                                        let callable = Arc::clone(&jit_fn.executable);
+                                        fn_info.jit_entry = Some(jit_fn);
+                                        let res = (callable)(self, this_val, &args)?;
+                                        return Ok(Some(res));
+                                    }
                                 }
                             }
                         }
@@ -1180,17 +1675,17 @@ impl Vm {
                         let generator_instance = JsGenerator {
                             function: f.clone(),
                             ip: 0,
-                            stack: args.to_vec(),
+                            stack: args,
                             state: crate::object::GeneratorState::SuspendedStart,
                         };
-                        return Ok(self.alloc_generator(generator_instance));
-                    }
-                    if f.is_async {
+                        let gen_val = self.alloc_generator(generator_instance);
+                        Ok(Some(gen_val))
+                    } else if f.is_async {
                         let promise_val = self.alloc_promise(PromiseState::Pending, JsValue::undefined());
                         let chunk = Arc::clone(&f.chunk);
                         let target_depth = self.frames.len();
                         let base_sp = self.stack.len();
-                        for arg in args {
+                        for arg in &args {
                             self.push(*arg);
                         }
                         self.frames.push(CallFrame {
@@ -1208,31 +1703,49 @@ impl Vm {
                             }
                         }
                         let _ = self.drain_microtasks();
-                        return Ok(promise_val);
+                        Ok(Some(promise_val))
+                    } else {
+                        let new_frame = CallFrame {
+                            chunk: Arc::clone(&f.chunk),
+                            ip: 0,
+                            base_sp: self.stack.len(),
+                            this_val,
+                            gen_ptr: None,
+                        };
+                        for arg in args {
+                            self.push(arg);
+                        }
+                        self.frames.push(new_frame);
+                        Ok(None)
                     }
-                    let chunk = Arc::clone(&f.chunk);
-                    let target_depth = self.frames.len();
-                    let base_sp = self.stack.len();
-                    for arg in args {
-                        self.push(*arg);
-                    }
-                    self.frames.push(CallFrame {
-                        chunk,
-                        ip: 0,
-                        base_sp,
-                        this_val,
-                        gen_ptr: None,
-                    });
-                    return self.run_until_depth(target_depth);
                 }
-                _ => return Err(VmError::TypeError("Target is not a function".into())),
+                _ => Err(VmError::TypeError(format!("{} is not a function", self.to_string_value(callee)))),
             }
+        } else {
+            Err(VmError::TypeError(format!("{} is not a function", self.to_string_value(callee))))
         }
-        Err(VmError::TypeError("Target is not callable".into()))
+    }
+
+    pub fn call(&mut self, callee: JsValue, this_val: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
+        let res_opt = self.execute_call_internal(callee, this_val, args.to_vec())?;
+        if let Some(res) = res_opt {
+            Ok(res)
+        } else {
+            let target_depth = self.frames.len() - 1;
+            self.run_until_depth(target_depth)
+        }
     }
 
     pub fn run_until_depth(&mut self, target_depth: usize) -> Result<JsValue, VmError> {
         while self.frames.len() > target_depth {
+            if let Some(max) = self.max_instructions {
+                self.instruction_count += 1;
+                if self.instruction_count > max {
+                    return Err(VmError::RuntimeError(
+                        "Execution step limit exceeded (timeout)".to_string(),
+                    ));
+                }
+            }
             let (op, chunk) = {
                 let frame = self.frames.last_mut().unwrap();
                 if frame.ip >= frame.chunk.instructions.len() {
@@ -1432,12 +1945,14 @@ impl Vm {
                             if let Some(i) = key.to_int32() {
                                 if i >= 0 {
                                     let idx = i as usize;
-                                    if idx >= elements.len() {
-                                        elements.resize(idx + 1, JsValue::undefined());
+                                    if idx < 65536 && idx <= elements.len() + 1024 {
+                                        if idx >= elements.len() {
+                                            elements.resize(idx + 1, JsValue::undefined());
+                                        }
+                                        elements[idx] = val;
+                                        self.push(val);
+                                        continue;
                                     }
-                                    elements[idx] = val;
-                                    self.push(val);
-                                    continue;
                                 }
                             }
                         }
@@ -1535,86 +2050,21 @@ impl Vm {
                     }
                     args.reverse();
                     let callee = self.pop()?;
+                    if let Some(res) = self.execute_call_internal(callee, JsValue::undefined(), args)? {
+                        self.push(res);
+                    }
+                }
 
-                    if let Some(ptr) = callee.as_object_ptr() {
-                        let obj = unsafe { &*(ptr as *mut JsObject) };
-                        match &obj.kind {
-                            ObjectKind::NativeFunction(native) => {
-                                let res = native.call(self, JsValue::undefined(), &args)?;
-                                self.push(res);
-                            }
-                            ObjectKind::Function(f) => {
-                                let obj_mut = unsafe { &mut *(ptr as *mut JsObject) };
-                                if let ObjectKind::Function(ref mut fn_info) = obj_mut.kind {
-                                    if let Some(jit_fn) = &fn_info.jit_entry {
-                                        let callable = Arc::clone(&jit_fn.executable);
-                                        let res = (callable)(self, &args)?;
-                                        self.push(res);
-                                        continue;
-                                    } else {
-                                        fn_info.call_count = fn_info.call_count.saturating_add(1);
-                                        if fn_info.call_count >= crate::jit::JIT_HOT_THRESHOLD && !fn_info.is_generator && !fn_info.is_async {
-                                            if let Some(jit_fn) = crate::jit::JitCompiler::compile(&fn_info.chunk) {
-                                                let callable = Arc::clone(&jit_fn.executable);
-                                                fn_info.jit_entry = Some(jit_fn);
-                                                let res = (callable)(self, &args)?;
-                                                self.push(res);
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                }
-                                if f.is_generator {
-                                    let generator_instance = JsGenerator {
-                                        function: f.clone(),
-                                        ip: 0,
-                                        stack: args,
-                                        state: crate::object::GeneratorState::SuspendedStart,
-                                    };
-                                    let gen_val = self.alloc_generator(generator_instance);
-                                    self.push(gen_val);
-                                } else if f.is_async {
-                                    let promise_val = self.alloc_promise(PromiseState::Pending, JsValue::undefined());
-                                    let chunk = Arc::clone(&f.chunk);
-                                    let target_depth = self.frames.len();
-                                    let base_sp = self.stack.len();
-                                    for arg in &args {
-                                        self.push(*arg);
-                                    }
-                                    self.frames.push(CallFrame {
-                                        chunk,
-                                        ip: 0,
-                                        base_sp,
-                                        this_val: JsValue::undefined(),
-                                        gen_ptr: None,
-                                    });
-                                    match self.run_until_depth(target_depth) {
-                                        Ok(res) => self.resolve_promise(promise_val, res),
-                                        Err(e) => {
-                                            let err_val = self.alloc_string(e.to_string());
-                                            self.reject_promise(promise_val, err_val);
-                                        }
-                                    }
-                                    let _ = self.drain_microtasks();
-                                    self.push(promise_val);
-                                } else {
-                                    let new_frame = CallFrame {
-                                        chunk: Arc::clone(&f.chunk),
-                                        ip: 0,
-                                        base_sp: self.stack.len(),
-                                        this_val: JsValue::undefined(),
-                                        gen_ptr: None,
-                                    };
-                                    for arg in args {
-                                        self.push(arg);
-                                    }
-                                    self.frames.push(new_frame);
-                                }
-                            }
-                            _ => return Err(VmError::TypeError(format!("{} is not a function", self.to_string_value(callee)))),
-                        }
-                    } else {
-                        return Err(VmError::TypeError(format!("{} is not a function", self.to_string_value(callee))));
+                OpCode::CallWithThis(argc) => {
+                    let mut args = Vec::with_capacity(argc as usize);
+                    for _ in 0..argc {
+                        args.push(self.pop()?);
+                    }
+                    args.reverse();
+                    let callee = self.pop()?;
+                    let this_val = self.pop()?;
+                    if let Some(res) = self.execute_call_internal(callee, this_val, args)? {
+                        self.push(res);
                     }
                 }
 
@@ -1658,6 +2108,13 @@ impl Vm {
                 OpCode::Return => {
                     let ret_val = self.pop().unwrap_or_default();
                     let finished = self.frames.pop().unwrap();
+                    while let Some(top) = self.catch_stack.last() {
+                        if top.frame_idx >= self.frames.len() {
+                            self.catch_stack.pop();
+                        } else {
+                            break;
+                        }
+                    }
                     if let Some(g_ptr) = finished.gen_ptr {
                         let g_obj = unsafe { &mut *(g_ptr) };
                         if let ObjectKind::Generator(ref mut g) = g_obj.kind {
@@ -1706,10 +2163,13 @@ impl Vm {
                                 match p.state {
                                     PromiseState::Fulfilled => p.result,
                                     PromiseState::Rejected => {
-                                        if let Some(target_ip) = self.catch_stack.pop() {
+                                        if let Some(handler) = self.catch_stack.pop() {
+                                            self.frames.truncate(handler.frame_idx + 1);
+                                            self.stack.truncate(handler.stack_len);
                                             self.push(p.result);
-                                            let frame = self.frames.last_mut().unwrap();
-                                            frame.ip = target_ip;
+                                            if let Some(frame) = self.frames.last_mut() {
+                                                frame.ip = handler.target_ip;
+                                            }
                                             continue;
                                         } else {
                                             let err_str = self.to_string_value(p.result);
@@ -1816,45 +2276,70 @@ impl Vm {
                     let b = self.pop()?;
                     let a = self.pop()?;
 
-                    let a_is_str = a.is_object() && a.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
-                    let b_is_str = b.is_object() && b.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    let a_prim = self.to_primitive(a, PreferredType::Default)?;
+                    let b_prim = self.to_primitive(b, PreferredType::Default)?;
+
+                    let a_is_str = a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    let b_is_str = b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
 
                     if a_is_str || b_is_str {
-                        let sa = self.to_string_value(a);
-                        let sb = self.to_string_value(b);
+                        let sa = self.to_string_value(a_prim);
+                        let sb = self.to_string_value(b_prim);
                         let combined = format!("{}{}", sa, sb);
                         let res = self.alloc_string(combined);
                         self.push(res);
                     } else {
-                        let na = a.to_number().unwrap_or(f64::NAN);
-                        let nb = b.to_number().unwrap_or(f64::NAN);
+                        let na = self.to_number_value(a_prim)?;
+                        let nb = self.to_number_value(b_prim)?;
                         self.push(JsValue::from_double(na + nb));
                     }
                 }
                 OpCode::Sub => {
-                    let b = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    let a = self.pop()?.to_number().unwrap_or(f64::NAN);
+                    let b_val = self.pop()?;
+                    let a_val = self.pop()?;
+                    let b = self.to_number_value(b_val)?;
+                    let a = self.to_number_value(a_val)?;
                     self.push(JsValue::from_double(a - b));
                 }
                 OpCode::Mul => {
-                    let b = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    let a = self.pop()?.to_number().unwrap_or(f64::NAN);
+                    let b_val = self.pop()?;
+                    let a_val = self.pop()?;
+                    let b = self.to_number_value(b_val)?;
+                    let a = self.to_number_value(a_val)?;
                     self.push(JsValue::from_double(a * b));
                 }
                 OpCode::Div => {
-                    let b = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    let a = self.pop()?.to_number().unwrap_or(f64::NAN);
+                    let b_val = self.pop()?;
+                    let a_val = self.pop()?;
+                    let b = self.to_number_value(b_val)?;
+                    let a = self.to_number_value(a_val)?;
                     self.push(JsValue::from_double(a / b));
                 }
                 OpCode::Mod => {
-                    let b = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    let a = self.pop()?.to_number().unwrap_or(f64::NAN);
+                    let b_val = self.pop()?;
+                    let a_val = self.pop()?;
+                    let b = self.to_number_value(b_val)?;
+                    let a = self.to_number_value(a_val)?;
                     self.push(JsValue::from_double(a % b));
                 }
 
+                OpCode::Pos => {
+                    let v = self.pop()?;
+                    let n = self.to_number_value(v)?;
+                    self.push(JsValue::from_double(n));
+                }
                 OpCode::Neg => {
-                    let n = self.pop()?.to_number().unwrap_or(f64::NAN);
+                    let v = self.pop()?;
+                    let n = self.to_number_value(v)?;
                     self.push(JsValue::from_double(-n));
+                }
+                OpCode::Void => {
+                    let _ = self.pop()?;
+                    self.push(JsValue::undefined());
+                }
+                OpCode::Delete => {
+                    let _ = self.pop()?;
+                    self.push(JsValue::from_boolean(true));
                 }
                 OpCode::Not => {
                     let v = self.pop()?;
@@ -1907,24 +2392,117 @@ impl Vm {
                     self.push(JsValue::from_boolean(!crate::object::js_values_equal(a, b)));
                 }
                 OpCode::Lt => {
-                    let b = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    let a = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    self.push(JsValue::from_boolean(a < b));
+                    let b_val = self.pop()?;
+                    let a_val = self.pop()?;
+                    let a_prim = self.to_primitive(a_val, PreferredType::Number)?;
+                    let b_prim = self.to_primitive(b_val, PreferredType::Number)?;
+                    let a_is_str = a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    let b_is_str = b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    if a_is_str && b_is_str {
+                        let sa = self.to_string_value(a_prim);
+                        let sb = self.to_string_value(b_prim);
+                        self.push(JsValue::from_boolean(sa < sb));
+                    } else {
+                        let a = self.to_number_value(a_prim)?;
+                        let b = self.to_number_value(b_prim)?;
+                        self.push(JsValue::from_boolean(a < b));
+                    }
                 }
                 OpCode::Lte => {
-                    let b = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    let a = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    self.push(JsValue::from_boolean(a <= b));
+                    let b_val = self.pop()?;
+                    let a_val = self.pop()?;
+                    let a_prim = self.to_primitive(a_val, PreferredType::Number)?;
+                    let b_prim = self.to_primitive(b_val, PreferredType::Number)?;
+                    let a_is_str = a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    let b_is_str = b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    if a_is_str && b_is_str {
+                        let sa = self.to_string_value(a_prim);
+                        let sb = self.to_string_value(b_prim);
+                        self.push(JsValue::from_boolean(sa <= sb));
+                    } else {
+                        let a = self.to_number_value(a_prim)?;
+                        let b = self.to_number_value(b_prim)?;
+                        self.push(JsValue::from_boolean(a <= b));
+                    }
                 }
                 OpCode::Gt => {
-                    let b = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    let a = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    self.push(JsValue::from_boolean(a > b));
+                    let b_val = self.pop()?;
+                    let a_val = self.pop()?;
+                    let a_prim = self.to_primitive(a_val, PreferredType::Number)?;
+                    let b_prim = self.to_primitive(b_val, PreferredType::Number)?;
+                    let a_is_str = a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    let b_is_str = b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    if a_is_str && b_is_str {
+                        let sa = self.to_string_value(a_prim);
+                        let sb = self.to_string_value(b_prim);
+                        self.push(JsValue::from_boolean(sa > sb));
+                    } else {
+                        let a = self.to_number_value(a_prim)?;
+                        let b = self.to_number_value(b_prim)?;
+                        self.push(JsValue::from_boolean(a > b));
+                    }
                 }
                 OpCode::Gte => {
-                    let b = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    let a = self.pop()?.to_number().unwrap_or(f64::NAN);
-                    self.push(JsValue::from_boolean(a >= b));
+                    let b_val = self.pop()?;
+                    let a_val = self.pop()?;
+                    let a_prim = self.to_primitive(a_val, PreferredType::Number)?;
+                    let b_prim = self.to_primitive(b_val, PreferredType::Number)?;
+                    let a_is_str = a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    let b_is_str = b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
+                    if a_is_str && b_is_str {
+                        let sa = self.to_string_value(a_prim);
+                        let sb = self.to_string_value(b_prim);
+                        self.push(JsValue::from_boolean(sa >= sb));
+                    } else {
+                        let a = self.to_number_value(a_prim)?;
+                        let b = self.to_number_value(b_prim)?;
+                        self.push(JsValue::from_boolean(a >= b));
+                    }
+                }
+                OpCode::Instanceof => {
+                    let rhs = self.pop()?;
+                    let lhs = self.pop()?;
+                    if !lhs.is_object() {
+                        self.push(JsValue::from_boolean(false));
+                    } else if let Some(rhs_ptr) = rhs.as_object_ptr() {
+                        let _rhs_obj = unsafe { &*(rhs_ptr as *mut JsObject) };
+                        let proto = self.get_property(rhs, "prototype");
+                        let mut curr_obj = Some(lhs);
+                        let mut is_instance = false;
+                        if proto.is_object() {
+                            while let Some(curr) = curr_obj {
+                                if let Some(ptr) = curr.as_object_ptr() {
+                                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                                    if let Some(p) = obj.prototype {
+                                        if p == proto {
+                                            is_instance = true;
+                                            break;
+                                        }
+                                        curr_obj = Some(p);
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        self.push(JsValue::from_boolean(is_instance));
+                    } else {
+                        return Err(VmError::TypeError("Right-hand side of 'instanceof' is not an object".into()));
+                    }
+                }
+                OpCode::In => {
+                    let rhs = self.pop()?;
+                    let lhs = self.pop()?;
+                    let key = self.to_string_value(lhs);
+                    if let Some(ptr) = rhs.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        let has = self.shapes.has_property(obj.shape_id, &key);
+                        self.push(JsValue::from_boolean(has));
+                    } else {
+                        return Err(VmError::TypeError("Cannot use 'in' operator to search for property in non-object".into()));
+                    }
                 }
 
                 OpCode::Jump(target) => {
@@ -1948,16 +2526,23 @@ impl Vm {
 
                 OpCode::Throw => {
                     let err = self.pop()?;
-                    if let Some(target_ip) = self.catch_stack.pop() {
+                    if let Some(handler) = self.catch_stack.pop() {
+                        self.frames.truncate(handler.frame_idx + 1);
+                        self.stack.truncate(handler.stack_len);
                         self.push(err);
-                        let frame = self.frames.last_mut().unwrap();
-                        frame.ip = target_ip;
+                        if let Some(frame) = self.frames.last_mut() {
+                            frame.ip = handler.target_ip;
+                        }
                     } else {
                         return Err(VmError::RuntimeError(self.to_string_value(err)));
                     }
                 }
                 OpCode::PushCatch(target) => {
-                    self.catch_stack.push(target as usize);
+                    self.catch_stack.push(CatchHandler {
+                        frame_idx: self.frames.len().saturating_sub(1),
+                        target_ip: target as usize,
+                        stack_len: self.stack.len(),
+                    });
                 }
                 OpCode::PopCatch => {
                     self.catch_stack.pop();

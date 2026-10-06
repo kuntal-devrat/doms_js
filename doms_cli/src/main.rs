@@ -4,6 +4,9 @@ use std::env;
 use std::fs;
 use std::io::{self, Write};
 
+mod test262_runner;
+use test262_runner::{RunnerConfig, Test262Runner};
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -14,10 +17,56 @@ fn main() {
 
     match args[1].as_str() {
         "-v" | "--version" => {
-            println!("DOMS.js v0.1.0 (Phase 0)");
+            println!("DOMS.js v0.1.0 (Phase 3)");
         }
         "-h" | "--help" => {
             print_help();
+        }
+        "test262" => {
+            let mut config = RunnerConfig::default();
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "-s" | "--suite" => {
+                        if i + 1 < args.len() {
+                            config.suite_filter = Some(args[i + 1].clone());
+                            i += 1;
+                        }
+                    }
+                    "-f" | "--filter" => {
+                        if i + 1 < args.len() {
+                            config.path_filter = Some(args[i + 1].clone());
+                            i += 1;
+                        }
+                    }
+                    "-m" | "--max" => {
+                        if i + 1 < args.len() {
+                            if let Ok(n) = args[i + 1].parse::<usize>() {
+                                config.max_tests = Some(n);
+                            }
+                            i += 1;
+                        }
+                    }
+                    "-t" | "--threads" => {
+                        if i + 1 < args.len() {
+                            if let Ok(t) = args[i + 1].parse::<usize>() {
+                                config.threads = t;
+                            }
+                            i += 1;
+                        }
+                    }
+                    "-v" | "--verbose" => {
+                        config.verbose = true;
+                    }
+                    pos_arg if !pos_arg.starts_with('-') => {
+                        config.suite_filter = Some(pos_arg.to_string());
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            let runner = Test262Runner::new(config);
+            runner.run();
         }
         "eval" | "-e" => {
             if args.len() < 3 {
@@ -45,6 +94,7 @@ fn print_help() {
     println!("  doms                  Start interactive REPL");
     println!("  doms run <file.js>    Execute a JavaScript file");
     println!("  doms eval \"<code>\"    Evaluate JavaScript code string");
+    println!("  doms test262 [opts]   Run official Test262 ECMAScript conformance test suite");
     println!("  doms --version        Show version information");
     println!("  doms --help           Show this help message");
 }

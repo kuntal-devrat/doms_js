@@ -45,6 +45,13 @@ pub enum TokenKind {
     From,
     As,
     Default,
+    Instanceof,
+    In,
+    Switch,
+    Case,
+    Do,
+    Void,
+    Delete,
 
     // Identifiers & Literals
     Ident(String),
@@ -53,10 +60,17 @@ pub enum TokenKind {
 
     // Operators & Punctuation
     Plus,
+    PlusEq,
+    PlusPlus,
     Minus,
+    MinusEq,
+    MinusMinus,
     Star,
+    StarEq,
     Slash,
+    SlashEq,
     Percent,
+    PercentEq,
     Eq,
     EqEq,
     EqEqEq,
@@ -125,6 +139,13 @@ impl TokenKind {
             TokenKind::False => Some("false".to_string()),
             TokenKind::Null => Some("null".to_string()),
             TokenKind::Undefined => Some("undefined".to_string()),
+            TokenKind::Instanceof => Some("instanceof".to_string()),
+            TokenKind::In => Some("in".to_string()),
+            TokenKind::Switch => Some("switch".to_string()),
+            TokenKind::Case => Some("case".to_string()),
+            TokenKind::Do => Some("do".to_string()),
+            TokenKind::Void => Some("void".to_string()),
+            TokenKind::Delete => Some("delete".to_string()),
             _ => None,
         }
     }
@@ -221,6 +242,13 @@ impl<'a> Lexer<'a> {
             return self.read_identifier_or_keyword(line, col);
         }
 
+        if ch == '.' {
+            let mut lookahead = self.chars.clone();
+            if lookahead.next().is_some_and(|c| c.is_ascii_digit()) {
+                return self.read_number(line, col);
+            }
+        }
+
         if ch.is_ascii_digit() {
             return self.read_number(line, col);
         }
@@ -232,11 +260,52 @@ impl<'a> Lexer<'a> {
         self.advance();
 
         let kind = match ch {
-            '+' => TokenKind::Plus,
-            '-' => TokenKind::Minus,
-            '*' => TokenKind::Star,
-            '/' => TokenKind::Slash,
-            '%' => TokenKind::Percent,
+            '+' => {
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::PlusEq
+                } else if self.peek() == Some('+') {
+                    self.advance();
+                    TokenKind::PlusPlus
+                } else {
+                    TokenKind::Plus
+                }
+            }
+            '-' => {
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::MinusEq
+                } else if self.peek() == Some('-') {
+                    self.advance();
+                    TokenKind::MinusMinus
+                } else {
+                    TokenKind::Minus
+                }
+            }
+            '*' => {
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::StarEq
+                } else {
+                    TokenKind::Star
+                }
+            }
+            '/' => {
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::SlashEq
+                } else {
+                    TokenKind::Slash
+                }
+            }
+            '%' => {
+                if self.peek() == Some('=') {
+                    self.advance();
+                    TokenKind::PercentEq
+                } else {
+                    TokenKind::Percent
+                }
+            }
             ';' => TokenKind::Semicolon,
             ',' => TokenKind::Comma,
             '.' => TokenKind::Dot,
@@ -359,6 +428,13 @@ impl<'a> Lexer<'a> {
             "from" => TokenKind::From,
             "as" => TokenKind::As,
             "default" => TokenKind::Default,
+            "instanceof" => TokenKind::Instanceof,
+            "in" => TokenKind::In,
+            "switch" => TokenKind::Switch,
+            "case" => TokenKind::Case,
+            "do" => TokenKind::Do,
+            "void" => TokenKind::Void,
+            "delete" => TokenKind::Delete,
             _ => TokenKind::Ident(s),
         };
 
@@ -367,13 +443,119 @@ impl<'a> Lexer<'a> {
 
     fn read_number(&mut self, line: usize, col: usize) -> Result<Token, LexError> {
         let mut s = String::new();
+
+        // Check for 0x (hex), 0b (bin), 0o (oct)
+        if self.peek() == Some('0') {
+            let mut lookahead = self.chars.clone();
+            match lookahead.next() {
+                Some('x') | Some('X') => {
+                    self.advance(); // '0'
+                    self.advance(); // 'x'
+                    let mut hex_str = String::new();
+                    while let Some(c) = self.peek() {
+                        if c.is_ascii_hexdigit() {
+                            hex_str.push(c);
+                            self.advance();
+                        } else if c == '_' {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    if self.peek() == Some('n') {
+                        self.advance(); // consume 'n'
+                    }
+                    let num = u64::from_str_radix(&hex_str, 16)
+                        .map(|v| v as f64)
+                        .unwrap_or(f64::NAN);
+                    return Ok(Token { kind: TokenKind::Number(num), line, col });
+                }
+                Some('b') | Some('B') => {
+                    self.advance(); // '0'
+                    self.advance(); // 'b'
+                    let mut bin_str = String::new();
+                    while let Some(c) = self.peek() {
+                        if c == '0' || c == '1' {
+                            bin_str.push(c);
+                            self.advance();
+                        } else if c == '_' {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    if self.peek() == Some('n') {
+                        self.advance(); // consume 'n'
+                    }
+                    let num = u64::from_str_radix(&bin_str, 2)
+                        .map(|v| v as f64)
+                        .unwrap_or(f64::NAN);
+                    return Ok(Token { kind: TokenKind::Number(num), line, col });
+                }
+                Some('o') | Some('O') => {
+                    self.advance(); // '0'
+                    self.advance(); // 'o'
+                    let mut oct_str = String::new();
+                    while let Some(c) = self.peek() {
+                        if matches!(c, '0'..='7') {
+                            oct_str.push(c);
+                            self.advance();
+                        } else if c == '_' {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    if self.peek() == Some('n') {
+                        self.advance(); // consume 'n'
+                    }
+                    let num = u64::from_str_radix(&oct_str, 8)
+                        .map(|v| v as f64)
+                        .unwrap_or(f64::NAN);
+                    return Ok(Token { kind: TokenKind::Number(num), line, col });
+                }
+                _ => {}
+            }
+        }
+
+        // Standard decimal, possibly starting with '.' or digits
+        let mut has_dot = false;
+        let mut has_exp = false;
+
         while let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c == '.' {
+            if c.is_ascii_digit() {
                 s.push(c);
                 self.advance();
+            } else if c == '.' && !has_dot && !has_exp {
+                // Peek ahead to ensure it's not a method call like 42.toString()
+                let mut lookahead = self.chars.clone();
+                if lookahead.next().is_some_and(|next_c| next_c.is_ascii_alphabetic() || next_c == '$' || next_c == '_') {
+                    // It's followed by an identifier (e.g. 42.toString), stop before the dot
+                    break;
+                }
+                has_dot = true;
+                s.push(c);
+                self.advance();
+            } else if (c == 'e' || c == 'E') && !has_exp {
+                has_exp = true;
+                s.push(c);
+                self.advance();
+                if let Some(sign) = self.peek() {
+                    if sign == '+' || sign == '-' {
+                        s.push(sign);
+                        self.advance();
+                    }
+                }
+            } else if c == '_' {
+                self.advance(); // skip numeric separator
             } else {
                 break;
             }
+        }
+
+        // BigInt literal suffix 'n'
+        if self.peek() == Some('n') {
+            self.advance();
         }
 
         let num = s.parse::<f64>().map_err(|_| LexError::InvalidNumber(line, col))?;
@@ -392,9 +574,64 @@ impl<'a> Lexer<'a> {
                         'n' => s.push('\n'),
                         'r' => s.push('\r'),
                         't' => s.push('\t'),
+                        'b' => s.push('\x08'),
+                        'f' => s.push('\x0C'),
+                        'v' => s.push('\x0B'),
+                        '0' => s.push('\0'),
                         '\\' => s.push('\\'),
                         '\'' => s.push('\''),
                         '"' => s.push('"'),
+                        '\n' => {} // line continuation
+                        'x' => {
+                            // 2 hex digits
+                            let mut hex = String::new();
+                            for _ in 0..2 {
+                                if let Some(h) = self.advance() {
+                                    if h.is_ascii_hexdigit() {
+                                        hex.push(h);
+                                    }
+                                }
+                            }
+                            if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                if let Some(ch) = char::from_u32(code) {
+                                    s.push(ch);
+                                }
+                            }
+                        }
+                        'u' => {
+                            if self.peek() == Some('{') {
+                                self.advance(); // '{'
+                                let mut hex = String::new();
+                                while let Some(ch) = self.advance() {
+                                    if ch == '}' {
+                                        break;
+                                    }
+                                    if ch.is_ascii_hexdigit() {
+                                        hex.push(ch);
+                                    }
+                                }
+                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                    if let Some(ch) = char::from_u32(code) {
+                                        s.push(ch);
+                                    }
+                                }
+                            } else {
+                                // 4 hex digits
+                                let mut hex = String::new();
+                                for _ in 0..4 {
+                                    if let Some(h) = self.advance() {
+                                        if h.is_ascii_hexdigit() {
+                                            hex.push(h);
+                                        }
+                                    }
+                                }
+                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                    if let Some(ch) = char::from_u32(code) {
+                                        s.push(ch);
+                                    }
+                                }
+                            }
+                        }
                         _ => s.push(escaped),
                     }
                 }

@@ -1,0 +1,23 @@
+[package]
+name = "doms_fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+doms_parser = { path = "../crates/doms_parser" }
+doms_compiler = { path = "../crates/doms_compiler" }
+doms_vm = { path = "../crates/doms_vm" }
+doms_core = { path = "../doms_core" }
+
+[[bin]]
+name = "fuzz_parser"
+path = "fuzz_targets/fuzz_parser.rs"
+
+[[bin]]
+name = "fuzz_compiler"
+path = "fuzz_targets/fuzz_compiler.rs"
+
+[[bin]]
+name = "fuzz_vm"
+path = "fuzz_targets/fuzz_vm.rs"

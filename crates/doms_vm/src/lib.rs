@@ -3,6 +3,7 @@
 //! Bytecode virtual machine and interpreter for the DOMS JavaScript engine.
 
 pub mod builtins;
+pub mod debugger;
 pub mod inline_cache;
 pub mod interpreter;
 pub mod jit;
@@ -11,6 +12,7 @@ pub mod shape;
 pub mod value;
 
 pub use builtins::register_builtins;
+pub use debugger::{Breakpoint, CallFrameInfo, CdpDispatcher, DebuggerSession, StepMode};
 pub use inline_cache::{IcState, InlineCacheSlot};
 pub use interpreter::{CallFrame, Vm, VmError, VmValue};
 pub use jit::{JIT_HOT_THRESHOLD, JitCompiler, JitFunction};

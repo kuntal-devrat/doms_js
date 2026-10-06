@@ -99,6 +99,7 @@ impl<'a> Parser<'a> {
             TokenKind::If => self.parse_if_statement(),
             TokenKind::While => self.parse_while_statement(),
             TokenKind::For => self.parse_for_statement(),
+            TokenKind::Switch => self.parse_switch_statement(),
             TokenKind::Break => {
                 self.advance()?;
                 self.match_token(&TokenKind::Semicolon)?;
@@ -130,19 +131,80 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_switch_statement(&mut self) -> Result<Statement, ParseError> {
+        self.advance()?; // switch
+        self.expect(TokenKind::LParen)?;
+        let discriminant = self.parse_expression(0)?;
+        self.expect(TokenKind::RParen)?;
+        self.expect(TokenKind::LBrace)?;
+
+        let mut cases = Vec::new();
+        while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
+            if self.match_token(&TokenKind::Case)? {
+                let test = self.parse_expression(0)?;
+                self.expect(TokenKind::Colon)?;
+                let mut consequent = Vec::new();
+                while !self.check(&TokenKind::Case)
+                    && !self.check(&TokenKind::Default)
+                    && !self.check(&TokenKind::RBrace)
+                    && self.current.kind != TokenKind::Eof
+                {
+                    consequent.push(self.parse_statement()?);
+                }
+                cases.push(crate::ast::SwitchCase {
+                    test: Some(test),
+                    consequent,
+                });
+            } else if self.match_token(&TokenKind::Default)? {
+                self.expect(TokenKind::Colon)?;
+                let mut consequent = Vec::new();
+                while !self.check(&TokenKind::Case)
+                    && !self.check(&TokenKind::Default)
+                    && !self.check(&TokenKind::RBrace)
+                    && self.current.kind != TokenKind::Eof
+                {
+                    consequent.push(self.parse_statement()?);
+                }
+                cases.push(crate::ast::SwitchCase {
+                    test: None,
+                    consequent,
+                });
+            } else {
+                let tok = self.advance()?;
+                return Err(ParseError::UnexpectedToken(tok.kind, tok.line, tok.col));
+            }
+        }
+
+        self.expect(TokenKind::RBrace)?;
+        Ok(Statement::Switch { discriminant, cases })
+    }
+
     fn parse_var_decl(&mut self, kind: VarKind) -> Result<Statement, ParseError> {
         self.advance()?; // let / const / var
-        let name_tok = self.advance()?;
-        let name = match name_tok.kind {
-            TokenKind::Ident(id) => id,
-            other => return Err(ParseError::UnexpectedToken(other, name_tok.line, name_tok.col)),
-        };
+        let mut declarations = Vec::new();
 
-        let init =
-            if self.match_token(&TokenKind::Eq)? { Some(self.parse_expression(0)?) } else { None };
+        loop {
+            let name_tok = self.advance()?;
+            let name = match name_tok.kind {
+                TokenKind::Ident(id) => id,
+                other => return Err(ParseError::UnexpectedToken(other, name_tok.line, name_tok.col)),
+            };
+
+            let init = if self.match_token(&TokenKind::Eq)? {
+                Some(self.parse_expression(0)?)
+            } else {
+                None
+            };
+
+            declarations.push(crate::ast::VarDeclarator { name, init });
+
+            if !self.match_token(&TokenKind::Comma)? {
+                break;
+            }
+        }
 
         self.match_token(&TokenKind::Semicolon)?;
-        Ok(Statement::VarDecl { kind, name, init })
+        Ok(Statement::VarDecl { kind, declarations })
     }
 
     fn parse_function_signature_and_body(
@@ -451,13 +513,59 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            if self.check(&TokenKind::Eq) {
-                // Assignment
+            if self.check(&TokenKind::PlusPlus) {
+                self.advance()?;
+                if let Expression::Identifier(ref name) = lhs {
+                    lhs = Expression::Assignment {
+                        target: name.clone(),
+                        value: Box::new(Expression::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(lhs.clone()),
+                            right: Box::new(Expression::Literal(Literal::Number(1.0))),
+                        }),
+                    };
+                    continue;
+                }
+            }
+
+            if self.check(&TokenKind::MinusMinus) {
+                self.advance()?;
+                if let Expression::Identifier(ref name) = lhs {
+                    lhs = Expression::Assignment {
+                        target: name.clone(),
+                        value: Box::new(Expression::Binary {
+                            op: BinaryOp::Sub,
+                            left: Box::new(lhs.clone()),
+                            right: Box::new(Expression::Literal(Literal::Number(1.0))),
+                        }),
+                    };
+                    continue;
+                }
+            }
+
+            let compound_bin_op = match self.current.kind {
+                TokenKind::Eq => Some(None),
+                TokenKind::PlusEq => Some(Some(BinaryOp::Add)),
+                TokenKind::MinusEq => Some(Some(BinaryOp::Sub)),
+                TokenKind::StarEq => Some(Some(BinaryOp::Mul)),
+                TokenKind::SlashEq => Some(Some(BinaryOp::Div)),
+                TokenKind::PercentEq => Some(Some(BinaryOp::Mod)),
+                _ => None,
+            };
+
+            if let Some(opt_bin_op) = compound_bin_op {
                 if min_bp > 1 {
                     break;
                 }
-                self.advance()?; // =
-                let value = self.parse_expression(1)?;
+                self.advance()?; // =, +=, -=, etc.
+                let mut value = self.parse_expression(1)?;
+                if let Some(bin_op) = opt_bin_op {
+                    value = Expression::Binary {
+                        op: bin_op,
+                        left: Box::new(lhs.clone()),
+                        right: Box::new(value),
+                    };
+                }
                 match lhs {
                     Expression::Identifier(name) => {
                         lhs = Expression::Assignment { target: name, value: Box::new(value) };
@@ -492,6 +600,8 @@ impl<'a> Parser<'a> {
                 TokenKind::LtEq => (BinaryOp::Lte, 14, 15),
                 TokenKind::Gt => (BinaryOp::Gt, 14, 15),
                 TokenKind::GtEq => (BinaryOp::Gte, 14, 15),
+                TokenKind::Instanceof => (BinaryOp::Instanceof, 14, 15),
+                TokenKind::In => (BinaryOp::In, 14, 15),
                 TokenKind::Plus => (BinaryOp::Add, 16, 17),
                 TokenKind::Minus => (BinaryOp::Sub, 16, 17),
                 TokenKind::Star => (BinaryOp::Mul, 18, 19),
@@ -526,6 +636,40 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => self.parse_array_literal(),
             TokenKind::LBrace => self.parse_object_literal(),
             TokenKind::Function => self.parse_function_expr(),
+            TokenKind::PlusPlus => {
+                let expr = self.parse_prefix()?;
+                if let Expression::Identifier(ref name) = expr {
+                    Ok(Expression::Assignment {
+                        target: name.clone(),
+                        value: Box::new(Expression::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(expr),
+                            right: Box::new(Expression::Literal(Literal::Number(1.0))),
+                        }),
+                    })
+                } else {
+                    Ok(expr)
+                }
+            }
+            TokenKind::MinusMinus => {
+                let expr = self.parse_prefix()?;
+                if let Expression::Identifier(ref name) = expr {
+                    Ok(Expression::Assignment {
+                        target: name.clone(),
+                        value: Box::new(Expression::Binary {
+                            op: BinaryOp::Sub,
+                            left: Box::new(expr),
+                            right: Box::new(Expression::Literal(Literal::Number(1.0))),
+                        }),
+                    })
+                } else {
+                    Ok(expr)
+                }
+            }
+            TokenKind::Plus => {
+                let expr = self.parse_expression(20)?;
+                Ok(Expression::Unary { op: UnaryOp::Pos, expr: Box::new(expr) })
+            }
             TokenKind::Minus => {
                 let expr = self.parse_expression(20)?;
                 Ok(Expression::Unary { op: UnaryOp::Neg, expr: Box::new(expr) })
@@ -541,6 +685,14 @@ impl<'a> Parser<'a> {
             TokenKind::Typeof => {
                 let expr = self.parse_expression(20)?;
                 Ok(Expression::Unary { op: UnaryOp::Typeof, expr: Box::new(expr) })
+            }
+            TokenKind::Void => {
+                let expr = self.parse_expression(20)?;
+                Ok(Expression::Unary { op: UnaryOp::Void, expr: Box::new(expr) })
+            }
+            TokenKind::Delete => {
+                let expr = self.parse_expression(20)?;
+                Ok(Expression::Unary { op: UnaryOp::Delete, expr: Box::new(expr) })
             }
             TokenKind::LParen => {
                 let expr = self.parse_expression(0)?;
@@ -609,10 +761,43 @@ impl<'a> Parser<'a> {
                     None => return Err(ParseError::UnexpectedToken(other, key_tok.line, key_tok.col)),
                 },
             };
-            self.expect(TokenKind::Colon)?;
-            let val = self.parse_expression(0)?;
+
+            let val = if self.match_token(&TokenKind::Colon)? {
+                self.parse_expression(0)?
+            } else if self.check(&TokenKind::LParen) {
+                // Method shorthand: foo() { ... }
+                self.advance()?;
+                let mut params = Vec::new();
+                if !self.check(&TokenKind::RParen) {
+                    loop {
+                        let param_tok = self.advance()?;
+                        match param_tok.kind {
+                            TokenKind::Ident(id) => params.push(id),
+                            other => return Err(ParseError::UnexpectedToken(other, param_tok.line, param_tok.col)),
+                        }
+                        if !self.match_token(&TokenKind::Comma)? {
+                            break;
+                        }
+                    }
+                }
+                self.expect(TokenKind::RParen)?;
+                self.expect(TokenKind::LBrace)?;
+                let mut body = Vec::new();
+                while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
+                    body.push(self.parse_statement()?);
+                }
+                self.expect(TokenKind::RBrace)?;
+                Expression::FunctionExpr {
+                    name: Some(key.clone()),
+                    params,
+                    body,
+                }
+            } else {
+                Expression::Identifier(key.clone())
+            };
+
             props.push((key, val));
-            if !self.match_token(&TokenKind::Comma)? {
+            if !self.match_token(&TokenKind::Comma)? || self.check(&TokenKind::RBrace) {
                 break;
             }
         }
@@ -624,7 +809,7 @@ impl<'a> Parser<'a> {
         let mut elements = Vec::new();
         while !self.check(&TokenKind::RBracket) && self.current.kind != TokenKind::Eof {
             elements.push(self.parse_expression(0)?);
-            if !self.match_token(&TokenKind::Comma)? {
+            if !self.match_token(&TokenKind::Comma)? || self.check(&TokenKind::RBracket) {
                 break;
             }
         }

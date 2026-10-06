@@ -23,7 +23,7 @@ pub enum SpeculativeType {
 }
 
 /// JIT-compiled native executable block representation.
-pub type JitCallable = Arc<dyn Fn(&mut Vm, &[JsValue]) -> Result<JsValue, VmError> + Send + Sync>;
+pub type JitCallable = Arc<dyn Fn(&mut Vm, JsValue, &[JsValue]) -> Result<JsValue, VmError> + Send + Sync>;
 
 /// Compiled JIT method containing metadata and compiled function.
 #[derive(Clone)]
@@ -74,7 +74,7 @@ impl JitCompiler {
         }
 
         let exec_chunk = Arc::clone(&chunk_clone);
-        let executable: JitCallable = Arc::new(move |vm: &mut Vm, args: &[JsValue]| -> Result<JsValue, VmError> {
+        let executable: JitCallable = Arc::new(move |vm: &mut Vm, this_val: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
             // Fast-path execution with inline argument binding and optimized dispatch
             let frame_chunk = Arc::clone(&exec_chunk);
             let target_depth = vm.frames.len();
@@ -89,7 +89,7 @@ impl JitCompiler {
                 chunk: frame_chunk,
                 ip: 0,
                 base_sp,
-                this_val: JsValue::undefined(),
+                this_val,
                 gen_ptr: None,
             });
 

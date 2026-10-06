@@ -15,6 +15,8 @@ pub fn register_builtins(vm: &mut Vm) {
     register_promise(vm);
     register_parallel_and_typed_arrays(vm);
     register_phase3_builtins(vm);
+    register_reflect(vm);
+    register_test262_harness(vm);
 }
 
 fn register_console(vm: &mut Vm) {
@@ -263,10 +265,74 @@ fn register_object_builtins(vm: &mut Vm) {
         Ok(target)
     });
 
+    let object_proto = vm.alloc_object();
+    let to_string_fn = vm.alloc_native_function("toString", 0, |vm, this, _args| {
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            let tag = match &obj.kind {
+                ObjectKind::Array(_) => "Array",
+                ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => "Function",
+                ObjectKind::Error { .. } => "Error",
+                ObjectKind::RegExp { .. } => "RegExp",
+                ObjectKind::Map(_) => "Map",
+                ObjectKind::Set(_) => "Set",
+                _ => "Object",
+            };
+            Ok(vm.alloc_string(format!("[object {}]", tag)))
+        } else if this.is_null() {
+            Ok(vm.alloc_string("[object Null]".into()))
+        } else if this.is_undefined() {
+            Ok(vm.alloc_string("[object Undefined]".into()))
+        } else {
+            Ok(vm.alloc_string("[object Object]".into()))
+        }
+    });
+    vm.set_property(object_proto, "toString", to_string_fn);
+
+    let has_own_prop = vm.alloc_native_function("hasOwnProperty", 1, |vm, this, args| {
+        let key = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            Ok(JsValue::from_boolean(vm.shapes.has_property(obj.shape_id, &key)))
+        } else {
+            Ok(JsValue::from_boolean(false))
+        }
+    });
+    vm.set_property(object_proto, "hasOwnProperty", has_own_prop);
+
+    let group_by_fn = vm.alloc_native_function("groupBy", 2, |vm, _this, args| {
+        let items = args.first().copied().unwrap_or(JsValue::undefined());
+        let callback = args.get(1).copied().unwrap_or(JsValue::undefined());
+        if !vm.is_callable(callback) {
+            return Err(VmError::TypeError("Object.groupBy callback must be callable".into()));
+        }
+        let out_obj = vm.alloc_object();
+        let len_val = vm.get_property(items, "length");
+        let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+        for i in 0..len {
+            let item = vm.get_element(items, i);
+            let key_val = vm.call(callback, JsValue::undefined(), &[item, JsValue::from_int32(i as i32)])?;
+            let key_str = vm.to_string_value(key_val);
+            let existing = vm.get_property(out_obj, &key_str);
+            if existing.is_undefined() {
+                let arr = vm.alloc_array(vec![item]);
+                vm.set_property(out_obj, &key_str, arr);
+            } else if let Some(ptr) = existing.as_object_ptr() {
+                let arr_obj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let ObjectKind::Array(ref mut elems) = arr_obj.kind {
+                    elems.push(item);
+                }
+            }
+        }
+        Ok(out_obj)
+    });
+
     vm.set_property(object_constructor, "keys", keys_fn);
     vm.set_property(object_constructor, "values", values_fn);
     vm.set_property(object_constructor, "entries", entries_fn);
     vm.set_property(object_constructor, "assign", assign_fn);
+    vm.set_property(object_constructor, "groupBy", group_by_fn);
+    vm.set_property(object_constructor, "prototype", object_proto);
 
     vm.globals.insert("Object".to_string(), object_constructor);
 }
@@ -288,7 +354,42 @@ fn register_array_builtins(vm: &mut Vm) {
         Ok(JsValue::from_boolean(false))
     });
 
+    let array_proto = vm.alloc_object();
+    let map_fn = vm.alloc_native_function("map", 1, |vm, this, args| {
+        let cb = args.first().copied().unwrap_or(JsValue::undefined());
+        let len_val = vm.get_property(this, "length");
+        let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+        if len > 1_000_000 {
+            return Err(crate::interpreter::VmError::RuntimeError("RangeError: Invalid array length".into()));
+        }
+        let mut mapped = Vec::with_capacity(len.min(65536));
+        for i in 0..len {
+            let el = vm.get_element(this, i);
+            let res = vm.call(cb, JsValue::undefined(), &[el, JsValue::from_int32(i as i32), this])?;
+            mapped.push(res);
+        }
+        Ok(vm.alloc_array(mapped))
+    });
+    vm.set_property(array_proto, "map", map_fn);
+
+    let join_fn = vm.alloc_native_function("join", 1, |vm, this, args| {
+        let sep = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| ",".to_string());
+        let len_val = vm.get_property(this, "length");
+        let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+        if len > 1_000_000 {
+            return Err(crate::interpreter::VmError::RuntimeError("RangeError: Invalid array length".into()));
+        }
+        let mut parts = Vec::with_capacity(len.min(65536));
+        for i in 0..len {
+            let el = vm.get_element(this, i);
+            parts.push(vm.to_string_value(el));
+        }
+        Ok(vm.alloc_string(parts.join(&sep)))
+    });
+    vm.set_property(array_proto, "join", join_fn);
+
     vm.set_property(array_constructor, "isArray", is_array_fn);
+    vm.set_property(array_constructor, "prototype", array_proto);
     vm.globals.insert("Array".to_string(), array_constructor);
 }
 
@@ -334,6 +435,52 @@ fn register_global_helpers(vm: &mut Vm) {
         Ok(JsValue::from_boolean(false))
     });
 
+    let str_ctor = vm.alloc_native_function("String", 1, |vm, _this, args| {
+        let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        Ok(vm.alloc_string(s))
+    });
+    vm.globals.insert("String".to_string(), str_ctor);
+
+    let num_ctor = vm.alloc_native_function("Number", 1, |vm, _this, args| {
+        if let Some(arg) = args.first() {
+            if let Some(n) = arg.to_number() {
+                Ok(JsValue::from_double(n))
+            } else {
+                let s = vm.to_string_value(*arg);
+                if let Ok(n) = s.trim().parse::<f64>() {
+                    Ok(JsValue::from_double(n))
+                } else {
+                    Ok(JsValue::from_double(f64::NAN))
+                }
+            }
+        } else {
+            Ok(JsValue::from_int32(0))
+        }
+    });
+    vm.globals.insert("Number".to_string(), num_ctor);
+
+    let bool_ctor = vm.alloc_native_function("Boolean", 1, |_vm, _this, args| {
+        let b = args.first().map(|v| v.is_truthy()).unwrap_or(false);
+        Ok(JsValue::from_boolean(b))
+    });
+    vm.globals.insert("Boolean".to_string(), bool_ctor);
+
+    let error_types = ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError"];
+    for err_type in error_types {
+        let err_name = err_type.to_string();
+        let proto = vm.alloc_object();
+        let name_val = vm.alloc_string(err_name.clone());
+        vm.set_property(proto, "name", name_val);
+
+        let err_name_c = err_name.clone();
+        let ctor = vm.alloc_closure_native_function(err_type, 1, Arc::new(move |vm, _this, args| {
+            let msg = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+            Ok(vm.alloc_error(err_name_c.clone(), msg))
+        }));
+        vm.set_property(ctor, "prototype", proto);
+        vm.globals.insert(err_type.to_string(), ctor);
+    }
+
     vm.globals.insert("parseInt".to_string(), parse_int);
     vm.globals.insert("parseFloat".to_string(), parse_float);
     vm.globals.insert("isNaN".to_string(), is_nan);
@@ -341,6 +488,95 @@ fn register_global_helpers(vm: &mut Vm) {
     vm.globals.insert("NaN".to_string(), JsValue::from_double(f64::NAN));
     vm.globals.insert("Infinity".to_string(), JsValue::from_double(f64::INFINITY));
     vm.globals.insert("undefined".to_string(), JsValue::undefined());
+
+    // eval
+    let eval_fn = vm.alloc_native_function("eval", 1, |vm, _this, args| {
+        if args.is_empty() {
+            return Ok(JsValue::undefined());
+        }
+        let code_val = args[0];
+        let code_str = if let Some(ptr) = code_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::String(ref s) = obj.kind {
+                s.clone()
+            } else {
+                return Ok(code_val);
+            }
+        } else {
+            return Ok(code_val);
+        };
+
+        let program = doms_parser::parse(&code_str)
+            .map_err(|e| VmError::SyntaxError(e.to_string()))?;
+        let chunk = doms_compiler::compile(&program)
+            .map_err(|e| VmError::TypeError(e.to_string()))?;
+
+        let target_depth = vm.frames.len();
+        let base_sp = vm.stack.len();
+        vm.frames.push(crate::interpreter::CallFrame {
+            chunk: Arc::new(chunk),
+            ip: 0,
+            base_sp,
+            this_val: JsValue::undefined(),
+            gen_ptr: None,
+        });
+        vm.run_until_depth(target_depth)
+    });
+    vm.globals.insert("eval".to_string(), eval_fn);
+
+    // Date
+    let date_proto = vm.alloc_object();
+    let date_to_string = vm.alloc_native_function("toString", 0, |vm, this, _args| {
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Date(time_ms) = obj.kind {
+                let s = format!("Date({})", time_ms);
+                return Ok(vm.alloc_string(s));
+            }
+        }
+        Ok(vm.alloc_string("Date(0)".into()))
+    });
+    let date_value_of = vm.alloc_native_function("valueOf", 0, |_vm, this, _args| {
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Date(time_ms) = obj.kind {
+                return Ok(JsValue::from_double(time_ms));
+            }
+        }
+        Ok(JsValue::from_double(0.0))
+    });
+    let date_get_time = vm.alloc_native_function("getTime", 0, |_vm, this, _args| {
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Date(time_ms) = obj.kind {
+                return Ok(JsValue::from_double(time_ms));
+            }
+        }
+        Ok(JsValue::from_double(0.0))
+    });
+    vm.set_property(date_proto, "toString", date_to_string);
+    vm.set_property(date_proto, "valueOf", date_value_of);
+    vm.set_property(date_proto, "getTime", date_get_time);
+
+    let date_ctor = vm.alloc_closure_native_function("Date", 1, Arc::new(move |vm, _this, args| {
+        let time_ms = args.first().and_then(|v| v.to_number()).unwrap_or(0.0);
+        Ok(vm.alloc_date(Some(date_proto), time_ms))
+    }));
+    vm.set_property(date_ctor, "prototype", date_proto);
+    vm.globals.insert("Date".to_string(), date_ctor);
+
+    // Symbol
+    let symbol_ctor = vm.alloc_native_function("Symbol", 1, |vm, _this, args| {
+        let desc = args.first().map(|v| vm.to_string_value(*v));
+        Ok(vm.alloc_symbol(desc))
+    });
+    let sym_to_prim = vm.alloc_string("Symbol.toPrimitive".into());
+    let sym_iter = vm.alloc_string("Symbol.iterator".into());
+    let sym_tag = vm.alloc_string("Symbol.toStringTag".into());
+    vm.set_property(symbol_ctor, "toPrimitive", sym_to_prim);
+    vm.set_property(symbol_ctor, "iterator", sym_iter);
+    vm.set_property(symbol_ctor, "toStringTag", sym_tag);
+    vm.globals.insert("Symbol".to_string(), symbol_ctor);
 }
 
 fn register_promise(vm: &mut Vm) {
@@ -486,19 +722,49 @@ fn register_promise(vm: &mut Vm) {
         Ok(result_promise)
     });
 
+    let with_resolvers_static = vm.alloc_native_function("withResolvers", 0, |vm, _this, _args| {
+        let promise = vm.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+        let resolve_fn = {
+            let p = promise;
+            vm.alloc_closure_native_function("resolve", 1, Arc::new(move |vm: &mut Vm, _this, args| {
+                let val = args.first().copied().unwrap_or(JsValue::undefined());
+                vm.resolve_promise(p, val);
+                Ok(JsValue::undefined())
+            }))
+        };
+        let reject_fn = {
+            let p = promise;
+            vm.alloc_closure_native_function("reject", 1, Arc::new(move |vm: &mut Vm, _this, args| {
+                let val = args.first().copied().unwrap_or(JsValue::undefined());
+                vm.reject_promise(p, val);
+                Ok(JsValue::undefined())
+            }))
+        };
+        let res_obj = vm.alloc_object();
+        vm.set_property(res_obj, "promise", promise);
+        vm.set_property(res_obj, "resolve", resolve_fn);
+        vm.set_property(res_obj, "reject", reject_fn);
+        Ok(res_obj)
+    });
+
     vm.set_property(promise_ctor, "resolve", resolve_static);
     vm.set_property(promise_ctor, "reject", reject_static);
     vm.set_property(promise_ctor, "all", all_static);
     vm.set_property(promise_ctor, "race", race_static);
+    vm.set_property(promise_ctor, "withResolvers", with_resolvers_static);
 
     vm.globals.insert("Promise".to_string(), promise_ctor);
 }
 
 fn register_parallel_and_typed_arrays(vm: &mut Vm) {
     let sab_ctor = vm.alloc_native_function("SharedArrayBuffer", 1, |vm, _this, args| {
-        let byte_len = args.first().and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
-        let sab = Arc::new(doms_parallel::SharedArrayBuffer::new(byte_len));
-        Ok(vm.alloc_shared_array_buffer(sab))
+        let byte_len = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
+        if !(0..=64 * 1024 * 1024).contains(&byte_len) {
+            return Err(crate::interpreter::VmError::RuntimeError("RangeError: Invalid SharedArrayBuffer length".into()));
+        }
+        let sab = doms_parallel::SharedArrayBuffer::try_new(byte_len as usize)
+            .map_err(|e| crate::interpreter::VmError::RuntimeError(e.into()))?;
+        Ok(vm.alloc_shared_array_buffer(Arc::new(sab)))
     });
     vm.globals.insert("SharedArrayBuffer".to_string(), sab_ctor);
 
@@ -515,12 +781,16 @@ fn register_parallel_and_typed_arrays(vm: &mut Vm) {
                 }));
             }
         }
-        let len = arg.to_int32().unwrap_or(0).max(0) as usize;
-        let sab = Arc::new(doms_parallel::SharedArrayBuffer::new(len * 4));
+        let len = arg.to_int32().unwrap_or(0);
+        if !(0..=16 * 1024 * 1024).contains(&len) {
+            return Err(crate::interpreter::VmError::RuntimeError("RangeError: Invalid Int32Array length".into()));
+        }
+        let sab = doms_parallel::SharedArrayBuffer::try_new((len as usize) * 4)
+            .map_err(|e| crate::interpreter::VmError::RuntimeError(e.into()))?;
         Ok(vm.alloc_typed_array(crate::object::JsTypedArray {
-            buffer: sab,
+            buffer: Arc::new(sab),
             kind: crate::object::TypedArrayKind::Int32,
-            length: len,
+            length: len as usize,
         }))
     });
     vm.globals.insert("Int32Array".to_string(), int32_ctor);
@@ -538,12 +808,16 @@ fn register_parallel_and_typed_arrays(vm: &mut Vm) {
                 }));
             }
         }
-        let len = arg.to_int32().unwrap_or(0).max(0) as usize;
-        let sab = Arc::new(doms_parallel::SharedArrayBuffer::new(len));
+        let len = arg.to_int32().unwrap_or(0);
+        if !(0..=64 * 1024 * 1024).contains(&len) {
+            return Err(crate::interpreter::VmError::RuntimeError("RangeError: Invalid Uint8Array length".into()));
+        }
+        let sab = doms_parallel::SharedArrayBuffer::try_new(len as usize)
+            .map_err(|e| crate::interpreter::VmError::RuntimeError(e.into()))?;
         Ok(vm.alloc_typed_array(crate::object::JsTypedArray {
-            buffer: sab,
+            buffer: Arc::new(sab),
             kind: crate::object::TypedArrayKind::Uint8,
-            length: len,
+            length: len as usize,
         }))
     });
     vm.globals.insert("Uint8Array".to_string(), uint8_ctor);
@@ -865,6 +1139,38 @@ fn register_phase3_builtins(vm: &mut Vm) {
         }
         Ok(map_val)
     });
+    let map_group_by = vm.alloc_native_function("groupBy", 2, |vm, _this, args| {
+        let items = args.first().copied().unwrap_or(JsValue::undefined());
+        let callback = args.get(1).copied().unwrap_or(JsValue::undefined());
+        if !vm.is_callable(callback) {
+            return Err(VmError::TypeError("Map.groupBy callback must be callable".into()));
+        }
+        let map_val = vm.alloc_map();
+        let len_val = vm.get_property(items, "length");
+        let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+        for i in 0..len {
+            let item = vm.get_element(items, i);
+            let key_val = vm.call(callback, JsValue::undefined(), &[item, JsValue::from_int32(i as i32)])?;
+            let has_fn = vm.get_property(map_val, "has");
+            let has_res = vm.call(has_fn, map_val, &[key_val]).unwrap_or_else(|_| JsValue::from_boolean(false));
+            if has_res.is_truthy() {
+                let get_fn = vm.get_property(map_val, "get");
+                let arr = vm.call(get_fn, map_val, &[key_val])?;
+                if let Some(ptr) = arr.as_object_ptr() {
+                    let arr_obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Array(ref mut elems) = arr_obj.kind {
+                        elems.push(item);
+                    }
+                }
+            } else {
+                let arr = vm.alloc_array(vec![item]);
+                let set_fn = vm.get_property(map_val, "set");
+                let _ = vm.call(set_fn, map_val, &[key_val, arr]);
+            }
+        }
+        Ok(map_val)
+    });
+    vm.set_property(map_ctor, "groupBy", map_group_by);
     vm.globals.insert("Map".to_string(), map_ctor);
 
     let set_ctor = vm.alloc_native_function("Set", 0, |vm, _this, args| {
@@ -1031,4 +1337,149 @@ fn register_phase3_builtins(vm: &mut Vm) {
     vm.set_property(temporal_obj, "PlainDate", plain_date_ctor);
 
     vm.globals.insert("Temporal".to_string(), temporal_obj);
+}
+
+fn register_test262_harness(vm: &mut Vm) {
+    let print_fn = vm.alloc_native_function("print", 1, native_console_log);
+    vm.globals.insert("print".to_string(), print_fn);
+
+    let test262_obj = vm.alloc_object();
+    let global_obj = vm.alloc_object();
+    vm.set_property(test262_obj, "global", global_obj);
+
+    let eval_script_fn = vm.alloc_native_function("evalScript", 1, |vm, _this, args| {
+        let code = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let program = doms_parser::parse(&code).map_err(|e| VmError::SyntaxError(e.to_string()))?;
+        let chunk = doms_compiler::compile(&program).map_err(|e| VmError::TypeError(e.to_string()))?;
+        vm.run(&chunk)
+    });
+    vm.set_property(test262_obj, "evalScript", eval_script_fn);
+
+    let gc_fn = vm.alloc_native_function("gc", 0, |vm, _this, _args| {
+        vm.heap.collect_nursery();
+        let _ = vm.heap.collect_old_gen_compact();
+        Ok(JsValue::undefined())
+    });
+    vm.set_property(test262_obj, "gc", gc_fn);
+
+    let detach_fn = vm.alloc_native_function("detachArrayBuffer", 1, |_vm, _this, _args| {
+        Ok(JsValue::undefined())
+    });
+    vm.set_property(test262_obj, "detachArrayBuffer", detach_fn);
+
+    let create_realm_fn = vm.alloc_native_function("createRealm", 0, |vm, _this, _args| {
+        let realm_obj = vm.alloc_object();
+        Ok(realm_obj)
+    });
+    vm.set_property(test262_obj, "createRealm", create_realm_fn);
+
+    vm.globals.insert("$262".to_string(), test262_obj);
+
+    let do_not_eval = vm.alloc_native_function("$DONOTEVALUATE", 0, |_vm, _this, _args| {
+        Err(VmError::ReferenceError("Test262: This statement should not be evaluated.".into()))
+    });
+    vm.globals.insert("$DONOTEVALUATE".to_string(), do_not_eval);
+
+    let t262_err = vm.alloc_native_function("Test262Error", 1, |vm, this, args| {
+        let msg = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let target = if this.is_object() { this } else { vm.alloc_object() };
+        let name_val = vm.alloc_string("Test262Error".into());
+        let msg_val = vm.alloc_string(msg);
+        vm.set_property(target, "name", name_val);
+        vm.set_property(target, "message", msg_val);
+        Ok(target)
+    });
+    vm.globals.insert("Test262Error".to_string(), t262_err);
+}
+
+fn register_reflect(vm: &mut Vm) {
+    let reflect_obj = vm.alloc_object();
+
+    let construct_fn = vm.alloc_native_function("construct", 2, |vm, _this, args| {
+        let target = args.first().copied().unwrap_or(JsValue::undefined());
+        let args_list = if let Some(arg_arr) = args.get(1) {
+            if let Some(ptr) = arg_arr.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Array(elements) = &obj.kind {
+                    elements.clone()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        let new_target = args.get(2).copied().unwrap_or(target);
+        if !target.is_object() {
+            return Err(VmError::TypeError("Target is not a constructor".into()));
+        }
+        let this_obj = vm.alloc_object();
+        let proto = vm.get_property(new_target, "prototype");
+        if proto.is_object() {
+            let this_ptr = this_obj.as_object_ptr().unwrap();
+            let jsobj = unsafe { &mut *(this_ptr as *mut JsObject) };
+            jsobj.prototype = Some(proto);
+        }
+        let res = vm.call(target, this_obj, &args_list)?;
+        if res.is_object() {
+            Ok(res)
+        } else {
+            Ok(this_obj)
+        }
+    });
+    vm.set_property(reflect_obj, "construct", construct_fn);
+
+    let apply_fn = vm.alloc_native_function("apply", 3, |vm, _this, args| {
+        let target = args.first().copied().unwrap_or(JsValue::undefined());
+        let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
+        let args_list = if let Some(arg_arr) = args.get(2) {
+            if let Some(ptr) = arg_arr.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Array(elements) = &obj.kind {
+                    elements.clone()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        vm.call(target, this_arg, &args_list)
+    });
+    vm.set_property(reflect_obj, "apply", apply_fn);
+
+    let get_fn = vm.alloc_native_function("get", 2, |vm, _this, args| {
+        let target = args.first().copied().unwrap_or(JsValue::undefined());
+        let key = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        Ok(vm.get_property(target, &key))
+    });
+    vm.set_property(reflect_obj, "get", get_fn);
+
+    let set_fn = vm.alloc_native_function("set", 3, |vm, _this, args| {
+        let target = args.first().copied().unwrap_or(JsValue::undefined());
+        let key = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let val = args.get(2).copied().unwrap_or(JsValue::undefined());
+        vm.set_property(target, &key, val);
+        Ok(JsValue::from_boolean(true))
+    });
+    vm.set_property(reflect_obj, "set", set_fn);
+
+    let has_fn = vm.alloc_native_function("has", 2, |vm, _this, args| {
+        let target = args.first().copied().unwrap_or(JsValue::undefined());
+        let key = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        if let Some(ptr) = target.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            Ok(JsValue::from_boolean(vm.shapes.has_property(obj.shape_id, &key)))
+        } else {
+            Ok(JsValue::from_boolean(false))
+        }
+    });
+    vm.set_property(reflect_obj, "has", has_fn);
+
+    vm.globals.insert("Reflect".to_string(), reflect_obj);
 }

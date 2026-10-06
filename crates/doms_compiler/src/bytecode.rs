@@ -40,6 +40,7 @@ pub enum OpCode {
     CreateAsyncFunction(u16),
     CreateGenerator(u16),
     Call(u8), // argc
+    CallWithThis(u8), // argc with explicit this_val on stack
     Construct(u8), // new Ctor(args) with argc
     Return,
     Await,
@@ -58,10 +59,13 @@ pub enum OpCode {
     Mod,
 
     // Unary
+    Pos,
     Neg,
     Not,
     BitNot,
     Typeof,
+    Void,
+    Delete,
 
     // Comparison & Equality
     Eq,
@@ -72,6 +76,8 @@ pub enum OpCode {
     Lte,
     Gt,
     Gte,
+    Instanceof,
+    In,
 
     // Bitwise
     BitAnd,

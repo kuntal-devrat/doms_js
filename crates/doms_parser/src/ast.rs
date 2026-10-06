@@ -13,13 +13,26 @@ pub enum VarKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct VarDeclarator {
+    pub name: String,
+    pub init: Option<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwitchCase {
+    pub test: Option<Expression>,
+    pub consequent: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Expression(Expression),
-    VarDecl { kind: VarKind, name: String, init: Option<Expression> },
+    VarDecl { kind: VarKind, declarations: Vec<VarDeclarator> },
     Block(Vec<Statement>),
     If { condition: Expression, then_branch: Box<Statement>, else_branch: Option<Box<Statement>> },
     While { condition: Expression, body: Box<Statement> },
     For { init: Option<Box<Statement>>, condition: Option<Expression>, update: Option<Expression>, body: Box<Statement> },
+    Switch { discriminant: Expression, cases: Vec<SwitchCase> },
     Break,
     Continue,
     TryCatch { try_block: Box<Statement>, catch_param: Option<String>, catch_block: Option<Box<Statement>>, finally_block: Option<Box<Statement>> },
@@ -85,12 +98,17 @@ pub enum BinaryOp {
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
+    Instanceof,
+    In,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
+    Pos,
     Neg,
     Not,
     BitNot,
     Typeof,
+    Void,
+    Delete,
 }

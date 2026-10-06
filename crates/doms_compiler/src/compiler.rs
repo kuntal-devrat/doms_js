@@ -21,11 +21,18 @@ pub enum CompileError {
 pub struct Compiler {
     pub chunk: BytecodeChunk,
     pub symbols: SymbolTable,
+    pub break_targets: Vec<Vec<usize>>,
+    pub continue_targets: Vec<Vec<usize>>,
 }
 
 impl Compiler {
     pub fn new() -> Self {
-        Self { chunk: BytecodeChunk::new(), symbols: SymbolTable::new() }
+        Self {
+            chunk: BytecodeChunk::new(),
+            symbols: SymbolTable::new(),
+            break_targets: Vec::new(),
+            continue_targets: Vec::new(),
+        }
     }
 
     pub fn compile(mut self, program: &Program) -> Result<BytecodeChunk, CompileError> {
@@ -67,19 +74,21 @@ impl Compiler {
                     self.chunk.emit(OpCode::Pop, 0);
                 }
             }
-            Statement::VarDecl { name, init, .. } => {
-                if let Some(init_expr) = init {
-                    self.compile_expression(init_expr)?;
-                } else {
-                    self.chunk.emit(OpCode::LoadUndefined, 0);
-                }
+            Statement::VarDecl { declarations, .. } => {
+                for decl in declarations {
+                    if let Some(init_expr) = &decl.init {
+                        self.compile_expression(init_expr)?;
+                    } else {
+                        self.chunk.emit(OpCode::LoadUndefined, 0);
+                    }
 
-                if self.symbols.scope_depth > 0 {
-                    self.symbols.define_local(name.clone());
-                } else {
-                    let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                    self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
-                    self.chunk.emit(OpCode::Pop, 0);
+                    if self.symbols.scope_depth > 0 {
+                        self.symbols.define_local(decl.name.clone());
+                    } else {
+                        let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
+                        self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+                    }
                 }
             }
             Statement::Block(stmts) => {
@@ -117,11 +126,25 @@ impl Compiler {
                 self.compile_expression(condition)?;
                 let jump_exit_idx = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
 
+                self.break_targets.push(Vec::new());
+                self.continue_targets.push(Vec::new());
+
                 self.compile_statement(body, false)?;
+
+                let continues = self.continue_targets.pop().unwrap();
+                for c in continues {
+                    self.chunk.patch_jump(c, loop_start);
+                }
+
                 self.chunk.emit(OpCode::Jump(loop_start), 0);
 
                 let exit_target = self.chunk.instructions.len() as i32;
                 self.chunk.patch_jump(jump_exit_idx, exit_target);
+
+                let breaks = self.break_targets.pop().unwrap();
+                for b in breaks {
+                    self.chunk.patch_jump(b, exit_target);
+                }
             }
             Statement::For { init, condition, update, body } => {
                 self.symbols.enter_scope();
@@ -136,11 +159,20 @@ impl Compiler {
                     jump_exit_idx = Some(self.chunk.emit(OpCode::JumpIfFalse(0), 0));
                 }
 
+                self.break_targets.push(Vec::new());
+                self.continue_targets.push(Vec::new());
+
                 self.compile_statement(body, false)?;
 
+                let update_start = self.chunk.instructions.len() as i32;
                 if let Some(up_expr) = update {
                     self.compile_expression(up_expr)?;
                     self.chunk.emit(OpCode::Pop, 0);
+                }
+
+                let continues = self.continue_targets.pop().unwrap();
+                for c in continues {
+                    self.chunk.patch_jump(c, update_start);
                 }
 
                 self.chunk.emit(OpCode::Jump(loop_start), 0);
@@ -150,16 +182,82 @@ impl Compiler {
                     self.chunk.patch_jump(exit_idx, exit_target);
                 }
 
+                let breaks = self.break_targets.pop().unwrap();
+                for b in breaks {
+                    self.chunk.patch_jump(b, exit_target);
+                }
+
                 let popped = self.symbols.exit_scope();
                 for _ in 0..popped {
                     self.chunk.emit(OpCode::Pop, 0);
                 }
             }
+            Statement::Switch { discriminant, cases } => {
+                self.compile_expression(discriminant)?;
+                let disc_slot = self.symbols.define_local(format!("@switch_{}", self.chunk.instructions.len()));
+                self.chunk.emit(OpCode::SetLocal(disc_slot), 0);
+                self.chunk.emit(OpCode::Pop, 0);
+
+                self.break_targets.push(Vec::new());
+
+                let mut body_jumps = Vec::new();
+                let mut default_idx = None;
+
+                for (idx, case) in cases.iter().enumerate() {
+                    if let Some(test_expr) = &case.test {
+                        self.chunk.emit(OpCode::GetLocal(disc_slot), 0);
+                        self.compile_expression(test_expr)?;
+                        self.chunk.emit(OpCode::StrictEq, 0);
+                        let jump_not_match = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
+                        let jump_body = self.chunk.emit(OpCode::Jump(0), 0);
+                        let next_test = self.chunk.instructions.len() as i32;
+                        self.chunk.patch_jump(jump_not_match, next_test);
+                        body_jumps.push((idx, jump_body));
+                    } else {
+                        default_idx = Some(idx);
+                    }
+                }
+
+                let jump_no_case_matched = self.chunk.emit(OpCode::Jump(0), 0);
+
+                let mut body_starts = Vec::new();
+                for case in cases {
+                    let start = self.chunk.instructions.len() as i32;
+                    body_starts.push(start);
+                    for s in &case.consequent {
+                        self.compile_statement(s, false)?;
+                    }
+                }
+
+                let exit_target = self.chunk.instructions.len() as i32;
+
+                for (idx, jmp) in body_jumps {
+                    let target = body_starts[idx];
+                    self.chunk.patch_jump(jmp, target);
+                }
+
+                if let Some(def_i) = default_idx {
+                    self.chunk.patch_jump(jump_no_case_matched, body_starts[def_i]);
+                } else {
+                    self.chunk.patch_jump(jump_no_case_matched, exit_target);
+                }
+
+                let breaks = self.break_targets.pop().unwrap();
+                for b in breaks {
+                    self.chunk.patch_jump(b, exit_target);
+                }
+            }
             Statement::Break => {
-                // Future enhancement: target jump resolution
+                if let Some(targets) = self.break_targets.last_mut() {
+                    let jmp = self.chunk.emit(OpCode::Jump(0), 0);
+                    targets.push(jmp);
+                }
             }
             Statement::Continue => {
-                // Future enhancement: loop continuation
+                if let Some(targets) = self.continue_targets.last_mut() {
+                    let jmp = self.chunk.emit(OpCode::Jump(0), 0);
+                    targets.push(jmp);
+                }
             }
             Statement::TryCatch { try_block, catch_param, catch_block, finally_block } => {
                 let catch_jump_idx = self.chunk.emit(OpCode::PushCatch(0), 0);
@@ -267,10 +365,12 @@ impl Compiler {
             Statement::Export { decl, is_default } => {
                 if let Some(stmt) = decl {
                     match &**stmt {
-                        Statement::VarDecl { name, .. } => {
+                        Statement::VarDecl { declarations, .. } => {
                             self.compile_statement(stmt, false)?;
-                            let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                            self.chunk.emit(OpCode::Export(name_idx), 0);
+                            for decl in declarations {
+                                let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
+                                self.chunk.emit(OpCode::Export(name_idx), 0);
+                            }
                         }
                         Statement::FunctionDecl { name, .. }
                         | Statement::AsyncFunctionDecl { name, .. } => {
@@ -416,6 +516,8 @@ impl Compiler {
                     BinaryOp::Lte => self.chunk.emit(OpCode::Lte, 0),
                     BinaryOp::Gt => self.chunk.emit(OpCode::Gt, 0),
                     BinaryOp::Gte => self.chunk.emit(OpCode::Gte, 0),
+                    BinaryOp::Instanceof => self.chunk.emit(OpCode::Instanceof, 0),
+                    BinaryOp::In => self.chunk.emit(OpCode::In, 0),
                     BinaryOp::BitwiseAnd => self.chunk.emit(OpCode::BitAnd, 0),
                     BinaryOp::BitwiseOr => self.chunk.emit(OpCode::BitOr, 0),
                     BinaryOp::BitwiseXor => self.chunk.emit(OpCode::BitXor, 0),
@@ -425,10 +527,13 @@ impl Compiler {
             Expression::Unary { op, expr } => {
                 self.compile_expression(expr)?;
                 match op {
+                    UnaryOp::Pos => self.chunk.emit(OpCode::Pos, 0),
                     UnaryOp::Neg => self.chunk.emit(OpCode::Neg, 0),
                     UnaryOp::Not => self.chunk.emit(OpCode::Not, 0),
                     UnaryOp::BitNot => self.chunk.emit(OpCode::BitNot, 0),
                     UnaryOp::Typeof => self.chunk.emit(OpCode::Typeof, 0),
+                    UnaryOp::Void => self.chunk.emit(OpCode::Void, 0),
+                    UnaryOp::Delete => self.chunk.emit(OpCode::Delete, 0),
                 };
             }
             Expression::Conditional { condition, then_expr, else_expr } => {
@@ -443,11 +548,35 @@ impl Compiler {
                 self.chunk.patch_jump(jump_exit_idx, exit_target);
             }
             Expression::Call { callee, args } => {
-                self.compile_expression(callee)?;
-                for arg in args {
-                    self.compile_expression(arg)?;
+                match callee.as_ref() {
+                    Expression::Member { object, property } => {
+                        self.compile_expression(object)?;
+                        self.chunk.emit(OpCode::Dup, 0);
+                        let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                        self.chunk.emit(OpCode::GetProp(prop_idx), 0);
+                        for arg in args {
+                            self.compile_expression(arg)?;
+                        }
+                        self.chunk.emit(OpCode::CallWithThis(args.len() as u8), 0);
+                    }
+                    Expression::Index { object, index } => {
+                        self.compile_expression(object)?;
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.compile_expression(index)?;
+                        self.chunk.emit(OpCode::GetElem, 0);
+                        for arg in args {
+                            self.compile_expression(arg)?;
+                        }
+                        self.chunk.emit(OpCode::CallWithThis(args.len() as u8), 0);
+                    }
+                    _ => {
+                        self.compile_expression(callee)?;
+                        for arg in args {
+                            self.compile_expression(arg)?;
+                        }
+                        self.chunk.emit(OpCode::Call(args.len() as u8), 0);
+                    }
                 }
-                self.chunk.emit(OpCode::Call(args.len() as u8), 0);
             }
             Expression::Member { object, property } => {
                 self.compile_expression(object)?;

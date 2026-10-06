@@ -10,3 +10,8 @@
 [Parallelism & Isolates](08_parallelism_and_isolates.md)
 [Embedding & C ABI (libdoms.h)](09_embedding_and_c_abi.md)
 [Contributor Guide & Workflow](10_contributor_guide.md)
+[Memory Caging & Security Sandbox](11_memory_caging.md)
+[Chrome DevTools Protocol (CDP)](12_debugger_protocol.md)
+[Source Maps & Stack Symbolication](13_source_maps.md)
+[Case Studies: Parallel Browsers & Games](14_browser_and_game_embedding.md)
+[Phase 4 Hardening & 1.0 Release](15_phase4_hardening_and_v1.md)

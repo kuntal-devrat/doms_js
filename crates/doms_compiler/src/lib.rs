@@ -5,10 +5,12 @@
 pub mod bytecode;
 pub mod compiler;
 pub mod scope;
+pub mod source_map;
 
 pub use bytecode::{BytecodeChunk, Constant, OpCode};
 pub use compiler::{CompileError, Compiler};
 pub use scope::{Local, SymbolTable};
+pub use source_map::{decode_vlq, Mapping, OriginalPosition, SourceMap};
 
 use doms_parser::ast::Program;
 

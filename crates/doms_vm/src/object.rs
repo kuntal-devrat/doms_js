@@ -133,6 +133,9 @@ pub enum ObjectKind {
         pattern: String,
         flags: String,
     },
+    Date(f64),
+    Symbol(Option<String>),
+    BigInt(i64),
 }
 
 #[derive(Debug, Clone)]
@@ -328,6 +331,33 @@ impl JsObject {
             prototype,
             slots: Vec::new(),
             kind: ObjectKind::RegExp { pattern, flags },
+        }
+    }
+
+    pub fn new_date(shape_id: ShapeId, prototype: Option<JsValue>, time_ms: f64) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::Date(time_ms),
+        }
+    }
+
+    pub fn new_symbol(shape_id: ShapeId, prototype: Option<JsValue>, desc: Option<String>) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::Symbol(desc),
+        }
+    }
+
+    pub fn new_bigint(shape_id: ShapeId, prototype: Option<JsValue>, val: i64) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::BigInt(val),
         }
     }
 
