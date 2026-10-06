@@ -22,6 +22,15 @@ pub enum TokenKind {
     If,
     Else,
     While,
+    For,
+    Break,
+    Continue,
+    Try,
+    Catch,
+    Finally,
+    Throw,
+    New,
+    This,
     Return,
     True,
     False,
@@ -56,6 +65,9 @@ pub enum TokenKind {
     Amp,
     Pipe,
     Caret,
+    Question,
+    Colon,
+    FatArrow,
 
     // Delimiters
     LParen,
@@ -189,6 +201,8 @@ impl<'a> Lexer<'a> {
             ']' => TokenKind::RBracket,
             '~' => TokenKind::Tilde,
             '^' => TokenKind::Caret,
+            '?' => TokenKind::Question,
+            ':' => TokenKind::Colon,
             '=' => {
                 if self.peek() == Some('=') {
                     self.advance();
@@ -198,6 +212,9 @@ impl<'a> Lexer<'a> {
                     } else {
                         TokenKind::EqEq
                     }
+                } else if self.peek() == Some('>') {
+                    self.advance();
+                    TokenKind::FatArrow
                 } else {
                     TokenKind::Eq
                 }
@@ -272,6 +289,15 @@ impl<'a> Lexer<'a> {
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
             "while" => TokenKind::While,
+            "for" => TokenKind::For,
+            "break" => TokenKind::Break,
+            "continue" => TokenKind::Continue,
+            "try" => TokenKind::Try,
+            "catch" => TokenKind::Catch,
+            "finally" => TokenKind::Finally,
+            "throw" => TokenKind::Throw,
+            "new" => TokenKind::New,
+            "this" => TokenKind::This,
             "return" => TokenKind::Return,
             "true" => TokenKind::True,
             "false" => TokenKind::False,

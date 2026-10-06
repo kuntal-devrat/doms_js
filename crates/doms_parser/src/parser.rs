@@ -79,6 +79,24 @@ impl<'a> Parser<'a> {
             TokenKind::Function => self.parse_function_decl(),
             TokenKind::If => self.parse_if_statement(),
             TokenKind::While => self.parse_while_statement(),
+            TokenKind::For => self.parse_for_statement(),
+            TokenKind::Break => {
+                self.advance()?;
+                self.match_token(&TokenKind::Semicolon)?;
+                Ok(Statement::Break)
+            }
+            TokenKind::Continue => {
+                self.advance()?;
+                self.match_token(&TokenKind::Semicolon)?;
+                Ok(Statement::Continue)
+            }
+            TokenKind::Try => self.parse_try_statement(),
+            TokenKind::Throw => {
+                self.advance()?;
+                let expr = self.parse_expression(0)?;
+                self.match_token(&TokenKind::Semicolon)?;
+                Ok(Statement::Throw(expr))
+            }
             TokenKind::Return => self.parse_return_statement(),
             TokenKind::LBrace => self.parse_block_statement(),
             TokenKind::Semicolon => {
@@ -174,6 +192,65 @@ impl<'a> Parser<'a> {
         Ok(Statement::While { condition, body })
     }
 
+    fn parse_for_statement(&mut self) -> Result<Statement, ParseError> {
+        self.advance()?; // for
+        self.expect(TokenKind::LParen)?;
+        let init = if self.match_token(&TokenKind::Semicolon)? {
+            None
+        } else if self.check(&TokenKind::Let) || self.check(&TokenKind::Const) || self.check(&TokenKind::Var) {
+            let kind = match self.current.kind {
+                TokenKind::Let => VarKind::Let,
+                TokenKind::Const => VarKind::Const,
+                _ => VarKind::Var,
+            };
+            Some(Box::new(self.parse_var_decl(kind)?))
+        } else {
+            let expr = self.parse_expression(0)?;
+            self.expect(TokenKind::Semicolon)?;
+            Some(Box::new(Statement::Expression(expr)))
+        };
+
+        let condition = if self.check(&TokenKind::Semicolon) {
+            None
+        } else {
+            Some(self.parse_expression(0)?)
+        };
+        self.expect(TokenKind::Semicolon)?;
+
+        let update = if self.check(&TokenKind::RParen) {
+            None
+        } else {
+            Some(self.parse_expression(0)?)
+        };
+        self.expect(TokenKind::RParen)?;
+
+        let body = Box::new(self.parse_statement()?);
+        Ok(Statement::For { init, condition, update, body })
+    }
+
+    fn parse_try_statement(&mut self) -> Result<Statement, ParseError> {
+        self.advance()?; // try
+        let try_block = Box::new(self.parse_block_statement()?);
+        let mut catch_param = None;
+        let mut catch_block = None;
+        if self.match_token(&TokenKind::Catch)? {
+            if self.match_token(&TokenKind::LParen)? {
+                let p_tok = self.advance()?;
+                match p_tok.kind {
+                    TokenKind::Ident(id) => catch_param = Some(id),
+                    other => return Err(ParseError::UnexpectedToken(other, p_tok.line, p_tok.col)),
+                }
+                self.expect(TokenKind::RParen)?;
+            }
+            catch_block = Some(Box::new(self.parse_block_statement()?));
+        }
+        let mut finally_block = None;
+        if self.match_token(&TokenKind::Finally)? {
+            finally_block = Some(Box::new(self.parse_block_statement()?));
+        }
+        Ok(Statement::TryCatch { try_block, catch_param, catch_block, finally_block })
+    }
+
     fn parse_return_statement(&mut self) -> Result<Statement, ParseError> {
         self.advance()?; // return
         if self.check(&TokenKind::Semicolon)
@@ -238,23 +315,55 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            if self.check(&TokenKind::LBracket) {
+                // Index access: lhs[expr]
+                self.advance()?;
+                let index = self.parse_expression(0)?;
+                self.expect(TokenKind::RBracket)?;
+                lhs = Expression::Index { object: Box::new(lhs), index: Box::new(index) };
+                continue;
+            }
+
+            if self.check(&TokenKind::Question) {
+                if min_bp > 1 {
+                    break;
+                }
+                self.advance()?; // ?
+                let then_expr = self.parse_expression(0)?;
+                self.expect(TokenKind::Colon)?;
+                let else_expr = self.parse_expression(0)?;
+                lhs = Expression::Conditional {
+                    condition: Box::new(lhs),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr),
+                };
+                continue;
+            }
+
             if self.check(&TokenKind::Eq) {
                 // Assignment
                 if min_bp > 1 {
                     break;
                 }
-                let target = match lhs {
-                    Expression::Identifier(name) => name,
+                self.advance()?; // =
+                let value = self.parse_expression(1)?;
+                match lhs {
+                    Expression::Identifier(name) => {
+                        lhs = Expression::Assignment { target: name, value: Box::new(value) };
+                    }
+                    Expression::Member { object, property } => {
+                        lhs = Expression::MemberAssignment { object, property, value: Box::new(value) };
+                    }
+                    Expression::Index { object, index } => {
+                        lhs = Expression::IndexAssignment { object, index, value: Box::new(value) };
+                    }
                     _ => {
                         return Err(ParseError::InvalidAssignmentTarget(
                             self.current.line,
                             self.current.col,
                         ));
                     }
-                };
-                self.advance()?; // =
-                let value = self.parse_expression(1)?;
-                lhs = Expression::Assignment { target, value: Box::new(value) };
+                }
                 continue;
             }
 
@@ -302,6 +411,10 @@ impl<'a> Parser<'a> {
             TokenKind::Null => Ok(Expression::Literal(Literal::Null)),
             TokenKind::Undefined => Ok(Expression::Literal(Literal::Undefined)),
             TokenKind::Ident(s) => Ok(Expression::Identifier(s)),
+            TokenKind::This => Ok(Expression::This),
+            TokenKind::LBracket => self.parse_array_literal(),
+            TokenKind::LBrace => self.parse_object_literal(),
+            TokenKind::Function => self.parse_function_expr(),
             TokenKind::Minus => {
                 let expr = self.parse_expression(20)?;
                 Ok(Expression::Unary { op: UnaryOp::Neg, expr: Box::new(expr) })
@@ -325,6 +438,73 @@ impl<'a> Parser<'a> {
             }
             other => Err(ParseError::UnexpectedToken(other, tok.line, tok.col)),
         }
+    }
+
+    fn parse_object_literal(&mut self) -> Result<Expression, ParseError> {
+        let mut props = Vec::new();
+        while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
+            let key_tok = self.advance()?;
+            let key = match key_tok.kind {
+                TokenKind::Ident(id) => id,
+                TokenKind::StringLit(s) => s,
+                other => return Err(ParseError::UnexpectedToken(other, key_tok.line, key_tok.col)),
+            };
+            self.expect(TokenKind::Colon)?;
+            let val = self.parse_expression(0)?;
+            props.push((key, val));
+            if !self.match_token(&TokenKind::Comma)? {
+                break;
+            }
+        }
+        self.expect(TokenKind::RBrace)?;
+        Ok(Expression::Object(props))
+    }
+
+    fn parse_array_literal(&mut self) -> Result<Expression, ParseError> {
+        let mut elements = Vec::new();
+        while !self.check(&TokenKind::RBracket) && self.current.kind != TokenKind::Eof {
+            elements.push(self.parse_expression(0)?);
+            if !self.match_token(&TokenKind::Comma)? {
+                break;
+            }
+        }
+        self.expect(TokenKind::RBracket)?;
+        Ok(Expression::Array(elements))
+    }
+
+    fn parse_function_expr(&mut self) -> Result<Expression, ParseError> {
+        let name = if let TokenKind::Ident(id) = &self.current.kind {
+            let n = id.clone();
+            self.advance()?;
+            Some(n)
+        } else {
+            None
+        };
+
+        self.expect(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if !self.check(&TokenKind::RParen) {
+            loop {
+                let param_tok = self.advance()?;
+                match param_tok.kind {
+                    TokenKind::Ident(id) => params.push(id),
+                    other => return Err(ParseError::UnexpectedToken(other, param_tok.line, param_tok.col)),
+                }
+                if !self.match_token(&TokenKind::Comma)? {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+
+        self.expect(TokenKind::LBrace)?;
+        let mut body = Vec::new();
+        while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
+            body.push(self.parse_statement()?);
+        }
+        self.expect(TokenKind::RBrace)?;
+
+        Ok(Expression::FunctionExpr { name, params, body })
     }
 }
 
@@ -355,5 +535,19 @@ mod tests {
         let mut parser = Parser::new("function add(a, b) { return a + b; } add(10, 20);").unwrap();
         let prog = parser.parse_program().unwrap();
         assert_eq!(prog.body.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_object_and_array() {
+        let mut parser = Parser::new("let obj = { x: 1, y: [10, 20] };").unwrap();
+        let prog = parser.parse_program().unwrap();
+        assert_eq!(prog.body.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_for_and_ternary() {
+        let mut parser = Parser::new("for (let i = 0; i < 10; i = i + 1) { let res = i > 5 ? 1 : 0; }").unwrap();
+        let prog = parser.parse_program().unwrap();
+        assert_eq!(prog.body.len(), 1);
     }
 }

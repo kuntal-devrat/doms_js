@@ -19,6 +19,11 @@ pub enum Statement {
     Block(Vec<Statement>),
     If { condition: Expression, then_branch: Box<Statement>, else_branch: Option<Box<Statement>> },
     While { condition: Expression, body: Box<Statement> },
+    For { init: Option<Box<Statement>>, condition: Option<Expression>, update: Option<Expression>, body: Box<Statement> },
+    Break,
+    Continue,
+    TryCatch { try_block: Box<Statement>, catch_param: Option<String>, catch_block: Option<Box<Statement>>, finally_block: Option<Box<Statement>> },
+    Throw(Expression),
     Return(Option<Expression>),
     FunctionDecl { name: String, params: Vec<String>, body: Vec<Statement> },
     Empty,
@@ -28,11 +33,19 @@ pub enum Statement {
 pub enum Expression {
     Literal(Literal),
     Identifier(String),
+    This,
     Binary { op: BinaryOp, left: Box<Expression>, right: Box<Expression> },
     Unary { op: UnaryOp, expr: Box<Expression> },
     Assignment { target: String, value: Box<Expression> },
+    MemberAssignment { object: Box<Expression>, property: String, value: Box<Expression> },
+    IndexAssignment { object: Box<Expression>, index: Box<Expression>, value: Box<Expression> },
     Call { callee: Box<Expression>, args: Vec<Expression> },
     Member { object: Box<Expression>, property: String },
+    Index { object: Box<Expression>, index: Box<Expression> },
+    Object(Vec<(String, Expression)>),
+    Array(Vec<Expression>),
+    Conditional { condition: Box<Expression>, then_expr: Box<Expression>, else_expr: Box<Expression> },
+    FunctionExpr { name: Option<String>, params: Vec<String>, body: Vec<Statement> },
 }
 
 #[derive(Debug, Clone, PartialEq)]

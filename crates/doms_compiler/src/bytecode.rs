@@ -1,10 +1,20 @@
 //! Bytecode instruction set and chunk representation.
 
+use std::sync::Arc;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDef {
+    pub name: Option<String>,
+    pub params: Vec<String>,
+    pub chunk: BytecodeChunk,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Number(f64),
     String(String),
     Boolean(bool),
+    Function(Arc<FunctionDef>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +25,20 @@ pub enum OpCode {
     LoadUndefined,
     LoadTrue,
     LoadFalse,
+    This,
+
+    // Objects & Arrays
+    CreateObject,
+    CreateArray(u16),
+    GetProp(u16),
+    SetProp(u16),
+    GetElem,
+    SetElem,
+
+    // Functions & Calls
+    CreateFunction(u16),
+    Call(u8), // argc
+    Return,
 
     // Arithmetic
     Add,
@@ -49,15 +73,16 @@ pub enum OpCode {
     JumpIfFalse(i32),
     JumpIfTrue(i32),
 
+    // Exceptions
+    Throw,
+    PushCatch(i32),
+    PopCatch,
+
     // Variable Access
     GetLocal(u16),
     SetLocal(u16),
     GetGlobal(u16), // index into constants pool for identifier name
     SetGlobal(u16),
-
-    // Functions & Calls
-    Call(u8), // argc
-    Return,
 
     // Stack Management
     Pop,
@@ -100,6 +125,7 @@ impl BytecodeChunk {
             OpCode::Jump(offset) => *offset = target,
             OpCode::JumpIfFalse(offset) => *offset = target,
             OpCode::JumpIfTrue(offset) => *offset = target,
+            OpCode::PushCatch(offset) => *offset = target,
             _ => panic!("Attempted to patch non-jump instruction"),
         }
     }

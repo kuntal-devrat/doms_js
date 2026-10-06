@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 doms_core.workspace = true
+doms_vm.workspace = true
 log.workspace = true
 
 [dev-dependencies]

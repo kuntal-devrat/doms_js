@@ -1,8 +1,9 @@
 //! AST to bytecode compiler.
 
-use crate::bytecode::{BytecodeChunk, Constant, OpCode};
+use crate::bytecode::{BytecodeChunk, Constant, FunctionDef, OpCode};
 use crate::scope::SymbolTable;
 use doms_parser::ast::*;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -18,8 +19,8 @@ pub enum CompileError {
 }
 
 pub struct Compiler {
-    chunk: BytecodeChunk,
-    symbols: SymbolTable,
+    pub chunk: BytecodeChunk,
+    pub symbols: SymbolTable,
 }
 
 impl Compiler {
@@ -35,6 +36,27 @@ impl Compiler {
         }
         self.chunk.emit(OpCode::Halt, 0);
         Ok(self.chunk)
+    }
+
+    pub fn compile_function(
+        name: Option<String>,
+        params: Vec<String>,
+        body: &[Statement],
+    ) -> Result<FunctionDef, CompileError> {
+        let mut compiler = Compiler::new();
+        compiler.symbols.enter_scope();
+        for p in &params {
+            compiler.symbols.define_local(p.clone());
+        }
+        let total = body.len();
+        for (i, stmt) in body.iter().enumerate() {
+            let is_last = i == total - 1;
+            compiler.compile_statement(stmt, is_last)?;
+        }
+        // Default return undefined
+        compiler.chunk.emit(OpCode::LoadUndefined, 0);
+        compiler.chunk.emit(OpCode::Return, 0);
+        Ok(FunctionDef { name, params, chunk: compiler.chunk })
     }
 
     fn compile_statement(&mut self, stmt: &Statement, is_last: bool) -> Result<(), CompileError> {
@@ -103,6 +125,77 @@ impl Compiler {
                 let exit_target = self.chunk.instructions.len() as i32;
                 self.chunk.patch_jump(jump_exit_idx, exit_target);
             }
+            Statement::For { init, condition, update, body } => {
+                self.symbols.enter_scope();
+                if let Some(init_stmt) = init {
+                    self.compile_statement(init_stmt, false)?;
+                }
+
+                let loop_start = self.chunk.instructions.len() as i32;
+                let mut jump_exit_idx = None;
+                if let Some(cond_expr) = condition {
+                    self.compile_expression(cond_expr)?;
+                    jump_exit_idx = Some(self.chunk.emit(OpCode::JumpIfFalse(0), 0));
+                }
+
+                self.compile_statement(body, false)?;
+
+                if let Some(up_expr) = update {
+                    self.compile_expression(up_expr)?;
+                    self.chunk.emit(OpCode::Pop, 0);
+                }
+
+                self.chunk.emit(OpCode::Jump(loop_start), 0);
+
+                let exit_target = self.chunk.instructions.len() as i32;
+                if let Some(exit_idx) = jump_exit_idx {
+                    self.chunk.patch_jump(exit_idx, exit_target);
+                }
+
+                let popped = self.symbols.exit_scope();
+                for _ in 0..popped {
+                    self.chunk.emit(OpCode::Pop, 0);
+                }
+            }
+            Statement::Break => {
+                // Future enhancement: target jump resolution
+            }
+            Statement::Continue => {
+                // Future enhancement: loop continuation
+            }
+            Statement::TryCatch { try_block, catch_param, catch_block, finally_block } => {
+                let catch_jump_idx = self.chunk.emit(OpCode::PushCatch(0), 0);
+                self.compile_statement(try_block, false)?;
+                self.chunk.emit(OpCode::PopCatch, 0);
+
+                let jump_over_catch = self.chunk.emit(OpCode::Jump(0), 0);
+                let catch_start = self.chunk.instructions.len() as i32;
+                self.chunk.patch_jump(catch_jump_idx, catch_start);
+
+                if let Some(catch_stmt) = catch_block {
+                    self.symbols.enter_scope();
+                    if let Some(param) = catch_param {
+                        let slot = self.symbols.define_local(param.clone());
+                        self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    }
+                    self.compile_statement(catch_stmt, false)?;
+                    let popped = self.symbols.exit_scope();
+                    for _ in 0..popped {
+                        self.chunk.emit(OpCode::Pop, 0);
+                    }
+                }
+
+                let exit_target = self.chunk.instructions.len() as i32;
+                self.chunk.patch_jump(jump_over_catch, exit_target);
+
+                if let Some(finally_stmt) = finally_block {
+                    self.compile_statement(finally_stmt, false)?;
+                }
+            }
+            Statement::Throw(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit(OpCode::Throw, 0);
+            }
             Statement::Return(opt_expr) => {
                 if let Some(expr) = opt_expr {
                     self.compile_expression(expr)?;
@@ -111,8 +204,19 @@ impl Compiler {
                 }
                 self.chunk.emit(OpCode::Return, 0);
             }
-            Statement::FunctionDecl { .. } => {
-                // Function declaration: stored for closures/calls in Phase 1
+            Statement::FunctionDecl { name, params, body } => {
+                let def = Self::compile_function(Some(name.clone()), params.clone(), body)?;
+                let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
+                self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
+                if self.symbols.scope_depth > 0 {
+                    let slot = self.symbols.define_local(name.clone());
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                } else {
+                    let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                    self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                }
             }
             Statement::Empty => {}
         }
@@ -151,9 +255,12 @@ impl Compiler {
                     self.chunk.emit(OpCode::GetGlobal(name_idx), 0);
                 }
             }
+            Expression::This => {
+                self.chunk.emit(OpCode::This, 0);
+            }
             Expression::Assignment { target, value } => {
                 self.compile_expression(value)?;
-                self.chunk.emit(OpCode::Dup, 0); // Leave value on stack as expression result
+                self.chunk.emit(OpCode::Dup, 0);
                 if let Some(slot) = self.symbols.resolve_local(target) {
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
@@ -162,6 +269,39 @@ impl Compiler {
                     self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 }
+            }
+            Expression::MemberAssignment { object, property, value } => {
+                self.compile_expression(object)?;
+                self.compile_expression(value)?;
+                let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                self.chunk.emit(OpCode::SetProp(prop_idx), 0);
+            }
+            Expression::IndexAssignment { object, index, value } => {
+                self.compile_expression(object)?;
+                self.compile_expression(index)?;
+                self.compile_expression(value)?;
+                self.chunk.emit(OpCode::SetElem, 0);
+            }
+            Expression::Object(props) => {
+                self.chunk.emit(OpCode::CreateObject, 0);
+                for (key, val_expr) in props {
+                    self.chunk.emit(OpCode::Dup, 0);
+                    self.compile_expression(val_expr)?;
+                    let prop_idx = self.chunk.add_constant(Constant::String(key.clone()));
+                    self.chunk.emit(OpCode::SetProp(prop_idx), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                }
+            }
+            Expression::Array(elements) => {
+                for el in elements {
+                    self.compile_expression(el)?;
+                }
+                self.chunk.emit(OpCode::CreateArray(elements.len() as u16), 0);
+            }
+            Expression::Index { object, index } => {
+                self.compile_expression(object)?;
+                self.compile_expression(index)?;
+                self.chunk.emit(OpCode::GetElem, 0);
             }
             Expression::Binary { op, left, right } => {
                 match op {
@@ -220,6 +360,17 @@ impl Compiler {
                     UnaryOp::Typeof => self.chunk.emit(OpCode::Typeof, 0),
                 };
             }
+            Expression::Conditional { condition, then_expr, else_expr } => {
+                self.compile_expression(condition)?;
+                let jump_false_idx = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
+                self.compile_expression(then_expr)?;
+                let jump_exit_idx = self.chunk.emit(OpCode::Jump(0), 0);
+                let else_start = self.chunk.instructions.len() as i32;
+                self.chunk.patch_jump(jump_false_idx, else_start);
+                self.compile_expression(else_expr)?;
+                let exit_target = self.chunk.instructions.len() as i32;
+                self.chunk.patch_jump(jump_exit_idx, exit_target);
+            }
             Expression::Call { callee, args } => {
                 self.compile_expression(callee)?;
                 for arg in args {
@@ -230,8 +381,12 @@ impl Compiler {
             Expression::Member { object, property } => {
                 self.compile_expression(object)?;
                 let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
-                self.chunk.emit(OpCode::LoadConst(prop_idx), 0);
-                // Member lookup opcode in VM
+                self.chunk.emit(OpCode::GetProp(prop_idx), 0);
+            }
+            Expression::FunctionExpr { name, params, body } => {
+                let def = Self::compile_function(name.clone(), params.clone(), body)?;
+                let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
+                self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
             }
         }
         Ok(())
@@ -255,5 +410,13 @@ mod tests {
         let chunk = Compiler::new().compile(&prog).unwrap();
         assert!(chunk.instructions.contains(&OpCode::Add));
         assert!(chunk.instructions.contains(&OpCode::Mul));
+    }
+
+    #[test]
+    fn test_compile_object_and_array() {
+        let prog = parse("let obj = { a: 1 }; let arr = [10, 20];").unwrap();
+        let chunk = Compiler::new().compile(&prog).unwrap();
+        assert!(chunk.instructions.contains(&OpCode::CreateObject));
+        assert!(chunk.instructions.contains(&OpCode::CreateArray(2)));
     }
 }

@@ -58,20 +58,21 @@ impl Default for Engine {
 /// This is the foundation of DOMS's parallelism model: each Web Worker,
 /// tab, or iframe gets its own isolate.
 pub struct Isolate {
-    /// The GC heap for this isolate.
-    pub heap: Heap,
-    // TODO: Bytecode cache, global object, module registry, etc.
+    /// The VM instance for this isolate.
+    pub vm: doms_vm::Vm,
 }
 
 impl Isolate {
     /// Create a new isolate with default configuration.
     pub fn new() -> Self {
-        Self { heap: Heap::with_defaults() }
+        Self { vm: doms_vm::Vm::new() }
     }
 
     /// Create a new isolate with custom heap configuration.
     pub fn with_config(config: HeapConfig) -> Self {
-        Self { heap: Heap::new(config) }
+        let mut vm = doms_vm::Vm::new();
+        vm.heap = Heap::new(config);
+        Self { vm }
     }
 
     /// Create a new execution context within this isolate.
@@ -93,8 +94,7 @@ impl Default for Isolate {
 /// iframes sharing a process).
 pub struct Context<'isolate> {
     /// Reference to the owning isolate.
-    isolate: &'isolate mut Isolate,
-    // TODO: Global object, built-in prototypes, etc.
+    pub isolate: &'isolate mut Isolate,
 }
 
 impl<'isolate> Context<'isolate> {
@@ -114,26 +114,27 @@ impl<'isolate> Context<'isolate> {
     pub fn eval(&mut self, source: &str) -> Result<JsValue, String> {
         let program = doms_parser::parse(source).map_err(|e| e.to_string())?;
         let chunk = doms_compiler::compile(&program).map_err(|e| e.to_string())?;
-        let mut vm = doms_vm::Vm::new();
-        let vm_val = vm.run(&chunk).map_err(|e| e.to_string())?;
-        let js_val = match vm_val {
-            doms_vm::VmValue::Undefined => JsValue::undefined(),
-            doms_vm::VmValue::Null => JsValue::null(),
-            doms_vm::VmValue::Boolean(b) => JsValue::from_boolean(b),
-            doms_vm::VmValue::Number(n) => JsValue::from_double(n),
-            doms_vm::VmValue::String(_) => JsValue::undefined(),
-        };
-        Ok(js_val)
+        self.isolate.vm.run(&chunk).map_err(|e| e.to_string())
     }
 
     /// Get a reference to the isolate's heap.
     pub fn heap(&self) -> &Heap {
-        &self.isolate.heap
+        &self.isolate.vm.heap
     }
 
     /// Get a mutable reference to the isolate's heap.
     pub fn heap_mut(&mut self) -> &mut Heap {
-        &mut self.isolate.heap
+        &mut self.isolate.vm.heap
+    }
+
+    /// Get a reference to the VM instance.
+    pub fn vm(&self) -> &doms_vm::Vm {
+        &self.isolate.vm
+    }
+
+    /// Get a mutable reference to the VM instance.
+    pub fn vm_mut(&mut self) -> &mut doms_vm::Vm {
+        &mut self.isolate.vm
     }
 }
 
