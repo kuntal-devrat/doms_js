@@ -1,0 +1,11 @@
+[package]
+name = "doms_gc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Generational garbage collector for the DOMS JavaScript engine"
+
+[dependencies]
+log.workspace = true
+
+[dev-dependencies]

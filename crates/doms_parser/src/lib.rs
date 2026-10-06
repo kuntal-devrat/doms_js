@@ -1,0 +1,29 @@
+//! # DOMS Parser
+//!
+//! Lexer, AST definitions, and Pratt parser for JavaScript in the DOMS engine.
+
+pub mod ast;
+pub mod lexer;
+pub mod parser;
+
+pub use ast::*;
+pub use lexer::{LexError, Lexer, Token, TokenKind};
+pub use parser::{ParseError, Parser};
+
+/// Parse a JavaScript source code string into an AST [`Program`].
+pub fn parse(source: &str) -> Result<Program, ParseError> {
+    let mut parser = Parser::new(source)?;
+    parser.parse_program()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_simple_script() {
+        let code = "let x = 10; let y = 20; let z = x + y;";
+        let prog = parse(code).unwrap();
+        assert_eq!(prog.body.len(), 3);
+    }
+}

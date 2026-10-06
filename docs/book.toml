@@ -1,0 +1,13 @@
+[book]
+authors = ["DOMS Contributors"]
+language = "en"
+multilingual = false
+src = "src"
+title = "The DOMS.js Architecture Guide"
+
+[output.html]
+git-repository-url = "https://github.com/nicodes-js/doms"
+edit-url-template = "https://github.com/nicodes-js/doms/edit/main/docs/{path}"
+default-theme = "rust"
+preferred-dark-theme = "navy"
+mathjax-support = true

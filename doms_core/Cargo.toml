@@ -1,0 +1,15 @@
+[package]
+name = "doms_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core types and engine API for the DOMS JavaScript engine"
+
+[dependencies]
+doms_gc.workspace = true
+doms_parser.workspace = true
+doms_compiler.workspace = true
+doms_vm.workspace = true
+doms_runtime.workspace = true
+doms_parallel.workspace = true
+log.workspace = true

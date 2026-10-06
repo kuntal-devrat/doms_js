@@ -1,0 +1,12 @@
+[package]
+name = "doms_parallel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Parallelism primitives, isolate messaging, and scheduler for DOMS"
+
+[dependencies]
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]

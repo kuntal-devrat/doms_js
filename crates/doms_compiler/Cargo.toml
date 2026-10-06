@@ -1,0 +1,13 @@
+[package]
+name = "doms_compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bytecode compiler and instruction set for the DOMS JavaScript engine"
+
+[dependencies]
+doms_parser.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]

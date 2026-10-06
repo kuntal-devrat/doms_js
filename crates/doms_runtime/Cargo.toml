@@ -1,0 +1,13 @@
+[package]
+name = "doms_runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "JavaScript runtime environment, global object, and built-ins for DOMS"
+
+[dependencies]
+doms_gc.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]

@@ -1,0 +1,30 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test262 suite (downloaded separately)
+tests/test262/test262/
+
+# mdBook output
+docs/book/
+
+# Coverage
+*.profraw
+*.profdata
+lcov.info
+coverage/
+
+# Benchmarks output
+bench_results/

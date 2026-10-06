@@ -1,0 +1,14 @@
+[package]
+name = "doms_vm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bytecode virtual machine and interpreter for the DOMS JavaScript engine"
+
+[dependencies]
+doms_gc.workspace = true
+doms_compiler.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]

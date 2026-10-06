@@ -1,0 +1,12 @@
+[package]
+name = "doms_parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Lexer, AST, and parser for the DOMS JavaScript engine"
+
+[dependencies]
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]

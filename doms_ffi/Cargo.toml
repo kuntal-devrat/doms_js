@@ -1,0 +1,15 @@
+[package]
+name = "doms_ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C ABI embedding interface (libdoms) for the DOMS JavaScript engine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+doms_core.workspace = true
+log.workspace = true
+
+[dev-dependencies]

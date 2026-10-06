@@ -1,0 +1,201 @@
+//! Top-level Heap — manages all GC memory spaces.
+//!
+//! The [`Heap`] is the primary interface for allocating GC-managed objects.
+//! It routes allocations to the appropriate space (nursery, old gen, or
+//! large object space) and triggers collections when needed.
+
+use crate::header::TypeTag;
+use crate::large_object::{LARGE_OBJECT_THRESHOLD, LargeObjectSpace};
+use crate::nursery::Nursery;
+use crate::old_gen::OldGen;
+
+/// Configuration for a GC heap.
+#[derive(Debug, Clone)]
+pub struct HeapConfig {
+    /// Size of each nursery semi-space in bytes.
+    pub nursery_size: usize,
+    /// Size of the old generation in bytes.
+    pub old_gen_size: usize,
+}
+
+impl Default for HeapConfig {
+    fn default() -> Self {
+        Self {
+            nursery_size: 4 * 1024 * 1024,  // 4 MB
+            old_gen_size: 64 * 1024 * 1024, // 64 MB
+        }
+    }
+}
+
+/// Statistics about the heap's current state.
+#[derive(Debug, Clone)]
+pub struct HeapStats {
+    /// Nursery utilization (0.0 - 1.0).
+    pub nursery_utilization: f64,
+    /// Old gen utilization (0.0 - 1.0).
+    pub old_gen_utilization: f64,
+    /// Number of nursery scavenges performed.
+    pub scavenge_count: u64,
+    /// Total allocations across all spaces.
+    pub total_allocations: u64,
+    /// Number of large objects.
+    pub large_object_count: usize,
+}
+
+/// The GC Heap — owns all memory spaces and coordinates collection.
+///
+/// # Usage
+///
+/// ```rust
+/// use doms_gc::{Heap, heap::HeapConfig};
+/// use doms_gc::header::TypeTag;
+///
+/// let mut heap = Heap::new(HeapConfig::default());
+///
+/// // Allocate a 32-byte object.
+/// let ptr = heap.allocate(32, TypeTag::Object);
+/// assert!(ptr.is_some());
+/// ```
+pub struct Heap {
+    /// Young generation: fast bump allocation, semi-space copying.
+    pub nursery: Nursery,
+    /// Old generation: long-lived objects.
+    pub old_gen: OldGen,
+    /// Large object space: objects > 8 KB.
+    pub large_objects: LargeObjectSpace,
+    /// Root set: pointers the GC must trace from.
+    /// In a real engine, these come from the VM stack, global object, etc.
+    roots: Vec<*mut u8>,
+}
+
+impl Heap {
+    /// Create a new heap with the given configuration.
+    pub fn new(config: HeapConfig) -> Self {
+        Self {
+            nursery: Nursery::new(config.nursery_size),
+            old_gen: OldGen::new(config.old_gen_size),
+            large_objects: LargeObjectSpace::new(),
+            roots: Vec::new(),
+        }
+    }
+
+    /// Create a heap with default configuration.
+    pub fn with_defaults() -> Self {
+        Self::new(HeapConfig::default())
+    }
+
+    /// Allocate an object of `payload_size` bytes.
+    ///
+    /// Small objects go to the nursery. Large objects (> 8 KB) go directly
+    /// to the large object space. If the nursery is full, a scavenge is
+    /// triggered automatically.
+    ///
+    /// Returns a pointer to the payload, or `None` on OOM.
+    pub fn allocate(&mut self, payload_size: usize, type_tag: TypeTag) -> Option<*mut u8> {
+        // Large objects bypass the nursery.
+        if payload_size >= LARGE_OBJECT_THRESHOLD {
+            return self.large_objects.allocate(payload_size, type_tag);
+        }
+
+        // Try nursery allocation.
+        if let Some(ptr) = self.nursery.allocate(payload_size, type_tag) {
+            return Some(ptr);
+        }
+
+        // Nursery full — trigger scavenge.
+        self.collect_nursery();
+
+        // Retry allocation after scavenge.
+        self.nursery.allocate(payload_size, type_tag)
+    }
+
+    /// Register a root pointer. The GC will trace from this pointer
+    /// during collections.
+    pub fn add_root(&mut self, root: *mut u8) {
+        self.roots.push(root);
+    }
+
+    /// Remove a root pointer.
+    pub fn remove_root(&mut self, root: *mut u8) {
+        self.roots.retain(|r| *r != root);
+    }
+
+    /// Trigger a nursery scavenge (minor GC).
+    pub fn collect_nursery(&mut self) {
+        self.nursery.scavenge(&mut self.roots);
+    }
+
+    /// Get current heap statistics.
+    pub fn stats(&self) -> HeapStats {
+        HeapStats {
+            nursery_utilization: self.nursery.utilization(),
+            old_gen_utilization: self.old_gen.utilization(),
+            scavenge_count: self.nursery.scavenge_count,
+            total_allocations: self.nursery.total_allocations,
+            large_object_count: self.large_objects.object_count(),
+        }
+    }
+
+    /// Check if a pointer is managed by this heap (in any space).
+    pub fn contains(&self, ptr: *const u8) -> bool {
+        self.nursery.contains(ptr) || self.old_gen.contains(ptr) || self.large_objects.contains(ptr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> HeapConfig {
+        HeapConfig { nursery_size: 4096, old_gen_size: 4096 }
+    }
+
+    #[test]
+    fn test_heap_creation() {
+        let heap = Heap::new(test_config());
+        let stats = heap.stats();
+        assert_eq!(stats.nursery_utilization, 0.0);
+        assert_eq!(stats.total_allocations, 0);
+    }
+
+    #[test]
+    fn test_heap_allocation() {
+        let mut heap = Heap::new(test_config());
+
+        let ptr = heap.allocate(32, TypeTag::Object);
+        assert!(ptr.is_some());
+
+        let ptr = ptr.unwrap();
+        assert!(heap.contains(ptr));
+
+        let stats = heap.stats();
+        assert_eq!(stats.total_allocations, 1);
+    }
+
+    #[test]
+    fn test_large_object_routing() {
+        let mut heap = Heap::new(test_config());
+
+        // This is larger than LARGE_OBJECT_THRESHOLD.
+        let ptr = heap.allocate(16 * 1024, TypeTag::ArrayBuffer);
+        assert!(ptr.is_some());
+
+        let stats = heap.stats();
+        assert_eq!(stats.large_object_count, 1);
+    }
+
+    #[test]
+    fn test_auto_scavenge() {
+        let mut heap = Heap::new(test_config());
+
+        // Fill the nursery.
+        for _ in 0..256 {
+            let _ = heap.allocate(8, TypeTag::Raw);
+        }
+
+        // Next allocation should trigger scavenge (no roots, all collected)
+        // and then succeed.
+        let ptr = heap.allocate(8, TypeTag::Raw);
+        assert!(ptr.is_some());
+    }
+}
