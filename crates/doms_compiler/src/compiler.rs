@@ -75,9 +75,7 @@ impl Compiler {
                 }
 
                 if self.symbols.scope_depth > 0 {
-                    let slot = self.symbols.define_local(name.clone());
-                    self.chunk.emit(OpCode::SetLocal(slot), 0);
-                    self.chunk.emit(OpCode::Pop, 0);
+                    self.symbols.define_local(name.clone());
                 } else {
                     let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                     self.chunk.emit(OpCode::SetGlobal(name_idx), 0);

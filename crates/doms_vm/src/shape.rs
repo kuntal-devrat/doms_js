@@ -113,6 +113,32 @@ impl ShapeRegistry {
 
         (new_id, offset)
     }
+    /// Check if shape has a property.
+    #[inline]
+    pub fn has_property(&self, shape_id: ShapeId, key: &str) -> bool {
+        self.lookup_offset(shape_id, key).is_some()
+    }
+
+    /// Return the count of properties in a shape.
+    #[inline]
+    pub fn property_count(&self, shape_id: ShapeId) -> usize {
+        self.get(shape_id).map(|s| s.property_offsets.len()).unwrap_or(0)
+    }
+
+    /// Check if `shape_id` is a descendant of `ancestor_id` in the transition tree.
+    pub fn is_descendant_of(&self, mut shape_id: ShapeId, ancestor_id: ShapeId) -> bool {
+        while let Some(shape) = self.get(shape_id) {
+            if shape.id == ancestor_id {
+                return true;
+            }
+            if let Some(parent) = shape.parent {
+                shape_id = parent;
+            } else {
+                break;
+            }
+        }
+        false
+    }
 }
 
 impl Default for ShapeRegistry {
@@ -142,5 +168,12 @@ mod tests {
         assert_eq!(registry.lookup_offset(s2, "x"), Some(0));
         assert_eq!(registry.lookup_offset(s2, "y"), Some(1));
         assert_eq!(registry.lookup_offset(s2, "z"), None);
+
+        assert!(registry.has_property(s2, "x"));
+        assert!(registry.has_property(s2, "y"));
+        assert!(!registry.has_property(s2, "z"));
+        assert_eq!(registry.property_count(s2), 2);
+        assert!(registry.is_descendant_of(s2, s1));
+        assert!(registry.is_descendant_of(s2, ShapeRegistry::ROOT_SHAPE_ID));
     }
 }

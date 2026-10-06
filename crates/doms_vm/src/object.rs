@@ -105,6 +105,8 @@ pub struct JsFunction {
     pub upvalues: Vec<JsValue>,
     pub is_async: bool,
     pub is_generator: bool,
+    pub call_count: u32,
+    pub jit_entry: Option<crate::jit::JitFunction>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +122,17 @@ pub enum ObjectKind {
     SharedArrayBuffer(Arc<doms_parallel::SharedArrayBuffer>),
     TypedArray(JsTypedArray),
     Worker(Arc<std::sync::Mutex<doms_parallel::MessagePort>>),
+    Map(Vec<(JsValue, JsValue)>),
+    Set(Vec<JsValue>),
+    WeakRef(JsValue),
+    FinalizationRegistry {
+        callback: JsValue,
+        entries: Vec<(JsValue, JsValue, Option<JsValue>)>,
+    },
+    RegExp {
+        pattern: String,
+        flags: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -273,6 +286,51 @@ impl JsObject {
         }
     }
 
+    pub fn new_map(shape_id: ShapeId, prototype: Option<JsValue>) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::Map(Vec::new()),
+        }
+    }
+
+    pub fn new_set(shape_id: ShapeId, prototype: Option<JsValue>) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::Set(Vec::new()),
+        }
+    }
+
+    pub fn new_weak_ref(shape_id: ShapeId, prototype: Option<JsValue>, target: JsValue) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::WeakRef(target),
+        }
+    }
+
+    pub fn new_finalization_registry(shape_id: ShapeId, prototype: Option<JsValue>, callback: JsValue) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::FinalizationRegistry { callback, entries: Vec::new() },
+        }
+    }
+
+    pub fn new_regexp(shape_id: ShapeId, prototype: Option<JsValue>, pattern: String, flags: String) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::RegExp { pattern, flags },
+        }
+    }
+
     #[inline]
     pub fn get_slot(&self, offset: u32) -> Option<JsValue> {
         self.slots.get(offset as usize).copied()
@@ -337,7 +395,62 @@ impl Trace for JsObject {
                     }
                 }
             }
+            ObjectKind::Map(entries) => {
+                for (k, v) in entries {
+                    if let Some(p) = k.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                    if let Some(p) = v.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+            }
+            ObjectKind::Set(elements) => {
+                for el in elements {
+                    if let Some(p) = el.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+            }
+            ObjectKind::FinalizationRegistry { callback, entries } => {
+                if let Some(p) = callback.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+                for (_, held, tok) in entries {
+                    if let Some(p) = held.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                    if let Some(t) = tok {
+                        if let Some(p) = t.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
+}
+
+/// Compare two JavaScript values according to SameValueZero semantics.
+pub fn js_values_equal(a: JsValue, b: JsValue) -> bool {
+    if a == b {
+        return true;
+    }
+    if a.is_number() && b.is_number() {
+        let na = a.to_number().unwrap();
+        let nb = b.to_number().unwrap();
+        if na.is_nan() && nb.is_nan() {
+            return true;
+        }
+        return na == nb;
+    }
+    if let (Some(ptr_a), Some(ptr_b)) = (a.as_heap_ptr(), b.as_heap_ptr()) {
+        let obj_a = unsafe { &*(ptr_a as *const JsObject) };
+        let obj_b = unsafe { &*(ptr_b as *const JsObject) };
+        if let (ObjectKind::String(sa), ObjectKind::String(sb)) = (&obj_a.kind, &obj_b.kind) {
+            return sa == sb;
+        }
+    }
+    false
 }

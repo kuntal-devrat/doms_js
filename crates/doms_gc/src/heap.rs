@@ -125,6 +125,13 @@ impl Heap {
         self.nursery.scavenge(&mut self.roots);
     }
 
+    /// Trigger an old generation mark-sweep-compaction (major GC).
+    pub fn collect_old_gen_compact(&mut self) -> usize {
+        self.old_gen.start_incremental_marking(&self.roots);
+        self.old_gen.mark_step(usize::MAX);
+        self.old_gen.compact()
+    }
+
     /// Get current heap statistics.
     pub fn stats(&self) -> HeapStats {
         HeapStats {

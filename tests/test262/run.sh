@@ -87,6 +87,24 @@ run_test "atomics-add-sub" "let sab = new SharedArrayBuffer(16); let ta = new In
 run_test "atomics-is-lock-free" "Atomics.isLockFree(4);"
 run_test "worker-parallel-actor" "let w = new Worker('postMessage(42);'); w.receiveMessage();"
 
+echo "Running Phase 3 standard library & JIT optimization conformance checks..."
+run_test "map-set-get" "let m = new Map(); m.set('k', 42); m.get('k');"
+run_test "map-has-size-delete" "let m = new Map(); m.set('x', 1); m.set('y', 2); m.has('x') && m.size === 2 && m.delete('x') && m.size === 1;"
+run_test "map-foreach" "let m = new Map(); m.set('a', 10); m.set('b', 20); let sum = 0; m.forEach(function(v, k) { sum = sum + v; }); sum === 30;"
+run_test "set-add-has" "let s = new Set(); s.add(10); s.has(10);"
+run_test "set-size-delete-clear" "let s = new Set(); s.add(1); s.add(2); s.delete(1); s.size === 1 && s.has(2);"
+run_test "set-foreach" "let s = new Set(); s.add(5); s.add(15); let total = 0; s.forEach(function(v) { total = total + v; }); total === 20;"
+run_test "weakref-deref" "let o = { a: 1 }; let wr = new WeakRef(o); wr.deref().a === 1;"
+run_test "finalization-registry" "let fr = new FinalizationRegistry(function(v) {}); fr.register({ x: 1 }, 42, 'tok'); fr.unregister('tok');"
+run_test "regexp-test-exec" "let re = new RegExp('abc'); re.test('123abcdef') && re.exec('123abcdef').index === 3;"
+run_test "regexp-source-flags" "let re = new RegExp('xyz', 'g'); re.source === 'xyz' && re.flags === 'g';"
+run_test "intl-number-format" "let nf = new Intl.NumberFormat(); typeof nf.format(1234.5) === 'string';"
+run_test "intl-datetime-format" "let df = new Intl.DateTimeFormat(); typeof df.format('2026-10-06') === 'string';"
+run_test "intl-collator" "let c = new Intl.Collator(); c.compare('a', 'b') === -1;"
+run_test "temporal-instant" "let t = Temporal.Now.instant(); typeof t.epochMilliseconds === 'number';"
+run_test "temporal-plain-date" "let d = new Temporal.PlainDate(2026, 10, 6); d.year === 2026 && d.month === 10 && d.day === 6;"
+run_test "jit-hot-loop" "function add(a, b) { return a + b; } let s = 0; for (let i = 0; i < 25; i = i + 1) { s = add(s, 1); } s === 25;"
+
 PERCENT=0
 if [ "${TOTAL}" -gt 0 ]; then
     PERCENT=$((PASSED * 100 / TOTAL))

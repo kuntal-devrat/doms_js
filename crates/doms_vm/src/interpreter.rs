@@ -193,6 +193,41 @@ impl Vm {
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
 
+    pub fn alloc_map(&mut self) -> JsValue {
+        let obj = Box::new(JsObject::new_map(ShapeRegistry::ROOT_SHAPE_ID, None));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_set(&mut self) -> JsValue {
+        let obj = Box::new(JsObject::new_set(ShapeRegistry::ROOT_SHAPE_ID, None));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_weak_ref(&mut self, target: JsValue) -> JsValue {
+        let obj = Box::new(JsObject::new_weak_ref(ShapeRegistry::ROOT_SHAPE_ID, None, target));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_finalization_registry(&mut self, callback: JsValue) -> JsValue {
+        let obj = Box::new(JsObject::new_finalization_registry(ShapeRegistry::ROOT_SHAPE_ID, None, callback));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_regexp(&mut self, pattern: String, flags: String) -> JsValue {
+        let obj = Box::new(JsObject::new_regexp(ShapeRegistry::ROOT_SHAPE_ID, None, pattern, flags));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
     pub fn enqueue_microtask(&mut self, callee: JsValue, args: Vec<JsValue>) {
         self.microtasks.push_back((callee, args));
     }
@@ -325,6 +360,56 @@ impl Vm {
                     "receiveMessage" => return self.get_worker_receive_message(port_clone).unwrap_or_default(),
                     "terminate" => return self.alloc_native_function("terminate", 0, |_vm, _this, _args| Ok(JsValue::undefined())),
                     _ => {}
+                }
+            }
+
+            // Special properties on Map
+            if let ObjectKind::Map(entries) = &obj.kind {
+                if key == "size" {
+                    return JsValue::from_int32(entries.len() as i32);
+                }
+                if let Some(m) = self.get_map_method(target, key) {
+                    return m;
+                }
+            }
+
+            // Special properties on Set
+            if let ObjectKind::Set(elements) = &obj.kind {
+                if key == "size" {
+                    return JsValue::from_int32(elements.len() as i32);
+                }
+                if let Some(m) = self.get_set_method(target, key) {
+                    return m;
+                }
+            }
+
+            // Special properties on WeakRef
+            if let ObjectKind::WeakRef(target_ref) = &obj.kind {
+                let tr = *target_ref;
+                if key == "deref" {
+                    return self.alloc_closure_native_function("deref", 0, Arc::new(move |_vm, _this, _args| {
+                        Ok(tr)
+                    }));
+                }
+            }
+
+            // Special properties on FinalizationRegistry
+            if let ObjectKind::FinalizationRegistry { .. } = &obj.kind {
+                if let Some(m) = self.get_finalization_registry_method(target, key) {
+                    return m;
+                }
+            }
+
+            // Special properties on RegExp
+            if let ObjectKind::RegExp { pattern, flags } = &obj.kind {
+                match key {
+                    "source" => return self.alloc_string(pattern.clone()),
+                    "flags" => return self.alloc_string(flags.clone()),
+                    _ => {
+                        if let Some(m) = self.get_regexp_method(target, key) {
+                            return m;
+                        }
+                    }
                 }
             }
 
@@ -730,6 +815,234 @@ impl Vm {
         })))
     }
 
+    fn get_map_method(&mut self, target: JsValue, name: &str) -> Option<JsValue> {
+        match name {
+            "get" => Some(self.alloc_closure_native_function("get", 1, Arc::new(move |_vm, _this, args| {
+                let key = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Map(entries) = &obj.kind {
+                        for (k, v) in entries {
+                            if crate::object::js_values_equal(*k, key) {
+                                return Ok(*v);
+                            }
+                        }
+                    }
+                }
+                Ok(JsValue::undefined())
+            }))),
+            "set" => Some(self.alloc_closure_native_function("set", 2, Arc::new(move |_vm, _this, args| {
+                let key = args.first().copied().unwrap_or(JsValue::undefined());
+                let val = args.get(1).copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Map(entries) = &mut obj.kind {
+                        for entry in entries.iter_mut() {
+                            if crate::object::js_values_equal(entry.0, key) {
+                                entry.1 = val;
+                                return Ok(target);
+                            }
+                        }
+                        entries.push((key, val));
+                    }
+                }
+                Ok(target)
+            }))),
+            "has" => Some(self.alloc_closure_native_function("has", 1, Arc::new(move |_vm, _this, args| {
+                let key = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Map(entries) = &obj.kind {
+                        for (k, _) in entries {
+                            if crate::object::js_values_equal(*k, key) {
+                                return Ok(JsValue::from_boolean(true));
+                            }
+                        }
+                    }
+                }
+                Ok(JsValue::from_boolean(false))
+            }))),
+            "delete" => Some(self.alloc_closure_native_function("delete", 1, Arc::new(move |_vm, _this, args| {
+                let key = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Map(entries) = &mut obj.kind {
+                        if let Some(idx) = entries.iter().position(|(k, _)| crate::object::js_values_equal(*k, key)) {
+                            entries.remove(idx);
+                            return Ok(JsValue::from_boolean(true));
+                        }
+                    }
+                }
+                Ok(JsValue::from_boolean(false))
+            }))),
+            "clear" => Some(self.alloc_closure_native_function("clear", 0, Arc::new(move |_vm, _this, _args| {
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Map(entries) = &mut obj.kind {
+                        entries.clear();
+                    }
+                }
+                Ok(JsValue::undefined())
+            }))),
+            "forEach" => Some(self.alloc_closure_native_function("forEach", 1, Arc::new(move |vm, _this, args| {
+                let cb = args.first().copied().unwrap_or(JsValue::undefined());
+                let entries = if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Map(entries) = &obj.kind {
+                        entries.clone()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                for (k, v) in entries {
+                    let _ = vm.call(cb, target, &[v, k, target]);
+                }
+                Ok(JsValue::undefined())
+            }))),
+            _ => None,
+        }
+    }
+
+    fn get_set_method(&mut self, target: JsValue, name: &str) -> Option<JsValue> {
+        match name {
+            "add" => Some(self.alloc_closure_native_function("add", 1, Arc::new(move |_vm, _this, args| {
+                let val = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &mut obj.kind {
+                        if !elements.iter().any(|el| crate::object::js_values_equal(*el, val)) {
+                            elements.push(val);
+                        }
+                    }
+                }
+                Ok(target)
+            }))),
+            "has" => Some(self.alloc_closure_native_function("has", 1, Arc::new(move |_vm, _this, args| {
+                let val = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        return Ok(JsValue::from_boolean(elements.iter().any(|el| crate::object::js_values_equal(*el, val))));
+                    }
+                }
+                Ok(JsValue::from_boolean(false))
+            }))),
+            "delete" => Some(self.alloc_closure_native_function("delete", 1, Arc::new(move |_vm, _this, args| {
+                let val = args.first().copied().unwrap_or(JsValue::undefined());
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &mut obj.kind {
+                        if let Some(idx) = elements.iter().position(|el| crate::object::js_values_equal(*el, val)) {
+                            elements.remove(idx);
+                            return Ok(JsValue::from_boolean(true));
+                        }
+                    }
+                }
+                Ok(JsValue::from_boolean(false))
+            }))),
+            "clear" => Some(self.alloc_closure_native_function("clear", 0, Arc::new(move |_vm, _this, _args| {
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &mut obj.kind {
+                        elements.clear();
+                    }
+                }
+                Ok(JsValue::undefined())
+            }))),
+            "forEach" => Some(self.alloc_closure_native_function("forEach", 1, Arc::new(move |vm, _this, args| {
+                let cb = args.first().copied().unwrap_or(JsValue::undefined());
+                let elements = if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::Set(elements) = &obj.kind {
+                        elements.clone()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                for el in elements {
+                    let _ = vm.call(cb, target, &[el, el, target]);
+                }
+                Ok(JsValue::undefined())
+            }))),
+            _ => None,
+        }
+    }
+
+    fn get_finalization_registry_method(&mut self, target: JsValue, name: &str) -> Option<JsValue> {
+        match name {
+            "register" => Some(self.alloc_closure_native_function("register", 3, Arc::new(move |_vm, _this, args| {
+                let target_obj = args.first().copied().unwrap_or(JsValue::undefined());
+                let held_value = args.get(1).copied().unwrap_or(JsValue::undefined());
+                let unreg_token = args.get(2).copied();
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::FinalizationRegistry { entries, .. } = &mut obj.kind {
+                        entries.push((target_obj, held_value, unreg_token));
+                    }
+                }
+                Ok(JsValue::undefined())
+            }))),
+            "unregister" => Some(self.alloc_closure_native_function("unregister", 1, Arc::new(move |_vm, _this, args| {
+                let token = args.first().copied().unwrap_or(JsValue::undefined());
+                let mut removed = false;
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::FinalizationRegistry { entries, .. } = &mut obj.kind {
+                        let len_before = entries.len();
+                        entries.retain(|(_, _, tok)| {
+                            if let Some(t) = tok {
+                                !crate::object::js_values_equal(*t, token)
+                            } else {
+                                true
+                            }
+                        });
+                        removed = entries.len() < len_before;
+                    }
+                }
+                Ok(JsValue::from_boolean(removed))
+            }))),
+            _ => None,
+        }
+    }
+
+    fn get_regexp_method(&mut self, target: JsValue, name: &str) -> Option<JsValue> {
+        match name {
+            "test" => Some(self.alloc_closure_native_function("test", 1, Arc::new(move |vm, _this, args| {
+                let text = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::RegExp { pattern, .. } = &obj.kind {
+                        let matches = text.contains(pattern);
+                        return Ok(JsValue::from_boolean(matches));
+                    }
+                }
+                Ok(JsValue::from_boolean(false))
+            }))),
+            "exec" => Some(self.alloc_closure_native_function("exec", 1, Arc::new(move |vm, _this, args| {
+                let text = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if let ObjectKind::RegExp { pattern, .. } = &obj.kind {
+                        if let Some(idx) = text.find(pattern) {
+                            let match_str = vm.alloc_string(pattern.clone());
+                            let arr_val = vm.alloc_array(vec![match_str]);
+                            vm.set_property(arr_val, "index", JsValue::from_int32(idx as i32));
+                            let text_val = vm.alloc_string(text);
+                            vm.set_property(arr_val, "input", text_val);
+                            return Ok(arr_val);
+                        }
+                    }
+                }
+                Ok(JsValue::null())
+            }))),
+            _ => None,
+        }
+    }
+
     // ── String Coercion and JSON ──
 
     pub fn to_string_value(&self, val: JsValue) -> String {
@@ -778,6 +1091,11 @@ impl Vm {
                     TypedArrayKind::Uint8 => "[object Uint8Array]".to_string(),
                 },
                 ObjectKind::Worker(_) => "[object Worker]".to_string(),
+                ObjectKind::Map(_) => "[object Map]".to_string(),
+                ObjectKind::Set(_) => "[object Set]".to_string(),
+                ObjectKind::WeakRef(_) => "[object WeakRef]".to_string(),
+                ObjectKind::FinalizationRegistry { .. } => "[object FinalizationRegistry]".to_string(),
+                ObjectKind::RegExp { pattern, flags } => format!("/{}/{}", pattern, flags),
             }
         } else {
             "undefined".to_string()
@@ -842,6 +1160,22 @@ impl Vm {
                     return native.call(self, this_val, args);
                 }
                 ObjectKind::Function(f) => {
+                    let obj_mut = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Function(ref mut fn_info) = obj_mut.kind {
+                        if let Some(jit_fn) = &fn_info.jit_entry {
+                            let callable = Arc::clone(&jit_fn.executable);
+                            return (callable)(self, args);
+                        } else {
+                            fn_info.call_count = fn_info.call_count.saturating_add(1);
+                            if fn_info.call_count >= crate::jit::JIT_HOT_THRESHOLD && !fn_info.is_generator && !fn_info.is_async {
+                                if let Some(jit_fn) = crate::jit::JitCompiler::compile(&fn_info.chunk) {
+                                    let callable = Arc::clone(&jit_fn.executable);
+                                    fn_info.jit_entry = Some(jit_fn);
+                                    return (callable)(self, args);
+                                }
+                            }
+                        }
+                    }
                     if f.is_generator {
                         let generator_instance = JsGenerator {
                             function: f.clone(),
@@ -944,6 +1278,8 @@ impl Vm {
                                 upvalues: Vec::new(),
                                 is_async: false,
                                 is_generator: false,
+                                call_count: 0,
+                                jit_entry: None,
                             };
                             self.alloc_function(js_fn)
                         }
@@ -1147,6 +1483,8 @@ impl Vm {
                         upvalues: Vec::new(),
                         is_async: false,
                         is_generator: false,
+                        call_count: 0,
+                        jit_entry: None,
                     };
                     let func_val = self.alloc_function(js_fn);
                     self.push(func_val);
@@ -1164,6 +1502,8 @@ impl Vm {
                         upvalues: Vec::new(),
                         is_async: true,
                         is_generator: false,
+                        call_count: 0,
+                        jit_entry: None,
                     };
                     let func_val = self.alloc_function(js_fn);
                     self.push(func_val);
@@ -1181,6 +1521,8 @@ impl Vm {
                         upvalues: Vec::new(),
                         is_async: false,
                         is_generator: true,
+                        call_count: 0,
+                        jit_entry: None,
                     };
                     let func_val = self.alloc_function(js_fn);
                     self.push(func_val);
@@ -1202,6 +1544,26 @@ impl Vm {
                                 self.push(res);
                             }
                             ObjectKind::Function(f) => {
+                                let obj_mut = unsafe { &mut *(ptr as *mut JsObject) };
+                                if let ObjectKind::Function(ref mut fn_info) = obj_mut.kind {
+                                    if let Some(jit_fn) = &fn_info.jit_entry {
+                                        let callable = Arc::clone(&jit_fn.executable);
+                                        let res = (callable)(self, &args)?;
+                                        self.push(res);
+                                        continue;
+                                    } else {
+                                        fn_info.call_count = fn_info.call_count.saturating_add(1);
+                                        if fn_info.call_count >= crate::jit::JIT_HOT_THRESHOLD && !fn_info.is_generator && !fn_info.is_async {
+                                            if let Some(jit_fn) = crate::jit::JitCompiler::compile(&fn_info.chunk) {
+                                                let callable = Arc::clone(&jit_fn.executable);
+                                                fn_info.jit_entry = Some(jit_fn);
+                                                let res = (callable)(self, &args)?;
+                                                self.push(res);
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
                                 if f.is_generator {
                                     let generator_instance = JsGenerator {
                                         function: f.clone(),
@@ -1504,7 +1866,16 @@ impl Vm {
                 }
                 OpCode::Typeof => {
                     let v = self.pop()?;
-                    let t = v.js_typeof();
+                    let t = if let Some(ptr) = v.as_heap_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        match &obj.kind {
+                            ObjectKind::String(_) => "string",
+                            ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => "function",
+                            _ => "object",
+                        }
+                    } else {
+                        v.js_typeof()
+                    };
                     let s_val = self.alloc_string(t.to_string());
                     self.push(s_val);
                 }
@@ -1528,24 +1899,12 @@ impl Vm {
                 OpCode::Eq | OpCode::StrictEq => {
                     let b = self.pop()?;
                     let a = self.pop()?;
-                    if a == b {
-                        self.push(JsValue::from_boolean(true));
-                    } else if (a.is_number()) && (b.is_number()) {
-                        self.push(JsValue::from_boolean(a.to_number() == b.to_number()));
-                    } else {
-                        self.push(JsValue::from_boolean(false));
-                    }
+                    self.push(JsValue::from_boolean(crate::object::js_values_equal(a, b)));
                 }
                 OpCode::NotEq | OpCode::StrictNotEq => {
                     let b = self.pop()?;
                     let a = self.pop()?;
-                    if a == b {
-                        self.push(JsValue::from_boolean(false));
-                    } else if (a.is_number()) && (b.is_number()) {
-                        self.push(JsValue::from_boolean(a.to_number() != b.to_number()));
-                    } else {
-                        self.push(JsValue::from_boolean(true));
-                    }
+                    self.push(JsValue::from_boolean(!crate::object::js_values_equal(a, b)));
                 }
                 OpCode::Lt => {
                     let b = self.pop()?.to_number().unwrap_or(f64::NAN);
@@ -1711,5 +2070,75 @@ mod tests {
         let mut vm = Vm::new();
         let res = vm.run(&chunk).unwrap();
         assert_eq!(res.as_number(), Some(99.0));
+    }
+
+    #[test]
+    fn test_phase3_builtins_and_collections() {
+        let mut vm = Vm::new();
+
+        // Map test
+        let map_val = vm.alloc_map();
+        let set_method = vm.get_property(map_val, "set");
+        let get_method = vm.get_property(map_val, "get");
+        let k = vm.alloc_string("hello".into());
+        let v = JsValue::from_int32(123);
+        vm.call(set_method, map_val, &[k, v]).unwrap();
+        let k_lookup = vm.alloc_string("hello".into());
+        let got = vm.call(get_method, map_val, &[k_lookup]).unwrap();
+        assert_eq!(got.as_number(), Some(123.0));
+
+        // Set test
+        let set_val = vm.alloc_set();
+        let add_method = vm.get_property(set_val, "add");
+        let has_method = vm.get_property(set_val, "has");
+        let num = JsValue::from_int32(77);
+        vm.call(add_method, set_val, &[num]).unwrap();
+        let has_res = vm.call(has_method, set_val, &[num]).unwrap();
+        assert_eq!(has_res.as_boolean(), Some(true));
+
+        // WeakRef test
+        let obj = vm.alloc_object();
+        let wr = vm.alloc_weak_ref(obj);
+        let deref_fn = vm.get_property(wr, "deref");
+        let derefed = vm.call(deref_fn, wr, &[]).unwrap();
+        assert_eq!(derefed, obj);
+
+        // RegExp test
+        let re = vm.alloc_regexp("doms".into(), "".into());
+        let test_fn = vm.get_property(re, "test");
+        let target_str = vm.alloc_string("doms_js engine".into());
+        let matched = vm.call(test_fn, re, &[target_str]).unwrap();
+        assert_eq!(matched.as_boolean(), Some(true));
+    }
+
+    #[test]
+    fn test_phase3_jit_hot_execution() {
+        let mut vm = Vm::new();
+        // Function that adds two numbers: arg0 + arg1
+        let mut chunk = BytecodeChunk::new();
+        chunk.emit(OpCode::GetLocal(0), 1);
+        chunk.emit(OpCode::GetLocal(1), 1);
+        chunk.emit(OpCode::Add, 1);
+        chunk.emit(OpCode::Return, 1);
+
+        let js_fn = JsFunction {
+            name: Some("add".into()),
+            params: vec!["a".into(), "b".into()],
+            chunk: Arc::new(chunk),
+            upvalues: Vec::new(),
+            is_async: false,
+            is_generator: false,
+            call_count: 0,
+            jit_entry: None,
+        };
+        let fn_val = vm.alloc_function(js_fn);
+
+        // Call 15 times to exceed JIT_HOT_THRESHOLD (10)
+        let mut total = 0.0;
+        for i in 0..15 {
+            let res = vm.call(fn_val, JsValue::undefined(), &[JsValue::from_int32(i), JsValue::from_int32(1)]).unwrap();
+            total += res.as_number().unwrap();
+        }
+        assert_eq!(total, 120.0);
     }
 }

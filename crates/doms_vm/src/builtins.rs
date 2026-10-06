@@ -14,6 +14,7 @@ pub fn register_builtins(vm: &mut Vm) {
     register_global_helpers(vm);
     register_promise(vm);
     register_parallel_and_typed_arrays(vm);
+    register_phase3_builtins(vm);
 }
 
 fn register_console(vm: &mut Vm) {
@@ -834,4 +835,200 @@ fn register_parallel_and_typed_arrays(vm: &mut Vm) {
     });
 
     vm.globals.insert("Worker".to_string(), worker_ctor);
+}
+
+fn register_phase3_builtins(vm: &mut Vm) {
+    // ── Map & Set ──
+    let map_ctor = vm.alloc_native_function("Map", 0, |vm, _this, args| {
+        let map_val = vm.alloc_map();
+        if let Some(arg) = args.first() {
+            if let Some(ptr) = arg.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Array(elements) = &obj.kind {
+                    for el in elements {
+                        if let Some(el_ptr) = el.as_object_ptr() {
+                            let el_obj = unsafe { &*(el_ptr as *mut JsObject) };
+                            if let ObjectKind::Array(pair) = &el_obj.kind {
+                                let k = pair.first().copied().unwrap_or(JsValue::undefined());
+                                let v = pair.get(1).copied().unwrap_or(JsValue::undefined());
+                                if let Some(m_ptr) = map_val.as_object_ptr() {
+                                    let m_obj = unsafe { &mut *(m_ptr as *mut JsObject) };
+                                    if let ObjectKind::Map(entries) = &mut m_obj.kind {
+                                        entries.push((k, v));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(map_val)
+    });
+    vm.globals.insert("Map".to_string(), map_ctor);
+
+    let set_ctor = vm.alloc_native_function("Set", 0, |vm, _this, args| {
+        let set_val = vm.alloc_set();
+        if let Some(arg) = args.first() {
+            if let Some(ptr) = arg.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Array(elements) = &obj.kind {
+                    if let Some(s_ptr) = set_val.as_object_ptr() {
+                        let s_obj = unsafe { &mut *(s_ptr as *mut JsObject) };
+                        if let ObjectKind::Set(set_elements) = &mut s_obj.kind {
+                            for el in elements {
+                                if !set_elements.contains(el) {
+                                    set_elements.push(*el);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(set_val)
+    });
+    vm.globals.insert("Set".to_string(), set_ctor);
+
+    // ── WeakRef & FinalizationRegistry ──
+    let weakref_ctor = vm.alloc_native_function("WeakRef", 1, |vm, _this, args| {
+        let target = args.first().copied().unwrap_or(JsValue::undefined());
+        Ok(vm.alloc_weak_ref(target))
+    });
+    vm.globals.insert("WeakRef".to_string(), weakref_ctor);
+
+    let fr_ctor = vm.alloc_native_function("FinalizationRegistry", 1, |vm, _this, args| {
+        let cb = args.first().copied().unwrap_or(JsValue::undefined());
+        Ok(vm.alloc_finalization_registry(cb))
+    });
+    vm.globals.insert("FinalizationRegistry".to_string(), fr_ctor);
+
+    // ── RegExp ──
+    let regexp_ctor = vm.alloc_native_function("RegExp", 2, |vm, _this, args| {
+        let pattern = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let flags = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        Ok(vm.alloc_regexp(pattern, flags))
+    });
+    vm.globals.insert("RegExp".to_string(), regexp_ctor);
+
+    // ── Intl ──
+    let intl_obj = vm.alloc_object();
+
+    let num_format_ctor = vm.alloc_native_function("NumberFormat", 0, |vm, _this, _args| {
+        let nf_obj = vm.alloc_object();
+        let format_fn = vm.alloc_native_function("format", 1, |vm, _this, args| {
+            let n = args.first().and_then(|v| v.to_number()).unwrap_or(0.0);
+            let s = if n.fract() == 0.0 && n.abs() < 1e16 {
+                let int_val = n as i64;
+                let sign = if int_val < 0 { "-" } else { "" };
+                let abs_str = int_val.abs().to_string();
+                let mut formatted = String::new();
+                for (i, ch) in abs_str.chars().rev().enumerate() {
+                    if i > 0 && i % 3 == 0 {
+                        formatted.push(',');
+                    }
+                    formatted.push(ch);
+                }
+                let rev_res: String = formatted.chars().rev().collect();
+                format!("{}{}", sign, rev_res)
+            } else {
+                format!("{:.3}", n)
+            };
+            Ok(vm.alloc_string(s))
+        });
+        vm.set_property(nf_obj, "format", format_fn);
+        Ok(nf_obj)
+    });
+    vm.set_property(intl_obj, "NumberFormat", num_format_ctor);
+
+    let date_format_ctor = vm.alloc_native_function("DateTimeFormat", 0, |vm, _this, _args| {
+        let df_obj = vm.alloc_object();
+        let format_fn = vm.alloc_native_function("format", 1, |vm, _this, args| {
+            let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| "2026-10-06T00:00:00Z".to_string());
+            Ok(vm.alloc_string(s))
+        });
+        vm.set_property(df_obj, "format", format_fn);
+        Ok(df_obj)
+    });
+    vm.set_property(intl_obj, "DateTimeFormat", date_format_ctor);
+
+    let collator_ctor = vm.alloc_native_function("Collator", 0, |vm, _this, _args| {
+        let coll_obj = vm.alloc_object();
+        let compare_fn = vm.alloc_native_function("compare", 2, |vm, _this, args| {
+            let a = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+            let b = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_default();
+            let cmp = match a.cmp(&b) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            };
+            Ok(JsValue::from_int32(cmp))
+        });
+        vm.set_property(coll_obj, "compare", compare_fn);
+        Ok(coll_obj)
+    });
+    vm.set_property(intl_obj, "Collator", collator_ctor);
+
+    vm.globals.insert("Intl".to_string(), intl_obj);
+
+    // ── Temporal ──
+    let temporal_obj = vm.alloc_object();
+
+    let instant_ctor = vm.alloc_native_function("Instant", 1, |vm, _this, args| {
+        let ms = args.first().and_then(|v| v.to_number()).unwrap_or(0.0);
+        let inst = vm.alloc_object();
+        vm.set_property(inst, "epochMilliseconds", JsValue::from_double(ms));
+        vm.set_property(inst, "epochNanoseconds", JsValue::from_double(ms * 1_000_000.0));
+        let to_str = vm.alloc_native_function("toString", 0, |vm, this, _args| {
+            let ms_val = vm.get_property(this, "epochMilliseconds")
+                .to_number()
+                .unwrap_or(0.0);
+            Ok(vm.alloc_string(format!("{}Z", ms_val)))
+        });
+        vm.set_property(inst, "toString", to_str);
+        Ok(inst)
+    });
+    vm.set_property(temporal_obj, "Instant", instant_ctor);
+
+    let now_obj = vm.alloc_object();
+    let instant_fn = vm.alloc_native_function("instant", 0, |vm, _this, _args| {
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as f64)
+            .unwrap_or(0.0);
+        let inst = vm.alloc_object();
+        vm.set_property(inst, "epochMilliseconds", JsValue::from_double(ms));
+        vm.set_property(inst, "epochNanoseconds", JsValue::from_double(ms * 1_000_000.0));
+        let to_str = vm.alloc_native_function("toString", 0, |vm, this, _args| {
+            let ms_val = vm.get_property(this, "epochMilliseconds")
+                .to_number()
+                .unwrap_or(0.0);
+            Ok(vm.alloc_string(format!("{}Z", ms_val)))
+        });
+        vm.set_property(inst, "toString", to_str);
+        Ok(inst)
+    });
+    vm.set_property(now_obj, "instant", instant_fn);
+    vm.set_property(temporal_obj, "Now", now_obj);
+
+    let plain_date_ctor = vm.alloc_native_function("PlainDate", 3, |vm, _this, args| {
+        let y = args.first().and_then(|v| v.to_int32()).unwrap_or(1970);
+        let m = args.get(1).and_then(|v| v.to_int32()).unwrap_or(1);
+        let d = args.get(2).and_then(|v| v.to_int32()).unwrap_or(1);
+        let date_obj = vm.alloc_object();
+        vm.set_property(date_obj, "year", JsValue::from_int32(y));
+        vm.set_property(date_obj, "month", JsValue::from_int32(m));
+        vm.set_property(date_obj, "day", JsValue::from_int32(d));
+        let to_str = vm.alloc_native_function("toString", 0, |vm, this, _args| {
+            let y_val = vm.get_property(this, "year").to_int32().unwrap_or(0);
+            let m_val = vm.get_property(this, "month").to_int32().unwrap_or(0);
+            let d_val = vm.get_property(this, "day").to_int32().unwrap_or(0);
+            Ok(vm.alloc_string(format!("{:04}-{:02}-{:02}", y_val, m_val, d_val)))
+        });
+        vm.set_property(date_obj, "toString", to_str);
+        Ok(date_obj)
+    });
+    vm.set_property(temporal_obj, "PlainDate", plain_date_ctor);
+
+    vm.globals.insert("Temporal".to_string(), temporal_obj);
 }

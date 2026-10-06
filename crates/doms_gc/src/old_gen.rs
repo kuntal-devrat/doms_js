@@ -207,6 +207,50 @@ impl OldGen {
             header.is_marked()
         }
     }
+
+    /// Compact the old generation by sliding marked objects toward the beginning.
+    /// Unmarked objects are collected.
+    /// Returns the number of bytes reclaimed.
+    pub fn compact(&mut self) -> usize {
+        let mut scan = self.start;
+        let mut free = self.start;
+        let mut live_bytes = 0;
+        let mut live_count = 0;
+
+        while scan < self.cursor {
+            unsafe {
+                let header = &mut *(scan as *mut GcHeader);
+                let sz = header.total_size();
+                if sz == 0 {
+                    break;
+                }
+                if header.is_marked() {
+                    header.clear_marked();
+                    if scan != free {
+                        ptr::copy(scan, free, sz);
+                    }
+                    free = free.add(sz);
+                    live_bytes += sz;
+                    live_count += 1;
+                }
+                scan = scan.add(sz);
+            }
+        }
+
+        let reclaimed = self.bytes_used.saturating_sub(live_bytes);
+        self.cursor = free;
+        self.bytes_used = live_bytes;
+        self.object_count = live_count;
+        self.mark_state = MarkState::Idle;
+        self.mark_worklist.clear();
+        reclaimed
+    }
+
+    /// Sweep unmarked objects and reset marks.
+    /// Returns the number of bytes reclaimed.
+    pub fn sweep(&mut self) -> usize {
+        self.compact()
+    }
 }
 
 impl Drop for OldGen {
@@ -303,5 +347,29 @@ mod tests {
         assert!(!old_gen.is_marked(old_p1));
         assert!(!old_gen.is_marked(old_p2));
     }
+
+    #[test]
+    fn test_old_gen_compaction() {
+        let mut nursery = Nursery::new(4096);
+        let mut old_gen = OldGen::new(4096);
+
+        let p1 = nursery.allocate(16, TypeTag::Object).unwrap();
+        let p2 = nursery.allocate(16, TypeTag::Object).unwrap();
+
+        let old_p1 = unsafe { old_gen.promote(p1).unwrap() };
+        let _old_p2 = unsafe { old_gen.promote(p2).unwrap() };
+
+        assert_eq!(old_gen.object_count, 2);
+
+        // Mark only p1
+        old_gen.start_incremental_marking(&[old_p1]);
+        assert!(old_gen.is_marked(old_p1));
+
+        // Compact: should collect unmarked p2 and retain p1
+        let reclaimed = old_gen.compact();
+        assert!(reclaimed > 0);
+        assert_eq!(old_gen.object_count, 1);
+    }
 }
+
 
