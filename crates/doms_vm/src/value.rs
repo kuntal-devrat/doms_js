@@ -198,6 +198,17 @@ impl JsValue {
     }
 
     #[inline]
+    pub fn to_int32(&self) -> Option<i32> {
+        if self.is_int32() {
+            self.as_int32()
+        } else if self.is_double() {
+            Some(self.as_double().unwrap() as i32)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
     pub fn to_number(&self) -> Option<f64> {
         if self.is_double() {
             Some(f64::from_bits(self.0))

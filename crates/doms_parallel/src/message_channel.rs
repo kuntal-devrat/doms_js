@@ -21,6 +21,12 @@ pub struct MessagePort {
     receiver: Receiver<MessageData>,
 }
 
+impl std::fmt::Debug for MessagePort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MessagePort")
+    }
+}
+
 impl MessagePort {
     pub fn new(sender: Sender<MessageData>, receiver: Receiver<MessageData>) -> Self {
         Self { sender, receiver }

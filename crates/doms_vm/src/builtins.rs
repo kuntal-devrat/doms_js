@@ -3,6 +3,7 @@
 use crate::interpreter::{Vm, VmError};
 use crate::object::{JsObject, ObjectKind};
 use crate::value::JsValue;
+use std::sync::Arc;
 
 pub fn register_builtins(vm: &mut Vm) {
     register_console(vm);
@@ -11,6 +12,8 @@ pub fn register_builtins(vm: &mut Vm) {
     register_object_builtins(vm);
     register_array_builtins(vm);
     register_global_helpers(vm);
+    register_promise(vm);
+    register_parallel_and_typed_arrays(vm);
 }
 
 fn register_console(vm: &mut Vm) {
@@ -337,4 +340,498 @@ fn register_global_helpers(vm: &mut Vm) {
     vm.globals.insert("NaN".to_string(), JsValue::from_double(f64::NAN));
     vm.globals.insert("Infinity".to_string(), JsValue::from_double(f64::INFINITY));
     vm.globals.insert("undefined".to_string(), JsValue::undefined());
+}
+
+fn register_promise(vm: &mut Vm) {
+    let promise_ctor = vm.alloc_native_function("Promise", 1, |vm, _this, args| {
+        let executor = args.first().copied().unwrap_or(JsValue::undefined());
+        if !executor.is_object() {
+            return Err(VmError::TypeError("Promise resolver is not a function".into()));
+        }
+        let promise_val = vm.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+        let p_for_res = promise_val;
+        let resolve_fn = vm.alloc_closure_native_function("resolve", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+            let res = args.first().copied().unwrap_or(JsValue::undefined());
+            vm.resolve_promise(p_for_res, res);
+            Ok(JsValue::undefined())
+        }));
+        let p_for_rej = promise_val;
+        let reject_fn = vm.alloc_closure_native_function("reject", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+            let rej = args.first().copied().unwrap_or(JsValue::undefined());
+            vm.reject_promise(p_for_rej, rej);
+            Ok(JsValue::undefined())
+        }));
+
+        match vm.call(executor, JsValue::undefined(), &[resolve_fn, reject_fn]) {
+            Ok(_) => Ok(promise_val),
+            Err(e) => {
+                let err_str = vm.alloc_string(e.to_string());
+                vm.reject_promise(promise_val, err_str);
+                Ok(promise_val)
+            }
+        }
+    });
+
+    let resolve_static = vm.alloc_native_function("resolve", 1, |vm, _this, args| {
+        let val = args.first().copied().unwrap_or(JsValue::undefined());
+        if let Some(ptr) = val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if matches!(obj.kind, ObjectKind::Promise(_)) {
+                return Ok(val);
+            }
+        }
+        Ok(vm.alloc_promise(crate::object::PromiseState::Fulfilled, val))
+    });
+
+    let reject_static = vm.alloc_native_function("reject", 1, |vm, _this, args| {
+        let reason = args.first().copied().unwrap_or(JsValue::undefined());
+        Ok(vm.alloc_promise(crate::object::PromiseState::Rejected, reason))
+    });
+
+    let all_static = vm.alloc_native_function("all", 1, |vm, _this, args| {
+        let iterable = args.first().copied().unwrap_or(JsValue::undefined());
+        if let Some(ptr) = iterable.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Array(elements) = &obj.kind {
+                let elements_clone = elements.clone();
+                let result_promise = vm.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+                if elements_clone.is_empty() {
+                    let empty_arr = vm.alloc_array(Vec::new());
+                    vm.resolve_promise(result_promise, empty_arr);
+                    return Ok(result_promise);
+                }
+                let count = elements_clone.len();
+                let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(count));
+                let results = Arc::new(std::sync::Mutex::new(vec![JsValue::undefined(); count]));
+
+                for (idx, elem) in elements_clone.into_iter().enumerate() {
+                    let r_p = result_promise;
+                    let rem = Arc::clone(&remaining);
+                    let res_store = Arc::clone(&results);
+
+                    let resolve_item = vm.alloc_closure_native_function("resolve_item", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                        let v = args.first().copied().unwrap_or(JsValue::undefined());
+                        {
+                            let mut lock = res_store.lock().unwrap();
+                            lock[idx] = v;
+                        }
+                        if rem.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                            let final_res = {
+                                let lock = res_store.lock().unwrap();
+                                lock.clone()
+                            };
+                            let arr = vm.alloc_array(final_res);
+                            vm.resolve_promise(r_p, arr);
+                        }
+                        Ok(JsValue::undefined())
+                    }));
+
+                    let reject_item = vm.alloc_closure_native_function("reject_item", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                        let err = args.first().copied().unwrap_or(JsValue::undefined());
+                        vm.reject_promise(r_p, err);
+                        Ok(JsValue::undefined())
+                    }));
+
+                    if let Some(p_ptr) = elem.as_object_ptr() {
+                        let p_obj = unsafe { &*(p_ptr as *mut JsObject) };
+                        if matches!(p_obj.kind, ObjectKind::Promise(_)) {
+                            let then_fn = vm.get_property(elem, "then");
+                            let _ = vm.call(then_fn, elem, &[resolve_item, reject_item]);
+                            continue;
+                        }
+                    }
+                    let _ = vm.call(resolve_item, JsValue::undefined(), &[elem]);
+                }
+
+                return Ok(result_promise);
+            }
+        }
+        let empty_arr = vm.alloc_array(Vec::new());
+        Ok(vm.alloc_promise(crate::object::PromiseState::Fulfilled, empty_arr))
+    });
+
+    let race_static = vm.alloc_native_function("race", 1, |vm, _this, args| {
+        let iterable = args.first().copied().unwrap_or(JsValue::undefined());
+        let result_promise = vm.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+        if let Some(ptr) = iterable.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Array(elements) = &obj.kind {
+                let elements_clone = elements.clone();
+                for elem in elements_clone {
+                    let r_p = result_promise;
+                    let resolve_item = vm.alloc_closure_native_function("race_res", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                        let v = args.first().copied().unwrap_or(JsValue::undefined());
+                        vm.resolve_promise(r_p, v);
+                        Ok(JsValue::undefined())
+                    }));
+                    let reject_item = vm.alloc_closure_native_function("race_rej", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                        let err = args.first().copied().unwrap_or(JsValue::undefined());
+                        vm.reject_promise(r_p, err);
+                        Ok(JsValue::undefined())
+                    }));
+
+                    if let Some(p_ptr) = elem.as_object_ptr() {
+                        let p_obj = unsafe { &*(p_ptr as *mut JsObject) };
+                        if matches!(p_obj.kind, ObjectKind::Promise(_)) {
+                            let then_fn = vm.get_property(elem, "then");
+                            let _ = vm.call(then_fn, elem, &[resolve_item, reject_item]);
+                            continue;
+                        }
+                    }
+                    let _ = vm.call(resolve_item, JsValue::undefined(), &[elem]);
+                }
+            }
+        }
+        Ok(result_promise)
+    });
+
+    vm.set_property(promise_ctor, "resolve", resolve_static);
+    vm.set_property(promise_ctor, "reject", reject_static);
+    vm.set_property(promise_ctor, "all", all_static);
+    vm.set_property(promise_ctor, "race", race_static);
+
+    vm.globals.insert("Promise".to_string(), promise_ctor);
+}
+
+fn register_parallel_and_typed_arrays(vm: &mut Vm) {
+    let sab_ctor = vm.alloc_native_function("SharedArrayBuffer", 1, |vm, _this, args| {
+        let byte_len = args.first().and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        let sab = Arc::new(doms_parallel::SharedArrayBuffer::new(byte_len));
+        Ok(vm.alloc_shared_array_buffer(sab))
+    });
+    vm.globals.insert("SharedArrayBuffer".to_string(), sab_ctor);
+
+    let int32_ctor = vm.alloc_native_function("Int32Array", 1, |vm, _this, args| {
+        let arg = args.first().copied().unwrap_or(JsValue::undefined());
+        if let Some(ptr) = arg.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::SharedArrayBuffer(sab) = &obj.kind {
+                let len = sab.byte_length() / 4;
+                return Ok(vm.alloc_typed_array(crate::object::JsTypedArray {
+                    buffer: Arc::clone(sab),
+                    kind: crate::object::TypedArrayKind::Int32,
+                    length: len,
+                }));
+            }
+        }
+        let len = arg.to_int32().unwrap_or(0).max(0) as usize;
+        let sab = Arc::new(doms_parallel::SharedArrayBuffer::new(len * 4));
+        Ok(vm.alloc_typed_array(crate::object::JsTypedArray {
+            buffer: sab,
+            kind: crate::object::TypedArrayKind::Int32,
+            length: len,
+        }))
+    });
+    vm.globals.insert("Int32Array".to_string(), int32_ctor);
+
+    let uint8_ctor = vm.alloc_native_function("Uint8Array", 1, |vm, _this, args| {
+        let arg = args.first().copied().unwrap_or(JsValue::undefined());
+        if let Some(ptr) = arg.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::SharedArrayBuffer(sab) = &obj.kind {
+                let len = sab.byte_length();
+                return Ok(vm.alloc_typed_array(crate::object::JsTypedArray {
+                    buffer: Arc::clone(sab),
+                    kind: crate::object::TypedArrayKind::Uint8,
+                    length: len,
+                }));
+            }
+        }
+        let len = arg.to_int32().unwrap_or(0).max(0) as usize;
+        let sab = Arc::new(doms_parallel::SharedArrayBuffer::new(len));
+        Ok(vm.alloc_typed_array(crate::object::JsTypedArray {
+            buffer: sab,
+            kind: crate::object::TypedArrayKind::Uint8,
+            length: len,
+        }))
+    });
+    vm.globals.insert("Uint8Array".to_string(), uint8_ctor);
+
+    let atomics_obj = vm.alloc_object();
+
+    let atomics_load = vm.alloc_native_function("load", 2, |_vm, _this, args| {
+        let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        if let Some(ptr) = ta_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                match ta.kind {
+                    crate::object::TypedArrayKind::Int32 => {
+                        let off = idx * 4;
+                        let b0 = ta.buffer.get(off).unwrap_or(0);
+                        let b1 = ta.buffer.get(off + 1).unwrap_or(0);
+                        let b2 = ta.buffer.get(off + 2).unwrap_or(0);
+                        let b3 = ta.buffer.get(off + 3).unwrap_or(0);
+                        let val = i32::from_le_bytes([b0, b1, b2, b3]);
+                        return Ok(JsValue::from_int32(val));
+                    }
+                    crate::object::TypedArrayKind::Uint8 => {
+                        let val = doms_parallel::Atomics::load(&ta.buffer, idx)
+                            .map_err(|e| VmError::RuntimeError(e.to_string()))?;
+                        return Ok(JsValue::from_int32(val as i32));
+                    }
+                }
+            }
+        }
+        Err(VmError::TypeError("Atomics.load requires a TypedArray".into()))
+    });
+
+    let atomics_store = vm.alloc_native_function("store", 3, |_vm, _this, args| {
+        let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        let value = args.get(2).and_then(|v| v.to_number()).unwrap_or(0.0) as i32;
+        if let Some(ptr) = ta_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                match ta.kind {
+                    crate::object::TypedArrayKind::Int32 => {
+                        let off = idx * 4;
+                        let bytes = value.to_le_bytes();
+                        for (k, &b) in bytes.iter().enumerate() {
+                            ta.buffer.set(off + k, b);
+                        }
+                        return Ok(JsValue::from_int32(value));
+                    }
+                    crate::object::TypedArrayKind::Uint8 => {
+                        doms_parallel::Atomics::store(&ta.buffer, idx, value as u8)
+                            .map_err(|e| VmError::RuntimeError(e.to_string()))?;
+                        return Ok(JsValue::from_int32(value));
+                    }
+                }
+            }
+        }
+        Err(VmError::TypeError("Atomics.store requires a TypedArray".into()))
+    });
+
+    let atomics_add = vm.alloc_native_function("add", 3, |_vm, _this, args| {
+        let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        let value = args.get(2).and_then(|v| v.to_number()).unwrap_or(0.0) as i32;
+        if let Some(ptr) = ta_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                match ta.kind {
+                    crate::object::TypedArrayKind::Int32 => {
+                        let off = idx * 4;
+                        let b0 = ta.buffer.get(off).unwrap_or(0);
+                        let b1 = ta.buffer.get(off + 1).unwrap_or(0);
+                        let b2 = ta.buffer.get(off + 2).unwrap_or(0);
+                        let b3 = ta.buffer.get(off + 3).unwrap_or(0);
+                        let old = i32::from_le_bytes([b0, b1, b2, b3]);
+                        let new_val = old + value;
+                        let bytes = new_val.to_le_bytes();
+                        for (k, &b) in bytes.iter().enumerate() {
+                            ta.buffer.set(off + k, b);
+                        }
+                        return Ok(JsValue::from_int32(old));
+                    }
+                    crate::object::TypedArrayKind::Uint8 => {
+                        let old = doms_parallel::Atomics::add(&ta.buffer, idx, value as u8)
+                            .map_err(|e| VmError::RuntimeError(e.to_string()))?;
+                        return Ok(JsValue::from_int32(old as i32));
+                    }
+                }
+            }
+        }
+        Err(VmError::TypeError("Atomics.add requires a TypedArray".into()))
+    });
+
+    let atomics_sub = vm.alloc_native_function("sub", 3, |_vm, _this, args| {
+        let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        let value = args.get(2).and_then(|v| v.to_number()).unwrap_or(0.0) as i32;
+        if let Some(ptr) = ta_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                match ta.kind {
+                    crate::object::TypedArrayKind::Int32 => {
+                        let off = idx * 4;
+                        let b0 = ta.buffer.get(off).unwrap_or(0);
+                        let b1 = ta.buffer.get(off + 1).unwrap_or(0);
+                        let b2 = ta.buffer.get(off + 2).unwrap_or(0);
+                        let b3 = ta.buffer.get(off + 3).unwrap_or(0);
+                        let old = i32::from_le_bytes([b0, b1, b2, b3]);
+                        let new_val = old - value;
+                        let bytes = new_val.to_le_bytes();
+                        for (k, &b) in bytes.iter().enumerate() {
+                            ta.buffer.set(off + k, b);
+                        }
+                        return Ok(JsValue::from_int32(old));
+                    }
+                    crate::object::TypedArrayKind::Uint8 => {
+                        let old = doms_parallel::Atomics::sub(&ta.buffer, idx, value as u8)
+                            .map_err(|e| VmError::RuntimeError(e.to_string()))?;
+                        return Ok(JsValue::from_int32(old as i32));
+                    }
+                }
+            }
+        }
+        Err(VmError::TypeError("Atomics.sub requires a TypedArray".into()))
+    });
+
+    let atomics_and = vm.alloc_native_function("and", 3, |_vm, _this, args| {
+        let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        let value = args.get(2).and_then(|v| v.to_number()).unwrap_or(0.0) as i32;
+        if let Some(ptr) = ta_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                let off = idx * 4;
+                let b0 = ta.buffer.get(off).unwrap_or(0);
+                let b1 = ta.buffer.get(off + 1).unwrap_or(0);
+                let b2 = ta.buffer.get(off + 2).unwrap_or(0);
+                let b3 = ta.buffer.get(off + 3).unwrap_or(0);
+                let old = i32::from_le_bytes([b0, b1, b2, b3]);
+                let new_val = old & value;
+                let bytes = new_val.to_le_bytes();
+                for (k, &b) in bytes.iter().enumerate() {
+                    ta.buffer.set(off + k, b);
+                }
+                return Ok(JsValue::from_int32(old));
+            }
+        }
+        Err(VmError::TypeError("Atomics.and requires a TypedArray".into()))
+    });
+
+    let atomics_or = vm.alloc_native_function("or", 3, |_vm, _this, args| {
+        let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        let value = args.get(2).and_then(|v| v.to_number()).unwrap_or(0.0) as i32;
+        if let Some(ptr) = ta_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                let off = idx * 4;
+                let b0 = ta.buffer.get(off).unwrap_or(0);
+                let b1 = ta.buffer.get(off + 1).unwrap_or(0);
+                let b2 = ta.buffer.get(off + 2).unwrap_or(0);
+                let b3 = ta.buffer.get(off + 3).unwrap_or(0);
+                let old = i32::from_le_bytes([b0, b1, b2, b3]);
+                let new_val = old | value;
+                let bytes = new_val.to_le_bytes();
+                for (k, &b) in bytes.iter().enumerate() {
+                    ta.buffer.set(off + k, b);
+                }
+                return Ok(JsValue::from_int32(old));
+            }
+        }
+        Err(VmError::TypeError("Atomics.or requires a TypedArray".into()))
+    });
+
+    let atomics_xor = vm.alloc_native_function("xor", 3, |_vm, _this, args| {
+        let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        let value = args.get(2).and_then(|v| v.to_number()).unwrap_or(0.0) as i32;
+        if let Some(ptr) = ta_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                let off = idx * 4;
+                let b0 = ta.buffer.get(off).unwrap_or(0);
+                let b1 = ta.buffer.get(off + 1).unwrap_or(0);
+                let b2 = ta.buffer.get(off + 2).unwrap_or(0);
+                let b3 = ta.buffer.get(off + 3).unwrap_or(0);
+                let old = i32::from_le_bytes([b0, b1, b2, b3]);
+                let new_val = old ^ value;
+                let bytes = new_val.to_le_bytes();
+                for (k, &b) in bytes.iter().enumerate() {
+                    ta.buffer.set(off + k, b);
+                }
+                return Ok(JsValue::from_int32(old));
+            }
+        }
+        Err(VmError::TypeError("Atomics.xor requires a TypedArray".into()))
+    });
+
+    let atomics_cmpxchg = vm.alloc_native_function("compareExchange", 4, |_vm, _this, args| {
+        let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+        let expected = args.get(2).and_then(|v| v.to_number()).unwrap_or(0.0) as i32;
+        let replacement = args.get(3).and_then(|v| v.to_number()).unwrap_or(0.0) as i32;
+        if let Some(ptr) = ta_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                match ta.kind {
+                    crate::object::TypedArrayKind::Int32 => {
+                        let off = idx * 4;
+                        let b0 = ta.buffer.get(off).unwrap_or(0);
+                        let b1 = ta.buffer.get(off + 1).unwrap_or(0);
+                        let b2 = ta.buffer.get(off + 2).unwrap_or(0);
+                        let b3 = ta.buffer.get(off + 3).unwrap_or(0);
+                        let old = i32::from_le_bytes([b0, b1, b2, b3]);
+                        if old == expected {
+                            let bytes = replacement.to_le_bytes();
+                            for (k, &b) in bytes.iter().enumerate() {
+                                ta.buffer.set(off + k, b);
+                            }
+                        }
+                        return Ok(JsValue::from_int32(old));
+                    }
+                    crate::object::TypedArrayKind::Uint8 => {
+                        let res = doms_parallel::Atomics::compare_exchange(&ta.buffer, idx, expected as u8, replacement as u8)
+                            .map_err(|e| VmError::RuntimeError(e.to_string()))?;
+                        let old = match res {
+                            Ok(v) => v,
+                            Err(v) => v,
+                        };
+                        return Ok(JsValue::from_int32(old as i32));
+                    }
+                }
+            }
+        }
+        Err(VmError::TypeError("Atomics.compareExchange requires a TypedArray".into()))
+    });
+
+    let atomics_lockfree = vm.alloc_native_function("isLockFree", 1, |_vm, _this, args| {
+        let size = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
+        Ok(JsValue::from_boolean(size == 1 || size == 2 || size == 4))
+    });
+
+    vm.set_property(atomics_obj, "load", atomics_load);
+    vm.set_property(atomics_obj, "store", atomics_store);
+    vm.set_property(atomics_obj, "add", atomics_add);
+    vm.set_property(atomics_obj, "sub", atomics_sub);
+    vm.set_property(atomics_obj, "and", atomics_and);
+    vm.set_property(atomics_obj, "or", atomics_or);
+    vm.set_property(atomics_obj, "xor", atomics_xor);
+    vm.set_property(atomics_obj, "compareExchange", atomics_cmpxchg);
+    vm.set_property(atomics_obj, "isLockFree", atomics_lockfree);
+    vm.globals.insert("Atomics".to_string(), atomics_obj);
+
+    let worker_ctor = vm.alloc_native_function("Worker", 1, |vm, _this, args| {
+        let script = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let channel = doms_parallel::MessageChannel::new();
+        let child_port = channel.port2;
+
+        std::thread::spawn(move || {
+            let mut worker_vm = Vm::new();
+            let parent_port = Arc::new(std::sync::Mutex::new(child_port));
+            let post_msg = worker_vm.alloc_closure_native_function("postMessage", 1, Arc::new({
+                let p = Arc::clone(&parent_port);
+                move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                    let msg = args.first().copied().unwrap_or_default();
+                    let json = vm.to_json_string(msg);
+                    let guard = p.lock().unwrap();
+                    guard.post_message(json.into_bytes()).map_err(|e| VmError::RuntimeError(e.to_string()))?;
+                    Ok(JsValue::undefined())
+                }
+            }));
+            worker_vm.globals.insert("postMessage".to_string(), post_msg);
+
+            let code = if std::path::Path::new(&script).exists() {
+                std::fs::read_to_string(&script).unwrap_or(script)
+            } else {
+                script
+            };
+
+            if let Ok(prog) = doms_parser::parse(&code) {
+                if let Ok(chunk) = doms_compiler::compile(&prog) {
+                    let _ = worker_vm.run(&chunk);
+                }
+            }
+        });
+
+        let port_arc = Arc::new(std::sync::Mutex::new(channel.port1));
+        Ok(vm.alloc_worker(port_arc))
+    });
+
+    vm.globals.insert("Worker".to_string(), worker_ctor);
 }

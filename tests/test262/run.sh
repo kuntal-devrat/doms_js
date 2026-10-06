@@ -69,6 +69,24 @@ run_test "object-keys" "let o = { a: 1, b: 2 }; Object.keys(o).length;"
 run_test "try-catch" "let res = 0; try { throw 42; } catch (e) { res = e; } res;"
 run_test "ternary-operator" "let x = 10 > 5 ? 100 : 200; x;"
 
+echo "Running Phase 2 language & concurrency conformance checks..."
+run_test "promise-constructor-resolve" "let p = new Promise(function(resolve, reject) { resolve(42); }); await p;"
+run_test "promise-static-resolve" "await Promise.resolve(100);"
+run_test "promise-then" "await Promise.resolve(55).then(function(v) { return v + 10; });"
+run_test "promise-catch" "await Promise.reject(404).catch(function(e) { return 200; });"
+run_test "promise-finally" "await Promise.resolve(7).finally(function() { return 0; });"
+run_test "promise-all" "let res = await Promise.all([Promise.resolve(10), Promise.resolve(20)]); res[0] + res[1];"
+run_test "promise-race" "let res = await Promise.race([Promise.resolve(99), Promise.resolve(100)]); res;"
+run_test "async-await-call" "async function add(a, b) { return a + b; } await add(20, 22);"
+run_test "generator-yield-next" "function* gen() { yield 10; yield 20; return 30; } let it = gen(); let r1 = it.next(); let r2 = it.next(); let r3 = it.next(); r1.value + r2.value + r3.value;"
+run_test "generator-iterator-protocol" "function* g() { yield 1; } let it = g(); let r1 = it.next(); let r2 = it.next(); r1.done === false && r2.done === true;"
+run_test "shared-array-buffer" "let sab = new SharedArrayBuffer(16); sab.byteLength;"
+run_test "typed-array-int32" "let sab = new SharedArrayBuffer(16); let ta = new Int32Array(sab); ta[0] = 42; ta[0];"
+run_test "atomics-store-load" "let sab = new SharedArrayBuffer(16); let ta = new Int32Array(sab); Atomics.store(ta, 0, 77); Atomics.load(ta, 0);"
+run_test "atomics-add-sub" "let sab = new SharedArrayBuffer(16); let ta = new Int32Array(sab); Atomics.store(ta, 0, 10); Atomics.add(ta, 0, 5); Atomics.sub(ta, 0, 2); Atomics.load(ta, 0);"
+run_test "atomics-is-lock-free" "Atomics.isLockFree(4);"
+run_test "worker-parallel-actor" "let w = new Worker('postMessage(42);'); w.receiveMessage();"
+
 PERCENT=0
 if [ "${TOTAL}" -gt 0 ]; then
     PERCENT=$((PASSED * 100 / TOTAL))

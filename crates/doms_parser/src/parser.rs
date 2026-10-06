@@ -76,7 +76,26 @@ impl<'a> Parser<'a> {
             TokenKind::Let => self.parse_var_decl(VarKind::Let),
             TokenKind::Const => self.parse_var_decl(VarKind::Const),
             TokenKind::Var => self.parse_var_decl(VarKind::Var),
-            TokenKind::Function => self.parse_function_decl(),
+            TokenKind::Async => {
+                self.advance()?;
+                if self.check(&TokenKind::Function) {
+                    self.parse_async_function_decl()
+                } else {
+                    let expr = self.parse_expression(0)?;
+                    self.match_token(&TokenKind::Semicolon)?;
+                    Ok(Statement::Expression(expr))
+                }
+            }
+            TokenKind::Function => {
+                self.advance()?; // function
+                if self.match_token(&TokenKind::Star)? {
+                    self.parse_generator_decl()
+                } else {
+                    self.parse_function_decl_body()
+                }
+            }
+            TokenKind::Import => self.parse_import_statement(),
+            TokenKind::Export => self.parse_export_statement(),
             TokenKind::If => self.parse_if_statement(),
             TokenKind::While => self.parse_while_statement(),
             TokenKind::For => self.parse_for_statement(),
@@ -126,8 +145,9 @@ impl<'a> Parser<'a> {
         Ok(Statement::VarDecl { kind, name, init })
     }
 
-    fn parse_function_decl(&mut self) -> Result<Statement, ParseError> {
-        self.advance()?; // function
+    fn parse_function_signature_and_body(
+        &mut self,
+    ) -> Result<(String, Vec<String>, Vec<Statement>), ParseError> {
         let name_tok = self.advance()?;
         let name = match name_tok.kind {
             TokenKind::Ident(id) => id,
@@ -163,7 +183,98 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokenKind::RBrace)?;
 
+        Ok((name, params, body))
+    }
+
+    fn parse_function_decl_body(&mut self) -> Result<Statement, ParseError> {
+        let (name, params, body) = self.parse_function_signature_and_body()?;
         Ok(Statement::FunctionDecl { name, params, body })
+    }
+
+    fn parse_async_function_decl(&mut self) -> Result<Statement, ParseError> {
+        self.expect(TokenKind::Function)?;
+        let (name, params, body) = self.parse_function_signature_and_body()?;
+        Ok(Statement::AsyncFunctionDecl { name, params, body })
+    }
+
+    fn parse_generator_decl(&mut self) -> Result<Statement, ParseError> {
+        let (name, params, body) = self.parse_function_signature_and_body()?;
+        Ok(Statement::GeneratorDecl { name, params, body })
+    }
+
+    fn parse_import_statement(&mut self) -> Result<Statement, ParseError> {
+        self.advance()?; // import
+        let mut specifiers = Vec::new();
+        let mut is_default = false;
+        let mut is_all = false;
+
+        if let TokenKind::Ident(default_name) = &self.current.kind {
+            let name = default_name.clone();
+            self.advance()?;
+            specifiers.push((name, None));
+            is_default = true;
+            if self.match_token(&TokenKind::Comma)? {
+                // optional comma after default
+            }
+        }
+
+        if self.match_token(&TokenKind::Star)? {
+            self.expect(TokenKind::As)?;
+            let ns_tok = self.advance()?;
+            if let TokenKind::Ident(ns) = ns_tok.kind {
+                specifiers.push(("*".to_string(), Some(ns)));
+                is_all = true;
+            }
+        } else if self.match_token(&TokenKind::LBrace)? {
+            while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
+                let name_tok = self.advance()?;
+                let name = match name_tok.kind {
+                    TokenKind::Ident(id) => id,
+                    other => return Err(ParseError::UnexpectedToken(other, name_tok.line, name_tok.col)),
+                };
+                let alias = if self.match_token(&TokenKind::As)? {
+                    let alias_tok = self.advance()?;
+                    match alias_tok.kind {
+                        TokenKind::Ident(id) => Some(id),
+                        other => return Err(ParseError::UnexpectedToken(other, alias_tok.line, alias_tok.col)),
+                    }
+                } else {
+                    None
+                };
+                specifiers.push((name, alias));
+                if !self.match_token(&TokenKind::Comma)? {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RBrace)?;
+        }
+
+        self.expect(TokenKind::From)?;
+        let src_tok = self.advance()?;
+        let source = match src_tok.kind {
+            TokenKind::StringLit(s) => s,
+            other => return Err(ParseError::UnexpectedToken(other, src_tok.line, src_tok.col)),
+        };
+        self.match_token(&TokenKind::Semicolon)?;
+        Ok(Statement::Import { specifiers, source, is_default, is_all })
+    }
+
+    fn parse_export_statement(&mut self) -> Result<Statement, ParseError> {
+        self.advance()?; // export
+        if self.match_token(&TokenKind::Default)? {
+            let expr = self.parse_expression(0)?;
+            self.match_token(&TokenKind::Semicolon)?;
+            Ok(Statement::Export {
+                decl: Some(Box::new(Statement::Expression(expr))),
+                is_default: true,
+            })
+        } else {
+            let stmt = self.parse_statement()?;
+            Ok(Statement::Export {
+                decl: Some(Box::new(stmt)),
+                is_default: false,
+            })
+        }
     }
 
     fn parse_if_statement(&mut self) -> Result<Statement, ParseError> {
@@ -301,11 +412,11 @@ impl<'a> Parser<'a> {
             if self.check(&TokenKind::Dot) {
                 self.advance()?;
                 let prop_tok = self.advance()?;
-                let prop = match prop_tok.kind {
-                    TokenKind::Ident(id) => id,
-                    other => {
+                let prop = match prop_tok.kind.as_prop_name() {
+                    Some(id) => id,
+                    None => {
                         return Err(ParseError::UnexpectedToken(
-                            other,
+                            prop_tok.kind,
                             prop_tok.line,
                             prop_tok.col,
                         ));
@@ -436,6 +547,53 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RParen)?;
                 Ok(expr)
             }
+            TokenKind::New => {
+                let mut callee = self.parse_prefix()?;
+                while self.check(&TokenKind::Dot) {
+                    self.advance()?;
+                    let prop_tok = self.advance()?;
+                    let prop = match prop_tok.kind.as_prop_name() {
+                        Some(id) => id,
+                        None => return Err(ParseError::UnexpectedToken(prop_tok.kind, prop_tok.line, prop_tok.col)),
+                    };
+                    callee = Expression::Member { object: Box::new(callee), property: prop };
+                }
+                let mut args = Vec::new();
+                if self.match_token(&TokenKind::LParen)? {
+                    if !self.check(&TokenKind::RParen) {
+                        loop {
+                            args.push(self.parse_expression(0)?);
+                            if !self.match_token(&TokenKind::Comma)? {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(TokenKind::RParen)?;
+                }
+                Ok(Expression::New { callee: Box::new(callee), args })
+            }
+            TokenKind::Await => {
+                let expr = self.parse_expression(20)?;
+                Ok(Expression::Await(Box::new(expr)))
+            }
+            TokenKind::Yield => {
+                if self.check(&TokenKind::Semicolon)
+                    || self.check(&TokenKind::RParen)
+                    || self.check(&TokenKind::RBrace)
+                    || self.check(&TokenKind::Eof)
+                {
+                    Ok(Expression::Yield(None))
+                } else {
+                    let expr = self.parse_expression(0)?;
+                    Ok(Expression::Yield(Some(Box::new(expr))))
+                }
+            }
+            TokenKind::Import => {
+                self.expect(TokenKind::LParen)?;
+                let spec = self.parse_expression(0)?;
+                self.expect(TokenKind::RParen)?;
+                Ok(Expression::DynamicImport(Box::new(spec)))
+            }
             other => Err(ParseError::UnexpectedToken(other, tok.line, tok.col)),
         }
     }
@@ -445,9 +603,11 @@ impl<'a> Parser<'a> {
         while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
             let key_tok = self.advance()?;
             let key = match key_tok.kind {
-                TokenKind::Ident(id) => id,
                 TokenKind::StringLit(s) => s,
-                other => return Err(ParseError::UnexpectedToken(other, key_tok.line, key_tok.col)),
+                other => match other.as_prop_name() {
+                    Some(id) => id,
+                    None => return Err(ParseError::UnexpectedToken(other, key_tok.line, key_tok.col)),
+                },
             };
             self.expect(TokenKind::Colon)?;
             let val = self.parse_expression(0)?;
@@ -549,5 +709,13 @@ mod tests {
         let mut parser = Parser::new("for (let i = 0; i < 10; i = i + 1) { let res = i > 5 ? 1 : 0; }").unwrap();
         let prog = parser.parse_program().unwrap();
         assert_eq!(prog.body.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_async_and_modules() {
+        let code = "async function fetchData() { let res = await p; return res; } import { a, b as c } from 'module'; export default 42; new Promise(fn);";
+        let mut parser = Parser::new(code).unwrap();
+        let prog = parser.parse_program().unwrap();
+        assert_eq!(prog.body.len(), 4);
     }
 }

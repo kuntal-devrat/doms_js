@@ -2,12 +2,15 @@
 
 use crate::builtins::register_builtins;
 use crate::inline_cache::InlineCacheSlot;
-use crate::object::{JsFunction, JsObject, NativeFn, NativeFunction, ObjectKind};
+use crate::object::{
+    JsFunction, JsGenerator, JsObject, JsTypedArray, NativeFn, NativeFunction, ObjectKind,
+    PromiseState, TypedArrayKind,
+};
 use crate::shape::ShapeRegistry;
 use crate::value::JsValue;
 use doms_compiler::bytecode::{BytecodeChunk, Constant, OpCode};
 use doms_gc::heap::Heap;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
@@ -33,6 +36,7 @@ pub struct CallFrame {
     pub ip: usize,
     pub base_sp: usize,
     pub this_val: JsValue,
+    pub gen_ptr: Option<*mut JsObject>,
 }
 
 /// Compatibility enum for earlier Phase 0 API callers.
@@ -72,6 +76,9 @@ pub struct Vm {
     pub inline_caches: Vec<InlineCacheSlot>,
     pub objects: Vec<*mut JsObject>,
     pub catch_stack: Vec<usize>,
+    pub microtasks: VecDeque<(JsValue, Vec<JsValue>)>,
+    pub modules: HashMap<String, JsValue>,
+    pub current_exports: HashMap<String, JsValue>,
 }
 
 impl Vm {
@@ -85,6 +92,9 @@ impl Vm {
             inline_caches: Vec::new(),
             objects: Vec::with_capacity(128),
             catch_stack: Vec::new(),
+            microtasks: VecDeque::new(),
+            modules: HashMap::new(),
+            current_exports: HashMap::new(),
         };
         register_builtins(&mut vm);
         vm
@@ -148,6 +158,86 @@ impl Vm {
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
 
+    pub fn alloc_promise(&mut self, state: PromiseState, result: JsValue) -> JsValue {
+        let obj = Box::new(JsObject::new_promise(ShapeRegistry::ROOT_SHAPE_ID, None, state, result));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_generator(&mut self, generator: JsGenerator) -> JsValue {
+        let obj = Box::new(JsObject::new_generator(ShapeRegistry::ROOT_SHAPE_ID, None, generator));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_shared_array_buffer(&mut self, sab: Arc<doms_parallel::SharedArrayBuffer>) -> JsValue {
+        let obj = Box::new(JsObject::new_shared_array_buffer(ShapeRegistry::ROOT_SHAPE_ID, None, sab));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_typed_array(&mut self, typed_array: JsTypedArray) -> JsValue {
+        let obj = Box::new(JsObject::new_typed_array(ShapeRegistry::ROOT_SHAPE_ID, None, typed_array));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_worker(&mut self, port: Arc<std::sync::Mutex<doms_parallel::MessagePort>>) -> JsValue {
+        let obj = Box::new(JsObject::new_worker(ShapeRegistry::ROOT_SHAPE_ID, None, port));
+        let ptr = Box::into_raw(obj);
+        self.objects.push(ptr);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn enqueue_microtask(&mut self, callee: JsValue, args: Vec<JsValue>) {
+        self.microtasks.push_back((callee, args));
+    }
+
+    pub fn drain_microtasks(&mut self) -> Result<(), VmError> {
+        while let Some((callee, args)) = self.microtasks.pop_front() {
+            let _ = self.call(callee, JsValue::undefined(), &args);
+        }
+        Ok(())
+    }
+
+    pub fn resolve_promise(&mut self, promise_val: JsValue, resolution: JsValue) {
+        if let Some(ptr) = promise_val.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::Promise(ref mut p) = obj.kind {
+                if p.state == PromiseState::Pending {
+                    p.state = PromiseState::Fulfilled;
+                    p.result = resolution;
+                    let reactions = std::mem::take(&mut p.fulfill_reactions);
+                    p.reject_reactions.clear();
+                    for cb in reactions {
+                        self.enqueue_microtask(cb, vec![resolution]);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn reject_promise(&mut self, promise_val: JsValue, reason: JsValue) {
+        if let Some(ptr) = promise_val.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::Promise(ref mut p) = obj.kind {
+                if p.state == PromiseState::Pending {
+                    p.state = PromiseState::Rejected;
+                    p.result = reason;
+                    let reactions = std::mem::take(&mut p.reject_reactions);
+                    p.fulfill_reactions.clear();
+                    for cb in reactions {
+                        self.enqueue_microtask(cb, vec![reason]);
+                    }
+                }
+            }
+        }
+    }
+
     // ── Property Access Helpers ──
 
     pub fn set_property(&mut self, target: JsValue, key: &str, value: JsValue) {
@@ -184,6 +274,57 @@ impl Vm {
                 }
                 if let Some(method) = self.get_string_method(key) {
                     return method;
+                }
+            }
+
+            // Special properties on Promise
+            if let ObjectKind::Promise(_) = &obj.kind {
+                match key {
+                    "then" => return self.get_promise_then(target).unwrap_or_default(),
+                    "catch" => return self.get_promise_catch(target).unwrap_or_default(),
+                    "finally" => return self.get_promise_finally(target).unwrap_or_default(),
+                    _ => {}
+                }
+            }
+
+            // Special properties on Generator
+            if let ObjectKind::Generator(_) = &obj.kind {
+                if key == "next" {
+                    return self.get_generator_next(target).unwrap_or_default();
+                }
+            }
+
+            // Special properties on SharedArrayBuffer
+            if let ObjectKind::SharedArrayBuffer(sab) = &obj.kind {
+                if key == "byteLength" {
+                    return JsValue::from_int32(sab.byte_length() as i32);
+                }
+            }
+
+            // Special properties on TypedArray
+            if let ObjectKind::TypedArray(ta) = &obj.kind {
+                match key {
+                    "length" => return JsValue::from_int32(ta.length as i32),
+                    "byteLength" => {
+                        let bytes = match ta.kind {
+                            TypedArrayKind::Int32 => ta.length * 4,
+                            TypedArrayKind::Uint8 => ta.length,
+                        };
+                        return JsValue::from_int32(bytes as i32);
+                    }
+                    "buffer" => return self.alloc_shared_array_buffer(Arc::clone(&ta.buffer)),
+                    _ => {}
+                }
+            }
+
+            // Special properties on Worker
+            if let ObjectKind::Worker(port) = &obj.kind {
+                let port_clone = Arc::clone(port);
+                match key {
+                    "postMessage" => return self.get_worker_post_message(port_clone).unwrap_or_default(),
+                    "receiveMessage" => return self.get_worker_receive_message(port_clone).unwrap_or_default(),
+                    "terminate" => return self.alloc_native_function("terminate", 0, |_vm, _this, _args| Ok(JsValue::undefined())),
+                    _ => {}
                 }
             }
 
@@ -277,8 +418,8 @@ impl Vm {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Array(elements) = &obj.kind {
                         let len = elements.len() as i32;
-                        let start = args.first().and_then(|v| v.as_int32()).unwrap_or(0);
-                        let end = args.get(1).and_then(|v| v.as_int32()).unwrap_or(len);
+                        let start = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
+                        let end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len);
                         let s = start.clamp(0, len) as usize;
                         let e = end.clamp(0, len) as usize;
                         let sliced = if s <= e { elements[s..e].to_vec() } else { Vec::new() };
@@ -344,7 +485,7 @@ impl Vm {
                 Ok(vm.alloc_string(s))
             })),
             "charAt" => Some(self.alloc_native_function("charAt", 1, |vm, this, args| {
-                let idx = args.first().and_then(|v| v.as_int32()).unwrap_or(0) as usize;
+                let idx = args.first().and_then(|v| v.to_int32()).unwrap_or(0) as usize;
                 let s = vm.to_string_value(this);
                 if let Some(ch) = s.chars().nth(idx) {
                     Ok(vm.alloc_string(ch.to_string()))
@@ -355,13 +496,238 @@ impl Vm {
             "slice" => Some(self.alloc_native_function("slice", 2, |vm, this, args| {
                 let s = vm.to_string_value(this);
                 let len = s.len() as i32;
-                let start = args.first().and_then(|v| v.as_int32()).unwrap_or(0).clamp(0, len) as usize;
-                let end = args.get(1).and_then(|v| v.as_int32()).unwrap_or(len).clamp(0, len) as usize;
+                let start = args.first().and_then(|v| v.to_int32()).unwrap_or(0).clamp(0, len) as usize;
+                let end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len).clamp(0, len) as usize;
                 let sub = if start <= end { &s[start..end] } else { "" };
                 Ok(vm.alloc_string(sub.to_string()))
             })),
             _ => None,
         }
+    }
+
+    fn get_promise_then(&mut self, promise_val: JsValue) -> Option<JsValue> {
+        Some(self.alloc_closure_native_function("then", 2, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+            let on_fulfilled = args.first().copied().unwrap_or_default();
+            let on_rejected = args.get(1).copied().unwrap_or_default();
+            let next_promise = vm.alloc_promise(PromiseState::Pending, JsValue::undefined());
+
+            if let Some(ptr) = promise_val.as_object_ptr() {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let ObjectKind::Promise(ref mut p) = obj.kind {
+                    match p.state {
+                        PromiseState::Fulfilled => {
+                            let val = p.result;
+                            if on_fulfilled.is_object() {
+                                let next_p = next_promise;
+                                let cb_task = vm.alloc_closure_native_function("then_cb", 0, Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
+                                    match vm.call(on_fulfilled, JsValue::undefined(), &[val]) {
+                                        Ok(res) => vm.resolve_promise(next_p, res),
+                                        Err(e) => {
+                                            let err_val = vm.alloc_string(e.to_string());
+                                            vm.reject_promise(next_p, err_val);
+                                        }
+                                    }
+                                    Ok(JsValue::undefined())
+                                }));
+                                vm.enqueue_microtask(cb_task, Vec::new());
+                            } else {
+                                vm.resolve_promise(next_promise, val);
+                            }
+                        }
+                        PromiseState::Rejected => {
+                            let err = p.result;
+                            if on_rejected.is_object() {
+                                let next_p = next_promise;
+                                let cb_task = vm.alloc_closure_native_function("catch_cb", 0, Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
+                                    match vm.call(on_rejected, JsValue::undefined(), &[err]) {
+                                        Ok(res) => vm.resolve_promise(next_p, res),
+                                        Err(e) => {
+                                            let err_val = vm.alloc_string(e.to_string());
+                                            vm.reject_promise(next_p, err_val);
+                                        }
+                                    }
+                                    Ok(JsValue::undefined())
+                                }));
+                                vm.enqueue_microtask(cb_task, Vec::new());
+                            } else {
+                                vm.reject_promise(next_promise, err);
+                            }
+                        }
+                        PromiseState::Pending => {
+                            let next_p = next_promise;
+                            if on_fulfilled.is_object() {
+                                let cb_task = vm.alloc_closure_native_function("pending_then", 1, Arc::new(move |vm: &mut Vm, _, args: &[JsValue]| -> Result<JsValue, VmError> {
+                                    let val = args.first().copied().unwrap_or_default();
+                                    match vm.call(on_fulfilled, JsValue::undefined(), &[val]) {
+                                        Ok(res) => vm.resolve_promise(next_p, res),
+                                        Err(e) => {
+                                            let err_val = vm.alloc_string(e.to_string());
+                                            vm.reject_promise(next_p, err_val);
+                                        }
+                                    }
+                                    Ok(JsValue::undefined())
+                                }));
+                                p.fulfill_reactions.push(cb_task);
+                            } else {
+                                let cb_task = vm.alloc_closure_native_function("pending_fwd", 1, Arc::new(move |vm: &mut Vm, _, args: &[JsValue]| -> Result<JsValue, VmError> {
+                                    let val = args.first().copied().unwrap_or_default();
+                                    vm.resolve_promise(next_p, val);
+                                    Ok(JsValue::undefined())
+                                }));
+                                p.fulfill_reactions.push(cb_task);
+                            }
+
+                            if on_rejected.is_object() {
+                                let cb_task = vm.alloc_closure_native_function("pending_catch", 1, Arc::new(move |vm: &mut Vm, _, args: &[JsValue]| -> Result<JsValue, VmError> {
+                                    let err = args.first().copied().unwrap_or_default();
+                                    match vm.call(on_rejected, JsValue::undefined(), &[err]) {
+                                        Ok(res) => vm.resolve_promise(next_p, res),
+                                        Err(e) => {
+                                            let err_val = vm.alloc_string(e.to_string());
+                                            vm.reject_promise(next_p, err_val);
+                                        }
+                                    }
+                                    Ok(JsValue::undefined())
+                                }));
+                                p.reject_reactions.push(cb_task);
+                            } else {
+                                let cb_task = vm.alloc_closure_native_function("pending_rfwd", 1, Arc::new(move |vm: &mut Vm, _, args: &[JsValue]| -> Result<JsValue, VmError> {
+                                    let err = args.first().copied().unwrap_or_default();
+                                    vm.reject_promise(next_p, err);
+                                    Ok(JsValue::undefined())
+                                }));
+                                p.reject_reactions.push(cb_task);
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(next_promise)
+        })))
+    }
+
+    fn get_promise_catch(&mut self, promise_val: JsValue) -> Option<JsValue> {
+        Some(self.alloc_closure_native_function("catch", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+            let on_rejected = args.first().copied().unwrap_or_default();
+            let then_fn = vm.get_property(promise_val, "then");
+            vm.call(then_fn, promise_val, &[JsValue::undefined(), on_rejected])
+        })))
+    }
+
+    fn get_promise_finally(&mut self, promise_val: JsValue) -> Option<JsValue> {
+        Some(self.alloc_closure_native_function("finally", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+            let on_finally = args.first().copied().unwrap_or_default();
+            let then_fn = vm.get_property(promise_val, "then");
+            vm.call(then_fn, promise_val, &[on_finally, on_finally])
+        })))
+    }
+
+    fn get_generator_next(&mut self, gen_val: JsValue) -> Option<JsValue> {
+        Some(self.alloc_closure_native_function("next", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+            let send_val = args.first().copied().unwrap_or_default();
+            vm.generator_next(gen_val, send_val)
+        })))
+    }
+
+    pub fn make_iter_result(&mut self, value: JsValue, done: bool) -> JsValue {
+        let obj = self.alloc_object();
+        self.set_property(obj, "value", value);
+        self.set_property(obj, "done", JsValue::from_boolean(done));
+        obj
+    }
+
+    pub fn generator_next(&mut self, gen_val: JsValue, send_val: JsValue) -> Result<JsValue, VmError> {
+        let ptr = gen_val.as_object_ptr().ok_or(VmError::TypeError("Not a generator".into()))?;
+        let (gen_fn, ip, stack, state) = {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            match &obj.kind {
+                ObjectKind::Generator(g) => (g.function.clone(), g.ip, g.stack.clone(), g.state),
+                _ => return Err(VmError::TypeError("Not a generator".into())),
+            }
+        };
+
+        if state == crate::object::GeneratorState::Completed {
+            return Ok(self.make_iter_result(JsValue::undefined(), true));
+        }
+
+        let mut current_stack = stack;
+        if state == crate::object::GeneratorState::SuspendedYield {
+            current_stack.push(send_val);
+        }
+
+        {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::Generator(ref mut g) = obj.kind {
+                g.state = crate::object::GeneratorState::Executing;
+            }
+        }
+
+        let chunk = Arc::clone(&gen_fn.chunk);
+        let target_depth = self.frames.len();
+        let base_sp = self.stack.len();
+        for val in &current_stack {
+            self.push(*val);
+        }
+        self.frames.push(CallFrame {
+            chunk,
+            ip,
+            base_sp,
+            this_val: JsValue::undefined(),
+            gen_ptr: Some(ptr as *mut JsObject),
+        });
+
+        self.run_until_depth(target_depth)
+    }
+
+    fn get_worker_post_message(&mut self, port: Arc<std::sync::Mutex<doms_parallel::MessagePort>>) -> Option<JsValue> {
+        Some(self.alloc_closure_native_function("postMessage", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+            let msg = args.first().copied().unwrap_or_default();
+            let json = vm.to_json_string(msg);
+            let guard = port.lock().unwrap();
+            guard.post_message(json.into_bytes()).map_err(|e| VmError::RuntimeError(e.to_string()))?;
+            Ok(JsValue::undefined())
+        })))
+    }
+
+    fn get_worker_receive_message(&mut self, port: Arc<std::sync::Mutex<doms_parallel::MessagePort>>) -> Option<JsValue> {
+        Some(self.alloc_closure_native_function("receiveMessage", 0, Arc::new(move |vm: &mut Vm, _this: JsValue, _args: &[JsValue]| -> Result<JsValue, VmError> {
+            let mut data_opt = {
+                let guard = port.lock().unwrap();
+                guard.try_recv().ok()
+            };
+
+            if data_opt.is_none() {
+                for _ in 0..50 {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                    let guard = port.lock().unwrap();
+                    if let Ok(data) = guard.try_recv() {
+                        data_opt = Some(data);
+                        break;
+                    }
+                }
+            }
+
+            match data_opt {
+                Some(data) => {
+                    let s = String::from_utf8_lossy(&data.payload).to_string();
+                    if let Ok(n) = s.parse::<f64>() {
+                        Ok(JsValue::from_double(n))
+                    } else if s == "true" {
+                        Ok(JsValue::from_boolean(true))
+                    } else if s == "false" {
+                        Ok(JsValue::from_boolean(false))
+                    } else {
+                        let mut clean = s;
+                        if clean.starts_with('"') && clean.ends_with('"') && clean.len() >= 2 {
+                            clean = clean[1..clean.len()-1].to_string();
+                        }
+                        Ok(vm.alloc_string(clean))
+                    }
+                }
+                None => Ok(JsValue::null()),
+            }
+        })))
     }
 
     // ── String Coercion and JSON ──
@@ -404,6 +770,14 @@ impl Vm {
                     format!("{}: {}", name, message)
                 }
                 ObjectKind::Ordinary => "[object Object]".to_string(),
+                ObjectKind::Promise(_) => "[object Promise]".to_string(),
+                ObjectKind::Generator(_) => "[object Generator]".to_string(),
+                ObjectKind::SharedArrayBuffer(_) => "[object SharedArrayBuffer]".to_string(),
+                ObjectKind::TypedArray(ta) => match ta.kind {
+                    TypedArrayKind::Int32 => "[object Int32Array]".to_string(),
+                    TypedArrayKind::Uint8 => "[object Uint8Array]".to_string(),
+                },
+                ObjectKind::Worker(_) => "[object Worker]".to_string(),
             }
         } else {
             "undefined".to_string()
@@ -453,8 +827,11 @@ impl Vm {
             ip: 0,
             base_sp: self.stack.len(),
             this_val: JsValue::undefined(),
+            gen_ptr: None,
         });
-        self.run_until_depth(target_depth)
+        let result = self.run_until_depth(target_depth)?;
+        self.drain_microtasks()?;
+        Ok(result)
     }
 
     pub fn call(&mut self, callee: JsValue, this_val: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
@@ -465,6 +842,40 @@ impl Vm {
                     return native.call(self, this_val, args);
                 }
                 ObjectKind::Function(f) => {
+                    if f.is_generator {
+                        let generator_instance = JsGenerator {
+                            function: f.clone(),
+                            ip: 0,
+                            stack: args.to_vec(),
+                            state: crate::object::GeneratorState::SuspendedStart,
+                        };
+                        return Ok(self.alloc_generator(generator_instance));
+                    }
+                    if f.is_async {
+                        let promise_val = self.alloc_promise(PromiseState::Pending, JsValue::undefined());
+                        let chunk = Arc::clone(&f.chunk);
+                        let target_depth = self.frames.len();
+                        let base_sp = self.stack.len();
+                        for arg in args {
+                            self.push(*arg);
+                        }
+                        self.frames.push(CallFrame {
+                            chunk,
+                            ip: 0,
+                            base_sp,
+                            this_val,
+                            gen_ptr: None,
+                        });
+                        match self.run_until_depth(target_depth) {
+                            Ok(res) => self.resolve_promise(promise_val, res),
+                            Err(e) => {
+                                let err_val = self.alloc_string(e.to_string());
+                                self.reject_promise(promise_val, err_val);
+                            }
+                        }
+                        let _ = self.drain_microtasks();
+                        return Ok(promise_val);
+                    }
                     let chunk = Arc::clone(&f.chunk);
                     let target_depth = self.frames.len();
                     let base_sp = self.stack.len();
@@ -476,6 +887,7 @@ impl Vm {
                         ip: 0,
                         base_sp,
                         this_val,
+                        gen_ptr: None,
                     });
                     return self.run_until_depth(target_depth);
                 }
@@ -492,6 +904,19 @@ impl Vm {
                 if frame.ip >= frame.chunk.instructions.len() {
                     let finished = self.frames.pop().unwrap();
                     let ret_val = self.stack.pop().unwrap_or_default();
+                    if let Some(g_ptr) = finished.gen_ptr {
+                        let g_obj = unsafe { &mut *(g_ptr) };
+                        if let ObjectKind::Generator(ref mut g) = g_obj.kind {
+                            g.state = crate::object::GeneratorState::Completed;
+                        }
+                        let iter_res = self.make_iter_result(ret_val, true);
+                        self.stack.truncate(finished.base_sp);
+                        if self.frames.len() == target_depth {
+                            return Ok(iter_res);
+                        }
+                        self.push(iter_res);
+                        continue;
+                    }
                     self.stack.truncate(finished.base_sp);
                     if self.frames.len() == target_depth {
                         return Ok(ret_val);
@@ -517,6 +942,8 @@ impl Vm {
                                 params: f.params.clone(),
                                 chunk: Arc::new(f.chunk.clone()),
                                 upvalues: Vec::new(),
+                                is_async: false,
+                                is_generator: false,
                             };
                             self.alloc_function(js_fn)
                         }
@@ -551,7 +978,34 @@ impl Vm {
                         _ => return Err(VmError::TypeError("Property name must be string".into())),
                     };
                     let obj = self.pop()?;
+
+                    let ic_idx = name_idx as usize;
+                    if ic_idx >= self.inline_caches.len() {
+                        self.inline_caches.resize(ic_idx + 1, InlineCacheSlot::new());
+                    }
+
+                    if let Some(ptr) = obj.as_object_ptr() {
+                        let jsobj = unsafe { &*(ptr as *mut JsObject) };
+                        let ic = &self.inline_caches[ic_idx];
+                        if ic.state == crate::inline_cache::IcState::Monomorphic && ic.cached_shape_id == Some(jsobj.shape_id) {
+                            if let Some(offset) = ic.cached_offset {
+                                if let Some(val) = jsobj.get_slot(offset) {
+                                    self.push(val);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
                     let val = self.get_property(obj, &name);
+
+                    if let Some(ptr) = obj.as_object_ptr() {
+                        let jsobj = unsafe { &*(ptr as *mut JsObject) };
+                        if let Some(offset) = self.shapes.lookup_offset(jsobj.shape_id, &name) {
+                            self.inline_caches[ic_idx].record_hit(jsobj.shape_id, offset);
+                        }
+                    }
+
                     self.push(val);
                 }
                 OpCode::SetProp(name_idx) => {
@@ -561,7 +1015,33 @@ impl Vm {
                     };
                     let val = self.pop()?;
                     let obj = self.pop()?;
+
+                    let ic_idx = name_idx as usize;
+                    if ic_idx >= self.inline_caches.len() {
+                        self.inline_caches.resize(ic_idx + 1, InlineCacheSlot::new());
+                    }
+
+                    if let Some(ptr) = obj.as_object_ptr() {
+                        let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                        let ic = &self.inline_caches[ic_idx];
+                        if ic.state == crate::inline_cache::IcState::Monomorphic && ic.cached_shape_id == Some(jsobj.shape_id) {
+                            if let Some(offset) = ic.cached_offset {
+                                jsobj.set_slot(offset, val);
+                                self.push(val);
+                                continue;
+                            }
+                        }
+                    }
+
                     self.set_property(obj, &name, val);
+
+                    if let Some(ptr) = obj.as_object_ptr() {
+                        let jsobj = unsafe { &*(ptr as *mut JsObject) };
+                        if let Some(offset) = self.shapes.lookup_offset(jsobj.shape_id, &name) {
+                            self.inline_caches[ic_idx].record_hit(jsobj.shape_id, offset);
+                        }
+                    }
+
                     self.push(val);
                 }
                 OpCode::GetElem => {
@@ -570,10 +1050,34 @@ impl Vm {
                     if let Some(ptr) = obj.as_object_ptr() {
                         let jsobj = unsafe { &*(ptr as *mut JsObject) };
                         if let ObjectKind::Array(elements) = &jsobj.kind {
-                            if let Some(i) = key.as_int32() {
+                            if let Some(i) = key.to_int32() {
                                 if i >= 0 && (i as usize) < elements.len() {
                                     self.push(elements[i as usize]);
                                     continue;
+                                }
+                            }
+                        }
+                        if let ObjectKind::TypedArray(ta) = &jsobj.kind {
+                            if let Some(i) = key.to_int32() {
+                                if i >= 0 && (i as usize) < ta.length {
+                                    let idx = i as usize;
+                                    match ta.kind {
+                                        TypedArrayKind::Int32 => {
+                                            let off = idx * 4;
+                                            let b0 = ta.buffer.get(off).unwrap_or(0);
+                                            let b1 = ta.buffer.get(off + 1).unwrap_or(0);
+                                            let b2 = ta.buffer.get(off + 2).unwrap_or(0);
+                                            let b3 = ta.buffer.get(off + 3).unwrap_or(0);
+                                            let n = i32::from_le_bytes([b0, b1, b2, b3]);
+                                            self.push(JsValue::from_int32(n));
+                                            continue;
+                                        }
+                                        TypedArrayKind::Uint8 => {
+                                            let n = ta.buffer.get(idx).unwrap_or(0);
+                                            self.push(JsValue::from_int32(n as i32));
+                                            continue;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -589,7 +1093,7 @@ impl Vm {
                     if let Some(ptr) = obj.as_object_ptr() {
                         let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
                         if let ObjectKind::Array(elements) = &mut jsobj.kind {
-                            if let Some(i) = key.as_int32() {
+                            if let Some(i) = key.to_int32() {
                                 if i >= 0 {
                                     let idx = i as usize;
                                     if idx >= elements.len() {
@@ -598,6 +1102,30 @@ impl Vm {
                                     elements[idx] = val;
                                     self.push(val);
                                     continue;
+                                }
+                            }
+                        }
+                        if let ObjectKind::TypedArray(ta) = &mut jsobj.kind {
+                            if let Some(i) = key.to_int32() {
+                                if i >= 0 && (i as usize) < ta.length {
+                                    let idx = i as usize;
+                                    let num = val.to_number().unwrap_or(0.0);
+                                    match ta.kind {
+                                        TypedArrayKind::Int32 => {
+                                            let off = idx * 4;
+                                            let bytes = (num as i32).to_le_bytes();
+                                            for (k, &b) in bytes.iter().enumerate() {
+                                                ta.buffer.set(off + k, b);
+                                            }
+                                            self.push(val);
+                                            continue;
+                                        }
+                                        TypedArrayKind::Uint8 => {
+                                            ta.buffer.set(idx, num as u8);
+                                            self.push(val);
+                                            continue;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -617,6 +1145,42 @@ impl Vm {
                         params: def.params.clone(),
                         chunk: Arc::new(def.chunk.clone()),
                         upvalues: Vec::new(),
+                        is_async: false,
+                        is_generator: false,
+                    };
+                    let func_val = self.alloc_function(js_fn);
+                    self.push(func_val);
+                }
+
+                OpCode::CreateAsyncFunction(const_idx) => {
+                    let def = match &chunk.constants[const_idx as usize] {
+                        Constant::Function(f) => Arc::clone(f),
+                        _ => return Err(VmError::TypeError("Expected function def".into())),
+                    };
+                    let js_fn = JsFunction {
+                        name: def.name.clone(),
+                        params: def.params.clone(),
+                        chunk: Arc::new(def.chunk.clone()),
+                        upvalues: Vec::new(),
+                        is_async: true,
+                        is_generator: false,
+                    };
+                    let func_val = self.alloc_function(js_fn);
+                    self.push(func_val);
+                }
+
+                OpCode::CreateGenerator(const_idx) => {
+                    let def = match &chunk.constants[const_idx as usize] {
+                        Constant::Function(f) => Arc::clone(f),
+                        _ => return Err(VmError::TypeError("Expected function def".into())),
+                    };
+                    let js_fn = JsFunction {
+                        name: def.name.clone(),
+                        params: def.params.clone(),
+                        chunk: Arc::new(def.chunk.clone()),
+                        upvalues: Vec::new(),
+                        is_async: false,
+                        is_generator: true,
                     };
                     let func_val = self.alloc_function(js_fn);
                     self.push(func_val);
@@ -638,16 +1202,52 @@ impl Vm {
                                 self.push(res);
                             }
                             ObjectKind::Function(f) => {
-                                let new_frame = CallFrame {
-                                    chunk: Arc::clone(&f.chunk),
-                                    ip: 0,
-                                    base_sp: self.stack.len(),
-                                    this_val: JsValue::undefined(),
-                                };
-                                for arg in args {
-                                    self.push(arg);
+                                if f.is_generator {
+                                    let generator_instance = JsGenerator {
+                                        function: f.clone(),
+                                        ip: 0,
+                                        stack: args,
+                                        state: crate::object::GeneratorState::SuspendedStart,
+                                    };
+                                    let gen_val = self.alloc_generator(generator_instance);
+                                    self.push(gen_val);
+                                } else if f.is_async {
+                                    let promise_val = self.alloc_promise(PromiseState::Pending, JsValue::undefined());
+                                    let chunk = Arc::clone(&f.chunk);
+                                    let target_depth = self.frames.len();
+                                    let base_sp = self.stack.len();
+                                    for arg in &args {
+                                        self.push(*arg);
+                                    }
+                                    self.frames.push(CallFrame {
+                                        chunk,
+                                        ip: 0,
+                                        base_sp,
+                                        this_val: JsValue::undefined(),
+                                        gen_ptr: None,
+                                    });
+                                    match self.run_until_depth(target_depth) {
+                                        Ok(res) => self.resolve_promise(promise_val, res),
+                                        Err(e) => {
+                                            let err_val = self.alloc_string(e.to_string());
+                                            self.reject_promise(promise_val, err_val);
+                                        }
+                                    }
+                                    let _ = self.drain_microtasks();
+                                    self.push(promise_val);
+                                } else {
+                                    let new_frame = CallFrame {
+                                        chunk: Arc::clone(&f.chunk),
+                                        ip: 0,
+                                        base_sp: self.stack.len(),
+                                        this_val: JsValue::undefined(),
+                                        gen_ptr: None,
+                                    };
+                                    for arg in args {
+                                        self.push(arg);
+                                    }
+                                    self.frames.push(new_frame);
                                 }
-                                self.frames.push(new_frame);
                             }
                             _ => return Err(VmError::TypeError(format!("{} is not a function", self.to_string_value(callee)))),
                         }
@@ -656,14 +1256,198 @@ impl Vm {
                     }
                 }
 
+                OpCode::Construct(argc) => {
+                    let mut args = Vec::with_capacity(argc as usize);
+                    for _ in 0..argc {
+                        args.push(self.pop()?);
+                    }
+                    args.reverse();
+                    let callee = self.pop()?;
+
+                    if let Some(ptr) = callee.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        match &obj.kind {
+                            ObjectKind::NativeFunction(native) => {
+                                let res = native.call(self, JsValue::undefined(), &args)?;
+                                self.push(res);
+                            }
+                            ObjectKind::Function(_) => {
+                                let this_obj = self.alloc_object();
+                                let proto = self.get_property(callee, "prototype");
+                                if proto.is_object() {
+                                    let this_ptr = this_obj.as_object_ptr().unwrap();
+                                    let jsobj = unsafe { &mut *(this_ptr as *mut JsObject) };
+                                    jsobj.prototype = Some(proto);
+                                }
+                                let res = self.call(callee, this_obj, &args)?;
+                                if res.is_object() {
+                                    self.push(res);
+                                } else {
+                                    self.push(this_obj);
+                                }
+                            }
+                            _ => return Err(VmError::TypeError(format!("{} is not a constructor", self.to_string_value(callee)))),
+                        }
+                    } else {
+                        return Err(VmError::TypeError("Target is not a constructor".into()));
+                    }
+                }
+
                 OpCode::Return => {
                     let ret_val = self.pop().unwrap_or_default();
                     let finished = self.frames.pop().unwrap();
+                    if let Some(g_ptr) = finished.gen_ptr {
+                        let g_obj = unsafe { &mut *(g_ptr) };
+                        if let ObjectKind::Generator(ref mut g) = g_obj.kind {
+                            g.state = crate::object::GeneratorState::Completed;
+                        }
+                        let iter_res = self.make_iter_result(ret_val, true);
+                        self.stack.truncate(finished.base_sp);
+                        if self.frames.len() == target_depth {
+                            return Ok(iter_res);
+                        }
+                        self.push(iter_res);
+                    } else {
+                        self.stack.truncate(finished.base_sp);
+                        if self.frames.len() == target_depth {
+                            return Ok(ret_val);
+                        }
+                        self.push(ret_val);
+                    }
+                }
+
+                OpCode::Await => {
+                    let val = self.pop()?;
+                    let resolved = if let Some(ptr) = val.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        if let ObjectKind::Promise(_) = &obj.kind {
+                            loop {
+                                let current_state = {
+                                    let o = unsafe { &*(ptr as *mut JsObject) };
+                                    if let ObjectKind::Promise(p) = &o.kind {
+                                        p.state
+                                    } else {
+                                        break;
+                                    }
+                                };
+                                if current_state != PromiseState::Pending {
+                                    break;
+                                }
+                                if self.microtasks.is_empty() {
+                                    break;
+                                }
+                                self.drain_microtasks()?;
+                            }
+                            self.drain_microtasks()?;
+                            let o_final = unsafe { &*(ptr as *mut JsObject) };
+                            if let ObjectKind::Promise(p) = &o_final.kind {
+                                match p.state {
+                                    PromiseState::Fulfilled => p.result,
+                                    PromiseState::Rejected => {
+                                        if let Some(target_ip) = self.catch_stack.pop() {
+                                            self.push(p.result);
+                                            let frame = self.frames.last_mut().unwrap();
+                                            frame.ip = target_ip;
+                                            continue;
+                                        } else {
+                                            let err_str = self.to_string_value(p.result);
+                                            return Err(VmError::RuntimeError(err_str));
+                                        }
+                                    }
+                                    PromiseState::Pending => val,
+                                }
+                            } else {
+                                val
+                            }
+                        } else {
+                            val
+                        }
+                    } else {
+                        val
+                    };
+                    self.push(resolved);
+                }
+
+                OpCode::Yield => {
+                    let yielded_val = self.pop().unwrap_or_default();
+                    let frame = self.frames.last_mut().unwrap();
+                    if let Some(g_ptr) = frame.gen_ptr {
+                        let g_obj = unsafe { &mut *(g_ptr) };
+                        if let ObjectKind::Generator(ref mut g) = g_obj.kind {
+                            g.ip = frame.ip;
+                            g.stack = self.stack[frame.base_sp..].to_vec();
+                            g.state = crate::object::GeneratorState::SuspendedYield;
+                        }
+                    }
+                    let finished = self.frames.pop().unwrap();
+                    let iter_res = self.make_iter_result(yielded_val, false);
                     self.stack.truncate(finished.base_sp);
                     if self.frames.len() == target_depth {
-                        return Ok(ret_val);
+                        return Ok(iter_res);
                     }
-                    self.push(ret_val);
+                    self.push(iter_res);
+                }
+
+                OpCode::Export(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Export name must be string".into())),
+                    };
+                    let val = *self.peek()?;
+                    self.current_exports.insert(name, val);
+                }
+
+                OpCode::ImportModule(src_idx) => {
+                    let src = match &chunk.constants[src_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Import source must be string".into())),
+                    };
+                    let mod_obj = if let Some(m) = self.modules.get(&src).copied() {
+                        m
+                    } else {
+                        let m = self.alloc_object();
+                        if let Ok(content) = std::fs::read_to_string(&src) {
+                            if let Ok(prog) = doms_parser::parse(&content) {
+                                if let Ok(c) = doms_compiler::compile(&prog) {
+                                    let old_exports = std::mem::take(&mut self.current_exports);
+                                    let _ = self.run(&c);
+                                    let exports = std::mem::replace(&mut self.current_exports, old_exports);
+                                    for (k, v) in exports {
+                                        self.set_property(m, &k, v);
+                                    }
+                                }
+                            }
+                        }
+                        self.modules.insert(src, m);
+                        m
+                    };
+                    self.push(mod_obj);
+                }
+
+                OpCode::DynamicImport => {
+                    let specifier_val = self.pop()?;
+                    let src = self.to_string_value(specifier_val);
+                    let mod_obj = if let Some(m) = self.modules.get(&src).copied() {
+                        m
+                    } else {
+                        let m = self.alloc_object();
+                        if let Ok(content) = std::fs::read_to_string(&src) {
+                            if let Ok(prog) = doms_parser::parse(&content) {
+                                if let Ok(c) = doms_compiler::compile(&prog) {
+                                    let old_exports = std::mem::take(&mut self.current_exports);
+                                    let _ = self.run(&c);
+                                    let exports = std::mem::replace(&mut self.current_exports, old_exports);
+                                    for (k, v) in exports {
+                                        self.set_property(m, &k, v);
+                                    }
+                                }
+                            }
+                        }
+                        self.modules.insert(src, m);
+                        m
+                    };
+                    let promise_val = self.alloc_promise(PromiseState::Fulfilled, mod_obj);
+                    self.push(promise_val);
                 }
 
                 OpCode::Add => {
@@ -715,7 +1499,7 @@ impl Vm {
                     self.push(JsValue::from_boolean(!v.is_truthy()));
                 }
                 OpCode::BitNot => {
-                    let n = self.pop()?.as_int32().unwrap_or(0);
+                    let n = self.pop()?.to_int32().unwrap_or(0);
                     self.push(JsValue::from_int32(!n));
                 }
                 OpCode::Typeof => {
@@ -726,18 +1510,18 @@ impl Vm {
                 }
 
                 OpCode::BitAnd => {
-                    let b = self.pop()?.as_int32().unwrap_or(0);
-                    let a = self.pop()?.as_int32().unwrap_or(0);
+                    let b = self.pop()?.to_int32().unwrap_or(0);
+                    let a = self.pop()?.to_int32().unwrap_or(0);
                     self.push(JsValue::from_int32(a & b));
                 }
                 OpCode::BitOr => {
-                    let b = self.pop()?.as_int32().unwrap_or(0);
-                    let a = self.pop()?.as_int32().unwrap_or(0);
+                    let b = self.pop()?.to_int32().unwrap_or(0);
+                    let a = self.pop()?.to_int32().unwrap_or(0);
                     self.push(JsValue::from_int32(a | b));
                 }
                 OpCode::BitXor => {
-                    let b = self.pop()?.as_int32().unwrap_or(0);
-                    let a = self.pop()?.as_int32().unwrap_or(0);
+                    let b = self.pop()?.to_int32().unwrap_or(0);
+                    let a = self.pop()?.to_int32().unwrap_or(0);
                     self.push(JsValue::from_int32(a ^ b));
                 }
 

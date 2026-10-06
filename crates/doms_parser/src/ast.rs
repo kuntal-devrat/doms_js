@@ -26,6 +26,10 @@ pub enum Statement {
     Throw(Expression),
     Return(Option<Expression>),
     FunctionDecl { name: String, params: Vec<String>, body: Vec<Statement> },
+    AsyncFunctionDecl { name: String, params: Vec<String>, body: Vec<Statement> },
+    GeneratorDecl { name: String, params: Vec<String>, body: Vec<Statement> },
+    Import { specifiers: Vec<(String, Option<String>)>, source: String, is_default: bool, is_all: bool },
+    Export { decl: Option<Box<Statement>>, is_default: bool },
     Empty,
 }
 
@@ -40,12 +44,16 @@ pub enum Expression {
     MemberAssignment { object: Box<Expression>, property: String, value: Box<Expression> },
     IndexAssignment { object: Box<Expression>, index: Box<Expression>, value: Box<Expression> },
     Call { callee: Box<Expression>, args: Vec<Expression> },
+    New { callee: Box<Expression>, args: Vec<Expression> },
     Member { object: Box<Expression>, property: String },
     Index { object: Box<Expression>, index: Box<Expression> },
     Object(Vec<(String, Expression)>),
     Array(Vec<Expression>),
     Conditional { condition: Box<Expression>, then_expr: Box<Expression>, else_expr: Box<Expression> },
     FunctionExpr { name: Option<String>, params: Vec<String>, body: Vec<Statement> },
+    Await(Box<Expression>),
+    Yield(Option<Box<Expression>>),
+    DynamicImport(Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

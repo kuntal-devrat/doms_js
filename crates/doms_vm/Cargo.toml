@@ -8,6 +8,8 @@ description = "Bytecode virtual machine and interpreter for the DOMS JavaScript 
 [dependencies]
 doms_gc.workspace = true
 doms_compiler.workspace = true
+doms_parallel.workspace = true
+doms_parser.workspace = true
 thiserror.workspace = true
 log.workspace = true
 

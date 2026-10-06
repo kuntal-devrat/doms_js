@@ -218,6 +218,79 @@ impl Compiler {
                     self.chunk.emit(OpCode::Pop, 0);
                 }
             }
+            Statement::AsyncFunctionDecl { name, params, body } => {
+                let def = Self::compile_function(Some(name.clone()), params.clone(), body)?;
+                let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
+                self.chunk.emit(OpCode::CreateAsyncFunction(const_idx), 0);
+                if self.symbols.scope_depth > 0 {
+                    let slot = self.symbols.define_local(name.clone());
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                } else {
+                    let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                    self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                }
+            }
+            Statement::GeneratorDecl { name, params, body } => {
+                let def = Self::compile_function(Some(name.clone()), params.clone(), body)?;
+                let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
+                self.chunk.emit(OpCode::CreateGenerator(const_idx), 0);
+                if self.symbols.scope_depth > 0 {
+                    let slot = self.symbols.define_local(name.clone());
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                } else {
+                    let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                    self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                }
+            }
+            Statement::Import { specifiers, source, .. } => {
+                let src_idx = self.chunk.add_constant(Constant::String(source.clone()));
+                self.chunk.emit(OpCode::ImportModule(src_idx), 0);
+                for (name, alias) in specifiers {
+                    let bind_name = alias.as_ref().unwrap_or(name);
+                    self.chunk.emit(OpCode::Dup, 0);
+                    let prop_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                    self.chunk.emit(OpCode::GetProp(prop_idx), 0);
+                    if self.symbols.scope_depth > 0 {
+                        let slot = self.symbols.define_local(bind_name.clone());
+                        self.chunk.emit(OpCode::SetLocal(slot), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+                    } else {
+                        let name_idx = self.chunk.add_constant(Constant::String(bind_name.clone()));
+                        self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+                    }
+                }
+                self.chunk.emit(OpCode::Pop, 0);
+            }
+            Statement::Export { decl, is_default } => {
+                if let Some(stmt) = decl {
+                    match &**stmt {
+                        Statement::VarDecl { name, .. } => {
+                            self.compile_statement(stmt, false)?;
+                            let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                            self.chunk.emit(OpCode::Export(name_idx), 0);
+                        }
+                        Statement::FunctionDecl { name, .. }
+                        | Statement::AsyncFunctionDecl { name, .. } => {
+                            self.compile_statement(stmt, false)?;
+                            let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                            self.chunk.emit(OpCode::Export(name_idx), 0);
+                        }
+                        Statement::Expression(expr) if *is_default => {
+                            self.compile_expression(expr)?;
+                            let name_idx = self.chunk.add_constant(Constant::String("default".to_string()));
+                            self.chunk.emit(OpCode::Export(name_idx), 0);
+                        }
+                        _ => {
+                            self.compile_statement(stmt, false)?;
+                        }
+                    }
+                }
+            }
             Statement::Empty => {}
         }
         Ok(())
@@ -387,6 +460,29 @@ impl Compiler {
                 let def = Self::compile_function(name.clone(), params.clone(), body)?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
+            }
+            Expression::New { callee, args } => {
+                self.compile_expression(callee)?;
+                for arg in args {
+                    self.compile_expression(arg)?;
+                }
+                self.chunk.emit(OpCode::Construct(args.len() as u8), 0);
+            }
+            Expression::Await(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit(OpCode::Await, 0);
+            }
+            Expression::Yield(opt_expr) => {
+                if let Some(expr) = opt_expr {
+                    self.compile_expression(expr)?;
+                } else {
+                    self.chunk.emit(OpCode::LoadUndefined, 0);
+                }
+                self.chunk.emit(OpCode::Yield, 0);
+            }
+            Expression::DynamicImport(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit(OpCode::DynamicImport, 0);
             }
         }
         Ok(())

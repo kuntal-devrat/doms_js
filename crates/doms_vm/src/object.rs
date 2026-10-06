@@ -53,12 +53,58 @@ impl std::fmt::Debug for NativeFunction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromiseState {
+    Pending,
+    Fulfilled,
+    Rejected,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsPromise {
+    pub state: PromiseState,
+    pub result: JsValue,
+    pub fulfill_reactions: Vec<JsValue>,
+    pub reject_reactions: Vec<JsValue>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratorState {
+    SuspendedStart,
+    SuspendedYield,
+    Executing,
+    Completed,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsGenerator {
+    pub function: JsFunction,
+    pub ip: usize,
+    pub stack: Vec<JsValue>,
+    pub state: GeneratorState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypedArrayKind {
+    Int32,
+    Uint8,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsTypedArray {
+    pub buffer: Arc<doms_parallel::SharedArrayBuffer>,
+    pub kind: TypedArrayKind,
+    pub length: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct JsFunction {
     pub name: Option<String>,
     pub params: Vec<String>,
     pub chunk: Arc<BytecodeChunk>,
     pub upvalues: Vec<JsValue>,
+    pub is_async: bool,
+    pub is_generator: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +115,11 @@ pub enum ObjectKind {
     NativeFunction(NativeFunction),
     String(String),
     Error { name: String, message: String },
+    Promise(JsPromise),
+    Generator(JsGenerator),
+    SharedArrayBuffer(Arc<doms_parallel::SharedArrayBuffer>),
+    TypedArray(JsTypedArray),
+    Worker(Arc<std::sync::Mutex<doms_parallel::MessagePort>>),
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +202,77 @@ impl JsObject {
         }
     }
 
+    pub fn new_promise(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        state: PromiseState,
+        result: JsValue,
+    ) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::Promise(JsPromise {
+                state,
+                result,
+                fulfill_reactions: Vec::new(),
+                reject_reactions: Vec::new(),
+            }),
+        }
+    }
+
+    pub fn new_shared_array_buffer(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        sab: Arc<doms_parallel::SharedArrayBuffer>,
+    ) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::SharedArrayBuffer(sab),
+        }
+    }
+
+    pub fn new_typed_array(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        typed_array: JsTypedArray,
+    ) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::TypedArray(typed_array),
+        }
+    }
+
+    pub fn new_generator(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        generator: JsGenerator,
+    ) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::Generator(generator),
+        }
+    }
+
+    pub fn new_worker(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        port: Arc<std::sync::Mutex<doms_parallel::MessagePort>>,
+    ) -> Self {
+        Self {
+            shape_id,
+            prototype,
+            slots: Vec::new(),
+            kind: ObjectKind::Worker(port),
+        }
+    }
+
     #[inline]
     pub fn get_slot(&self, offset: u32) -> Option<JsValue> {
         self.slots.get(offset as usize).copied()
@@ -190,6 +312,28 @@ impl Trace for JsObject {
                 for upval in &f.upvalues {
                     if let Some(p) = upval.as_heap_ptr() {
                         tracer.trace_ref(p);
+                    }
+                }
+            }
+            ObjectKind::Promise(p) => {
+                if let Some(r) = p.result.as_heap_ptr() {
+                    tracer.trace_ref(r);
+                }
+                for cb in &p.fulfill_reactions {
+                    if let Some(r) = cb.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                }
+                for cb in &p.reject_reactions {
+                    if let Some(r) = cb.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                }
+            }
+            ObjectKind::Generator(g) => {
+                for v in &g.stack {
+                    if let Some(r) = v.as_heap_ptr() {
+                        tracer.trace_ref(r);
                     }
                 }
             }

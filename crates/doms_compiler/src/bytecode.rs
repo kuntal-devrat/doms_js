@@ -35,10 +35,20 @@ pub enum OpCode {
     GetElem,
     SetElem,
 
-    // Functions & Calls
+    // Functions, Calls & Construction
     CreateFunction(u16),
+    CreateAsyncFunction(u16),
+    CreateGenerator(u16),
     Call(u8), // argc
+    Construct(u8), // new Ctor(args) with argc
     Return,
+    Await,
+    Yield,
+
+    // Modules
+    Export(u16),
+    ImportModule(u16),
+    DynamicImport,
 
     // Arithmetic
     Add,

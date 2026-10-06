@@ -56,7 +56,7 @@ fn execute_code(source: &str) {
                 let mut vm = doms_vm::Vm::new();
                 match vm.run(&chunk) {
                     Ok(val) => {
-                        println!("{}", val);
+                        println!("{}", vm.to_string_value(val));
                     }
                     Err(e) => {
                         eprintln!("Runtime error: {}", e);
@@ -115,7 +115,7 @@ fn run_repl() {
                 match doms_parser::parse(trimmed) {
                     Ok(program) => match doms_compiler::compile(&program) {
                         Ok(chunk) => match vm.run(&chunk) {
-                            Ok(val) => println!("{}", val),
+                            Ok(val) => println!("{}", vm.to_string_value(val)),
                             Err(e) => eprintln!("Runtime error: {}", e),
                         },
                         Err(e) => eprintln!("Compile error: {}", e),

@@ -37,6 +37,14 @@ pub enum TokenKind {
     Null,
     Undefined,
     Typeof,
+    Async,
+    Await,
+    Yield,
+    Import,
+    Export,
+    From,
+    As,
+    Default,
 
     // Identifiers & Literals
     Ident(String),
@@ -81,6 +89,45 @@ pub enum TokenKind {
     Dot,
 
     Eof,
+}
+
+impl TokenKind {
+    pub fn as_prop_name(&self) -> Option<String> {
+        match self {
+            TokenKind::Ident(s) => Some(s.clone()),
+            TokenKind::Catch => Some("catch".to_string()),
+            TokenKind::Finally => Some("finally".to_string()),
+            TokenKind::Default => Some("default".to_string()),
+            TokenKind::New => Some("new".to_string()),
+            TokenKind::This => Some("this".to_string()),
+            TokenKind::Return => Some("return".to_string()),
+            TokenKind::Let => Some("let".to_string()),
+            TokenKind::Const => Some("const".to_string()),
+            TokenKind::Var => Some("var".to_string()),
+            TokenKind::Function => Some("function".to_string()),
+            TokenKind::If => Some("if".to_string()),
+            TokenKind::Else => Some("else".to_string()),
+            TokenKind::While => Some("while".to_string()),
+            TokenKind::For => Some("for".to_string()),
+            TokenKind::Break => Some("break".to_string()),
+            TokenKind::Continue => Some("continue".to_string()),
+            TokenKind::Try => Some("try".to_string()),
+            TokenKind::Throw => Some("throw".to_string()),
+            TokenKind::Typeof => Some("typeof".to_string()),
+            TokenKind::Async => Some("async".to_string()),
+            TokenKind::Await => Some("await".to_string()),
+            TokenKind::Yield => Some("yield".to_string()),
+            TokenKind::Import => Some("import".to_string()),
+            TokenKind::Export => Some("export".to_string()),
+            TokenKind::From => Some("from".to_string()),
+            TokenKind::As => Some("as".to_string()),
+            TokenKind::True => Some("true".to_string()),
+            TokenKind::False => Some("false".to_string()),
+            TokenKind::Null => Some("null".to_string()),
+            TokenKind::Undefined => Some("undefined".to_string()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -304,6 +351,14 @@ impl<'a> Lexer<'a> {
             "null" => TokenKind::Null,
             "undefined" => TokenKind::Undefined,
             "typeof" => TokenKind::Typeof,
+            "async" => TokenKind::Async,
+            "await" => TokenKind::Await,
+            "yield" => TokenKind::Yield,
+            "import" => TokenKind::Import,
+            "export" => TokenKind::Export,
+            "from" => TokenKind::From,
+            "as" => TokenKind::As,
+            "default" => TokenKind::Default,
             _ => TokenKind::Ident(s),
         };
 
