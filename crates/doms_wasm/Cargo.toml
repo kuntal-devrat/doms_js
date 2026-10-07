@@ -1,0 +1,18 @@
+[package]
+name = "doms_wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WebAssembly embedding target and browser sandbox for the DOMS JavaScript Engine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+doms_core.workspace = true
+doms_vm.workspace = true
+doms_compiler.workspace = true
+doms_parser.workspace = true
+log.workspace = true
+
+[dev-dependencies]

@@ -17,6 +17,7 @@ pub fn register_builtins(vm: &mut Vm) {
     register_phase3_builtins(vm);
     register_reflect(vm);
     register_test262_harness(vm);
+    crate::web_apis::register_web_apis(vm);
 }
 
 fn register_console(vm: &mut Vm) {

@@ -10,9 +10,10 @@ use crate::shape::ShapeRegistry;
 use crate::value::JsValue;
 use doms_compiler::bytecode::{BytecodeChunk, Constant, OpCode};
 use doms_gc::heap::Heap;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -85,6 +86,15 @@ pub struct CatchHandler {
     pub stack_len: usize,
 }
 
+#[derive(Clone)]
+pub struct TimerEntry {
+    pub id: u32,
+    pub callback: JsValue,
+    pub args: Vec<JsValue>,
+    pub due_time: Instant,
+    pub interval: Option<Duration>,
+}
+
 pub struct Vm {
     pub stack: Vec<JsValue>,
     pub frames: Vec<CallFrame>,
@@ -97,6 +107,8 @@ pub struct Vm {
     pub microtasks: VecDeque<(JsValue, Vec<JsValue>)>,
     pub modules: HashMap<String, JsValue>,
     pub current_exports: HashMap<String, JsValue>,
+    pub timers: BTreeMap<u32, TimerEntry>,
+    pub next_timer_id: u32,
     pub instruction_count: usize,
     pub max_instructions: Option<usize>,
 }
@@ -115,6 +127,8 @@ impl Vm {
             microtasks: VecDeque::new(),
             modules: HashMap::new(),
             current_exports: HashMap::new(),
+            timers: BTreeMap::new(),
+            next_timer_id: 1,
             instruction_count: 0,
             max_instructions: None,
         };
@@ -326,7 +340,77 @@ impl Vm {
         Ok(())
     }
 
+    pub fn step_event_loop(&mut self) -> Result<bool, VmError> {
+        self.drain_microtasks()?;
+        let now = Instant::now();
+        let mut due_id = None;
+        for (&id, entry) in &self.timers {
+            if entry.due_time <= now {
+                due_id = Some(id);
+                break;
+            }
+        }
+        if let Some(id) = due_id {
+            if let Some(mut entry) = self.timers.remove(&id) {
+                let _ = self.call(entry.callback, JsValue::undefined(), &entry.args);
+                if let Some(interval) = entry.interval {
+                    entry.due_time = Instant::now() + interval;
+                    self.timers.insert(id, entry);
+                }
+                self.drain_microtasks()?;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn run_event_loop(&mut self) -> Result<(), VmError> {
+        let max_ticks = 100_000;
+        let mut ticks = 0;
+        while !self.timers.is_empty() || !self.microtasks.is_empty() {
+            ticks += 1;
+            if ticks > max_ticks {
+                return Err(VmError::RuntimeError("Event loop max ticks exceeded".into()));
+            }
+            let worked = self.step_event_loop()?;
+            if !worked && !self.timers.is_empty() {
+                let next_due = self.timers.values().map(|t| t.due_time).min();
+                if let Some(due) = next_due {
+                    let now = Instant::now();
+                    if due > now {
+                        let wait = (due - now).min(Duration::from_millis(5));
+                        std::thread::sleep(wait);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn resolve_promise(&mut self, promise_val: JsValue, resolution: JsValue) {
+        if let Some(ptr) = resolution.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Promise(_) = &obj.kind {
+                let then_fn = self.get_property(resolution, "then");
+                if then_fn.is_object() {
+                    let p_resolve = promise_val;
+                    let fulfill_cb = self.alloc_closure_native_function("chain_resolve", 1, Arc::new(move |vm, _, args| {
+                        let inner_val = args.first().copied().unwrap_or(JsValue::undefined());
+                        vm.resolve_promise(p_resolve, inner_val);
+                        Ok(JsValue::undefined())
+                    }));
+                    let p_reject = promise_val;
+                    let reject_cb = self.alloc_closure_native_function("chain_reject", 1, Arc::new(move |vm, _, args| {
+                        let inner_err = args.first().copied().unwrap_or(JsValue::undefined());
+                        vm.reject_promise(p_reject, inner_err);
+                        Ok(JsValue::undefined())
+                    }));
+                    let _ = self.call(then_fn, resolution, &[fulfill_cb, reject_cb]);
+                    return;
+                }
+            }
+        }
+
         if let Some(ptr) = promise_val.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Promise(ref mut p) = obj.kind {

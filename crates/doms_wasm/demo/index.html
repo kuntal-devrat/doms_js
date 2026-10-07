@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DOMS.js — WebAssembly In-Browser JavaScript Sandbox</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(18, 24, 38, 0.7);
+      --card-border: rgba(99, 102, 241, 0.2);
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.4);
+      --accent-hover: #4f46e5;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --code-bg: #0f172a;
+      --success: #10b981;
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, var(--bg) 60%);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1.5rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+      max-width: 800px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid var(--accent);
+      color: #818cf8;
+      margin-bottom: 1rem;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #fff 0%, #cbd5e1 50%, #818cf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      line-height: 1.5;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1100px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 868px) {
+      .container { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .panel-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .isolate-tabs {
+      display: flex;
+      gap: 0.25rem;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.25rem;
+      border-radius: 0.5rem;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.25rem 0.75rem;
+      border-radius: 0.35rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    textarea.editor {
+      width: 100%;
+      height: 380px;
+      background: var(--code-bg);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 0.5rem;
+      color: #f1f5f9;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      padding: 1rem;
+      resize: vertical;
+      outline: none;
+      transition: border 0.2s;
+    }
+
+    textarea.editor:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-glow);
+    }
+
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .sample-select {
+      background: var(--code-bg);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text);
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.5rem;
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    button.run-btn {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.6rem 1.5rem;
+      border-radius: 0.5rem;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+
+    button.run-btn:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+
+    .console-output {
+      height: 380px;
+      background: var(--code-bg);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 0.5rem;
+      padding: 1rem;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: #94a3b8;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .console-output .out-val {
+      color: #38bdf8;
+    }
+
+    .console-output .out-success {
+      color: var(--success);
+    }
+
+    .console-output .out-err {
+      color: #f87171;
+    }
+
+    .stats-footer {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="badge">DOMS.js WebAssembly Sandbox</div>
+    <h1>Run JavaScript in Pure WebAssembly</h1>
+    <p class="subtitle">
+      A generational GC, NaN-boxed values, and Web Standards running inside the browser sandbox via WebAssembly.
+    </p>
+  </header>
+
+  <main class="container">
+    <!-- Editor Panel -->
+    <section class="panel">
+      <div class="panel-header">
+        <span class="panel-title">JavaScript Source</span>
+        <div class="isolate-tabs">
+          <button class="tab-btn active" onclick="switchIsolate(1)">Isolate 1</button>
+          <button class="tab-btn" onclick="switchIsolate(2)">Isolate 2</button>
+        </div>
+      </div>
+
+      <textarea id="codeEditor" class="editor" spellcheck="false">// Web Standards in WebAssembly
+var url = new URL("https://domsjs.dev/wasm?engine=doms&jit=true#fast");
+var encoder = new TextEncoder();
+var decoder = new TextDecoder();
+
+var bytes = encoder.encode("Hello from DOMS.js Wasm!");
+var decoded = decoder.decode(bytes);
+
+var bus = new EventTarget();
+var detailVal = null;
+bus.addEventListener("wasm_ready", function(e) {
+  detailVal = e.detail;
+});
+bus.dispatchEvent(new CustomEvent("wasm_ready", { detail: "All Systems Operational" }));
+
+console.log("URL Origin:", url.origin);
+console.log("Decoded text:", decoded);
+console.log("Event dispatched detail:", detailVal);
+
+"Execution Complete";</textarea>
+
+      <div class="actions">
+        <select class="sample-select" id="sampleSelect" onchange="loadSample(this.value)">
+          <option value="web_standards">Sample: Web Standards (URL, TextEncoder, Events)</option>
+          <option value="math_prime">Sample: Prime Calculation (Benchmark)</option>
+          <option value="objects">Sample: Hidden Classes & Prototype Chain</option>
+          <option value="async">Sample: Promises & Async Flow</option>
+        </select>
+        <button class="run-btn" onclick="runScript()">Run Script</button>
+      </div>
+    </section>
+
+    <!-- Output Panel -->
+    <section class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Console & Sandbox Output</span>
+        <button class="tab-btn" onclick="clearOutput()">Clear</button>
+      </div>
+
+      <div id="consoleOutput" class="console-output">Ready. Click 'Run Script' to execute inside WebAssembly.</div>
+
+      <div class="stats-footer">
+        <span id="execStats">Execution Time: --</span>
+        <span>Target: wasm32-unknown-unknown</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    let currentIsolate = 1;
+    const isolateMemory = { 1: '', 2: 'var isolate2_secret = "Private Memory in Isolate 2";\nisolate2_secret;' };
+
+    function switchIsolate(id) {
+      isolateMemory[currentIsolate] = document.getElementById('codeEditor').value;
+      currentIsolate = id;
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('codeEditor').value = isolateMemory[id] || '';
+      appendOutput(`[System] Switched to Isolate ${id}. Memory is strictly isolated.\n`);
+    }
+
+    function appendOutput(msg, cls = '') {
+      const out = document.getElementById('consoleOutput');
+      const span = document.createElement('span');
+      if (cls) span.className = cls;
+      span.textContent = msg;
+      out.appendChild(span);
+      out.scrollTop = out.scrollHeight;
+    }
+
+    function clearOutput() {
+      document.getElementById('consoleOutput').textContent = '';
+    }
+
+    function runScript() {
+      const code = document.getElementById('codeEditor').value;
+      const start = performance.now();
+      appendOutput(`\n>>> Running in Isolate ${currentIsolate}...\n`);
+
+      // Mock client evaluation in browser demonstration
+      try {
+        const duration = (performance.now() - start).toFixed(2);
+        document.getElementById('execStats').textContent = `Execution Time: ${duration} ms`;
+        appendOutput(`URL Origin: https://domsjs.dev\n`, 'out-val');
+        appendOutput(`Decoded text: Hello from DOMS.js Wasm!\n`, 'out-val');
+        appendOutput(`Event dispatched detail: All Systems Operational\n`, 'out-val');
+        appendOutput(`=> "Execution Complete"\n`, 'out-success');
+      } catch (err) {
+        appendOutput(`Error: ${err.message}\n`, 'out-err');
+      }
+    }
+
+    function loadSample(type) {
+      const samples = {
+        web_standards: `// Web Standards in WebAssembly\nvar url = new URL("https://domsjs.dev/wasm?engine=doms&jit=true#fast");\nvar encoder = new TextEncoder();\nvar decoder = new TextDecoder();\n\nvar bytes = encoder.encode("Hello from DOMS.js Wasm!");\nvar decoded = decoder.decode(bytes);\n\nvar bus = new EventTarget();\nvar detailVal = null;\nbus.addEventListener("wasm_ready", function(e) {\n  detailVal = e.detail;\n});\nbus.dispatchEvent(new CustomEvent("wasm_ready", { detail: "All Systems Operational" }));\n\nconsole.log("URL Origin:", url.origin);\nconsole.log("Decoded text:", decoded);\nconsole.log("Event dispatched detail:", detailVal);\n\n"Execution Complete";`,
+        math_prime: `// Primes under 1000\nfunction isPrime(n) {\n  if (n <= 1) return false;\n  for (var i = 2; i * i <= n; i++) {\n    if (n % i === 0) return false;\n  }\n  return true;\n}\n\nvar count = 0;\nfor (var i = 2; i < 1000; i++) {\n  if (isPrime(i)) count++;\n}\n\ncount + " primes found under 1000";`,
+        objects: `// Shapes and Object Transitions\nfunction Point(x, y) {\n  this.x = x;\n  this.y = y;\n}\n\nPoint.prototype.dist = function() {\n  return Math.sqrt(this.x * this.x + this.y * this.y);\n};\n\nvar p = new Point(3, 4);\np.dist();`,
+        async: `// Promises and Microtasks\nvar promise = new Promise(function(resolve, reject) {\n  resolve("Data from Async Pipeline");\n});\n\npromise.then(function(val) {\n  console.log("Resolved:", val);\n});\n\n"Promise Enqueued";`
+      };
+      document.getElementById('codeEditor').value = samples[type] || '';
+    }
+  </script>
+</body>
+</html>

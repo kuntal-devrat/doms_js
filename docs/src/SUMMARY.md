@@ -15,3 +15,4 @@
 [Source Maps & Stack Symbolication](13_source_maps.md)
 [Case Studies: Parallel Browsers & Games](14_browser_and_game_embedding.md)
 [Phase 4 Hardening & 1.0 Release](15_phase4_hardening_and_v1.md)
+[Web Standards, Live DevTools & WebAssembly](16_web_standards_and_wasm.md)
