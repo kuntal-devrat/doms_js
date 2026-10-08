@@ -42,6 +42,48 @@ pub struct HeapStats {
     pub large_object_count: usize,
 }
 
+/// The remembered set tracks references from older generation or large objects
+/// to objects in the nursery. During minor collections (scavenge), remembered slots
+/// are traced as roots so young objects referenced by tenured objects are preserved.
+#[derive(Debug, Default)]
+pub struct RememberedSet {
+    /// Addresses of pointer slots (*mut *mut u8) holding references into the nursery.
+    pub slots: std::collections::HashSet<usize>,
+}
+
+impl RememberedSet {
+    pub fn new() -> Self {
+        Self {
+            slots: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Add a pointer slot to the remembered set.
+    #[inline]
+    pub fn remember(&mut self, slot: *mut *mut u8) {
+        if !slot.is_null() {
+            self.slots.insert(slot as usize);
+        }
+    }
+
+    /// Clear all remembered slots.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.slots.clear();
+    }
+
+    /// Number of remembered slots.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+}
+
 /// The GC Heap — owns all memory spaces and coordinates collection.
 ///
 /// # Usage
@@ -66,6 +108,8 @@ pub struct Heap {
     /// Root set: pointers the GC must trace from.
     /// In a real engine, these come from the VM stack, global object, etc.
     roots: Vec<*mut u8>,
+    /// Remembered set for generational write barrier tracking.
+    pub remembered_set: RememberedSet,
 }
 
 impl Heap {
@@ -76,6 +120,7 @@ impl Heap {
             old_gen: OldGen::new(config.old_gen_size),
             large_objects: LargeObjectSpace::new(),
             roots: Vec::new(),
+            remembered_set: RememberedSet::new(),
         }
     }
 
@@ -120,12 +165,55 @@ impl Heap {
         self.roots.retain(|r| *r != root);
     }
 
-    /// Trigger a nursery scavenge (minor GC).
-    pub fn collect_nursery(&mut self) {
-        self.nursery.scavenge(&mut self.roots);
+    /// Register a type tracer for interior reference tracing in the nursery.
+    pub fn register_tracer(&mut self, tag: TypeTag, visitor: crate::trace::TraceVisitor) {
+        self.nursery.register_tracer(tag, visitor);
     }
 
-    /// Trigger an old generation mark-sweep-compaction (major GC).
+    /// Post-write barrier: records when an old generation or large object
+    /// is updated to point to a nursery (young generation) object.
+    ///
+    /// # Safety
+    /// `slot` must be a valid, readable pointer to a pointer.
+    pub unsafe fn write_barrier(&mut self, slot: *mut *mut u8) {
+        if slot.is_null() {
+            return;
+        }
+        let target = unsafe { *slot };
+        if !target.is_null() && self.nursery.contains(target) {
+            self.remembered_set.remember(slot);
+        }
+    }
+
+    /// Trigger a nursery scavenge (minor GC).
+    pub fn collect_nursery(&mut self) {
+        let mut all_roots = self.roots.clone();
+        for &slot_addr in &self.remembered_set.slots {
+            let slot = slot_addr as *mut *mut u8;
+            let target = unsafe { *slot };
+            if !target.is_null() && self.nursery.contains(target) {
+                all_roots.push(target);
+            }
+        }
+
+        self.nursery.scavenge(&mut all_roots);
+
+        let nursery = &self.nursery;
+        self.remembered_set.slots.retain(|&slot_addr| {
+            let slot = slot_addr as *mut *mut u8;
+            let target = unsafe { *slot };
+            !target.is_null() && nursery.contains(target)
+        });
+    }
+
+    /// Trigger an old generation mark-sweep collection (non-moving, major GC).
+    pub fn collect_old_gen_sweep(&mut self) -> usize {
+        self.old_gen.start_incremental_marking(&self.roots);
+        self.old_gen.mark_step(usize::MAX);
+        self.old_gen.sweep()
+    }
+
+    /// Trigger an old generation mark-sweep-compaction (moving, major GC).
     pub fn collect_old_gen_compact(&mut self) -> usize {
         self.old_gen.start_incremental_marking(&self.roots);
         self.old_gen.mark_step(usize::MAX);
@@ -204,5 +292,44 @@ mod tests {
         // and then succeed.
         let ptr = heap.allocate(8, TypeTag::Raw);
         assert!(ptr.is_some());
+    }
+
+    #[test]
+    fn test_write_barrier_and_remembered_set() {
+        let mut heap = Heap::new(test_config());
+
+        // Allocate a child in the nursery
+        let child_ptr = heap.allocate(16, TypeTag::Raw).unwrap();
+
+        // Simulate an old generation object slot pointing to child_ptr
+        let mut old_slot = child_ptr;
+        unsafe {
+            heap.write_barrier(&mut old_slot as *mut *mut u8);
+        }
+
+        assert_eq!(heap.remembered_set.len(), 1);
+
+        // Run scavenge without adding child_ptr to heap.roots
+        // The write barrier remembered set must preserve child_ptr!
+        heap.collect_nursery();
+
+        // Nursery object survived
+        assert!(heap.nursery.contains(child_ptr) || heap.nursery.bytes_allocated > 0);
+    }
+
+    #[test]
+    fn test_collect_old_gen_sweep() {
+        let mut heap = Heap::new(test_config());
+
+        let p1 = heap.allocate(16, TypeTag::Object).unwrap();
+        let p2 = heap.allocate(16, TypeTag::Object).unwrap();
+
+        let old_p1 = unsafe { heap.old_gen.promote(p1).unwrap() };
+        let _old_p2 = unsafe { heap.old_gen.promote(p2).unwrap() };
+
+        heap.add_root(old_p1);
+        let reclaimed = heap.collect_old_gen_sweep();
+        assert!(reclaimed > 0);
+        assert_eq!(heap.old_gen.object_count, 1);
     }
 }

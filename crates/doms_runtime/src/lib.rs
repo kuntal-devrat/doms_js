@@ -6,4 +6,4 @@ pub mod builtins;
 pub mod global;
 
 pub use builtins::*;
-pub use global::GlobalEnvironment;
+pub use global::{GlobalEnvironment, RuntimeValue};

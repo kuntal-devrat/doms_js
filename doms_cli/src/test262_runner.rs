@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::io::IsTerminal;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -49,21 +50,20 @@ pub struct RunnerConfig {
     pub threads: usize,
     pub output_file: Option<PathBuf>,
     pub verbose: bool,
+    pub clean_summary: bool,
 }
 
 impl Default for RunnerConfig {
     fn default() -> Self {
-        let threads = std::thread::available_parallelism()
-            .map(|n| (n.get() / 2).clamp(1, 4))
-            .unwrap_or(2);
         Self {
             test262_dir: PathBuf::from("tests/test262/test262"),
             suite_filter: None,
             path_filter: None,
             max_tests: None,
-            threads,
+            threads: 1, // Safe single-threaded by default to prevent laptop freezes
             output_file: Some(PathBuf::from("tests/test262/results/summary.json")),
             verbose: false,
+            clean_summary: false,
         }
     }
 }
@@ -194,6 +194,22 @@ impl Test262Runner {
             out.push('\n');
         }
 
+        // Host object shim for $262
+        out.push_str("var $262 = typeof $262 !== 'undefined' ? $262 : {};\n");
+        out.push_str("if (!$262.global) $262.global = typeof globalThis !== 'undefined' ? globalThis : this;\n");
+        out.push_str("if (!$262.createRealm || !$262.createRealm().global) {\n");
+        out.push_str("    $262.createRealm = function() {\n");
+        out.push_str("        var g = typeof globalThis !== 'undefined' ? globalThis : this;\n");
+        out.push_str("        return {\n");
+        out.push_str("            global: g,\n");
+        out.push_str("            evalScript: function(src) { return eval(src); }\n");
+        out.push_str("        };\n");
+        out.push_str("    };\n");
+        out.push_str("}\n");
+        out.push_str("if (!$262.evalScript) $262.evalScript = function(src) { return eval(src); };\n");
+        out.push_str("if (!$262.gc) $262.gc = function() {};\n");
+        out.push_str("if (!$262.agent) $262.agent = {};\n");
+
         // Additional includes
         for inc in &meta.includes {
             if let Some(inc_content) = self.harness_cache.get(inc) {
@@ -234,7 +250,13 @@ impl Test262Runner {
         let full_source = self.build_source(&content, &meta);
 
         // 1. Parsing Phase
-        let parsed = doms_parser::parse(&full_source);
+        let parsed = if meta.is_module {
+            doms_parser::parse_module(&full_source)
+        } else if meta.is_only_strict {
+            doms_parser::parse_strict(&full_source)
+        } else {
+            doms_parser::parse(&full_source)
+        };
         if let Err(parse_err) = parsed {
             if meta.negative_phase.as_deref() == Some("parse") {
                 return TestStatus::Pass;
@@ -247,8 +269,18 @@ impl Test262Runner {
             return TestStatus::Fail("Expected parse error, but parsed successfully".into());
         }
 
+        let is_top_level_strict = meta.is_only_strict
+            || meta.is_module
+            || program.body.iter()
+                .take_while(|s| matches!(s, doms_parser::ast::Statement::Expression(doms_parser::ast::Expression::Literal(doms_parser::ast::Literal::String { .. }))))
+                .any(|s| matches!(s, doms_parser::ast::Statement::Expression(doms_parser::ast::Expression::Literal(doms_parser::ast::Literal::String { value, has_escape: false })) if value == "use strict"));
+
         // 2. Compilation Phase
-        let compiled = doms_compiler::compile(&program);
+        let compiled = if is_top_level_strict {
+            doms_compiler::compile_strict(&program)
+        } else {
+            doms_compiler::compile(&program)
+        };
         if let Err(comp_err) = compiled {
             if meta.negative_phase.as_deref() == Some("parse")
                 || meta.negative_phase.as_deref() == Some("runtime")
@@ -262,7 +294,11 @@ impl Test262Runner {
 
         // 3. Execution Phase
         let mut vm = doms_vm::Vm::new();
-        vm.max_instructions = Some(100_000);
+        vm.is_strict = is_top_level_strict;
+        vm.max_instructions = Some(10_000_000);
+        vm.max_objects = Some(20_000);
+        vm.max_evals = Some(100_000);
+        vm.deadline = Some(Instant::now() + std::time::Duration::from_millis(2500));
         let result = vm.run(&chunk);
 
         match result {
@@ -277,7 +313,24 @@ impl Test262Runner {
                 if meta.negative_phase.as_deref() == Some("runtime") {
                     TestStatus::Pass
                 } else {
-                    TestStatus::Fail(format!("Runtime error: {}", run_err))
+                    let msg = match run_err {
+                        doms_vm::VmError::Thrown(val) => {
+                            let str_val = vm.to_string_value(val);
+                            let name_prop = vm.get_property(val, "name");
+                            let message_prop = vm.get_property(val, "message");
+                            if !message_prop.is_undefined() {
+                                if !name_prop.is_undefined() {
+                                    format!("{}: {}", vm.to_string_value(name_prop), vm.to_string_value(message_prop))
+                                } else {
+                                    format!("{}: {}", str_val, vm.to_string_value(message_prop))
+                                }
+                            } else {
+                                str_val
+                            }
+                        }
+                        other => other.to_string(),
+                    };
+                    TestStatus::Fail(format!("Runtime error: {}", msg))
                 }
             }
         }
@@ -311,6 +364,10 @@ impl Test262Runner {
     }
 
     fn collect_tests_recursive(&self, dir: &Path, list: &mut Vec<PathBuf>) {
+        if dir.is_file() {
+            list.push(dir.to_path_buf());
+            return;
+        }
         if !dir.is_dir() {
             return;
         }
@@ -398,7 +455,19 @@ impl Test262Runner {
                 .spawn(move || {
                 for path in chunk {
                     let cat = Self::extract_category(&base_dir, &path);
-                    let status = runner_copy.execute_file(&path);
+                    let status = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runner_copy.execute_file(&path))) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                                s.to_string()
+                            } else if let Some(s) = e.downcast_ref::<String>() {
+                                s.clone()
+                            } else {
+                                "Test execution panicked".to_string()
+                            };
+                            TestStatus::Fail(format!("Worker panic: {}", msg))
+                        }
+                    };
 
                     let mut stats = cat_stats_c.lock().unwrap();
                     let entry = stats.entry(cat).or_default();
@@ -431,8 +500,13 @@ impl Test262Runner {
                         let p = passed_c.load(Ordering::Relaxed);
                         let f = failed_c.load(Ordering::Relaxed);
                         let pct = if comp > 0 { (p as f64 * 100.0) / comp as f64 } else { 0.0 };
-                        eprint!("\r[Live Progress] {:6}/{} ({:5.1}%) | Passed: {:6} ({:5.1}%) | Failed: {:6}    ",
-                            comp, total, (comp as f64 * 100.0) / total as f64, p, pct, f);
+                        if std::io::stderr().is_terminal() {
+                            eprint!("\r[Live Progress] {:6}/{} ({:5.1}%) | Passed: {:6} ({:5.1}%) | Failed: {:6}    ",
+                                comp, total, (comp as f64 * 100.0) / total as f64, p, pct, f);
+                        } else if comp % 500 == 0 || comp == total {
+                            eprintln!("[Progress] {:6}/{} ({:5.1}%) | Passed: {:6} ({:5.1}%) | Failed: {:6}",
+                                comp, total, (comp as f64 * 100.0) / total as f64, p, pct, f);
+                        }
                     }
                 }
             }).expect("Failed to spawn thread");
@@ -484,14 +558,44 @@ impl Test262Runner {
         println!("Time Elapsed            : {:.2}s ({:.1} tests/sec)", elapsed.as_secs_f64(), total as f64 / elapsed.as_secs_f64().max(0.001));
         println!("============================================================");
 
-        // Export summary JSON
+        // Export summary JSON with persistent category merging
         if let Some(ref out_path) = self.config.output_file {
             if let Some(parent) = out_path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
 
-            let mut categories_json = Vec::new();
+            // Load existing categories if summary merging is enabled
+            let mut merged_categories: HashMap<String, CategoryStats> = if !self.config.clean_summary && out_path.is_file() {
+                load_existing_categories(out_path)
+            } else {
+                HashMap::new()
+            };
+
+            // Merge current run's categories (overwriting updated ones)
             for (cat, st) in &sorted_cats {
+                merged_categories.insert((*cat).clone(), (*st).clone());
+            }
+
+            // Calculate overall cumulative stats across ALL recorded categories
+            let mut cumulative_total = 0;
+            let mut cumulative_passed = 0;
+            let mut cumulative_failed = 0;
+            for st in merged_categories.values() {
+                cumulative_total += st.total;
+                cumulative_passed += st.passed;
+                cumulative_failed += st.failed;
+            }
+            let cumulative_pct = if cumulative_total > 0 {
+                (cumulative_passed as f64 * 100.0) / cumulative_total as f64
+            } else {
+                0.0
+            };
+
+            let mut sorted_merged: Vec<_> = merged_categories.iter().collect();
+            sorted_merged.sort_by_key(|(k, _)| (*k).clone());
+
+            let mut categories_json = Vec::new();
+            for (cat, st) in &sorted_merged {
                 let pct = if st.total > 0 { (st.passed as f64 * 100.0) / st.total as f64 } else { 0.0 };
                 categories_json.push(format!(
                     "    \"{}\": {{ \"total\": {}, \"passed\": {}, \"failed\": {}, \"percentage\": {:.2} }}",
@@ -509,24 +613,77 @@ impl Test262Runner {
   "percentage": {:.2},
   "elapsed_seconds": {:.2},
   "timestamp": "{}",
+  "session": {{
+    "total": {},
+    "passed": {},
+    "failed": {},
+    "percentage": {:.2}
+  }},
   "categories": {{
 {}
   }}
 }}"#,
+                cumulative_total,
+                cumulative_passed,
+                cumulative_failed,
+                final_skipped,
+                cumulative_pct,
+                elapsed.as_secs_f64(),
+                chrono_now_utc(),
                 total,
                 final_passed,
                 final_failed,
-                final_skipped,
                 final_pct,
-                elapsed.as_secs_f64(),
-                chrono_now_utc(),
                 categories_json.join(",\n")
             );
 
             if fs::write(out_path, json_body).is_ok() {
-                println!("Metrics saved to: {}", out_path.display());
+                println!("Metrics saved to: {} (cumulative categories: {})", out_path.display(), merged_categories.len());
+                if merged_categories.len() > sorted_cats.len() {
+                    println!("Cumulative Across All Categories: {} tests | Passed: {} | Conformance Rate: {:.2}%",
+                        cumulative_total, cumulative_passed, cumulative_pct);
+                }
             }
         }
+    }
+}
+
+fn load_existing_categories(path: &Path) -> HashMap<String, CategoryStats> {
+    let mut map = HashMap::new();
+    let Ok(content) = fs::read_to_string(path) else { return map; };
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Look for: "category_name": { "total": ..., "passed": ..., "failed": ... }
+        if let Some(colon_pos) = trimmed.find("\": {") {
+            if let Some(start_quote) = trimmed.find('"') {
+                if start_quote < colon_pos {
+                    let cat_name = &trimmed[start_quote + 1..colon_pos];
+                    if cat_name != "categories" && cat_name != "session" {
+                        let total = extract_json_num(trimmed, "\"total\":");
+                        let passed = extract_json_num(trimmed, "\"passed\":");
+                        let failed = extract_json_num(trimmed, "\"failed\":");
+                        if let (Some(total), Some(passed), Some(failed)) = (total, passed, failed) {
+                            map.insert(cat_name.to_string(), CategoryStats { total, passed, failed });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
+fn extract_json_num(line: &str, key: &str) -> Option<usize> {
+    if let Some(pos) = line.find(key) {
+        let after = &line[pos + key.len()..];
+        let val_str: String = after
+            .chars()
+            .skip_while(|c| c.is_whitespace())
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        val_str.parse::<usize>().ok()
+    } else {
+        None
     }
 }
 
@@ -535,3 +692,4 @@ fn chrono_now_utc() -> String {
     let secs = now.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     format!("{}-epoch", secs)
 }
+

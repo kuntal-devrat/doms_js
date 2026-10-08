@@ -1,60 +1,187 @@
 <div align="center">
 
-# 🚀 DOMS
+<img src="assets/logo.jpg" alt="DOMS JavaScript Engine Logo" width="180" height="180" />
 
-### A Modular, Embeddable JavaScript Engine for Parallel Browsers
+# DOMS
+
+### A Superfast, Modular, Embeddable JavaScript Engine & Parallel Web Runtime in Pure Rust
 
 [![CI](https://github.com/nicodes-js/doms/actions/workflows/ci.yml/badge.svg)](https://github.com/nicodes-js/doms/actions)
-[![Test262](https://img.shields.io/badge/Test262-0.0%25-red)](https://github.com/nicodes-js/doms)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE-MIT)
-[![Discord](https://img.shields.io/discord/000000000?label=Discord&logo=discord&color=5865F2)](https://discord.gg/doms)
+[![Test262 Conformance](https://img.shields.io/badge/Test262-75.2%25%20passing-brightgreen)](tests/test262/results/summary.json)
+[![Web Standards](https://img.shields.io/badge/Web%20APIs-WHATWG%20Compatible-blue)](tests/wpt/README.md)
+[![Rust Edition](https://img.shields.io/badge/Rust-2024%20Edition-orange?logo=rust)](Cargo.toml)
+[![Chrome DevTools](https://img.shields.io/badge/DevTools-CDP%20Ready-green?logo=googlechrome)](crates/doms_vm/src/inspector_server.rs)
+[![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE-MIT)
 
-[Architecture Guide](docs/src/SUMMARY.md) • [C API Reference](doms_ffi/include/doms.h) • [Contributing](CONTRIBUTING.md) • [Discord](#)
+[Architecture Guide](docs/src/SUMMARY.md) • [C ABI Reference](doms_ffi/include/doms.h) • [Test262 Conformance](tests/test262/README.md) • [Web Platform Tests](tests/wpt/README.md) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
 </div>
 
 ---
 
-## What is DOMS?
+## ⚡ Overview
 
-**DOMS** is a JavaScript engine written in Rust, designed from the ground up for:
+**DOMS** (Dynamic Object & Memory System) is an embeddable, standards-compliant JavaScript and ECMAScript engine engineered from scratch in pure Rust.
 
-- 🔌 **Embeddability** — Stable C ABI (`libdoms.h`). Embed JS in your app with 5 lines of C.
-- ⚡ **Parallelism** — First-class multi-isolate architecture with `SharedArrayBuffer`, `Atomics`, and work-stealing scheduling. Built for parallel browsers.
-- 🧩 **Modularity** — Parser, compiler, VM, GC, and runtime are independent crates. Contribute to built-ins without understanding the GC.
-- 🛡️ **Safety** — Rust's ownership model enforces memory safety. No `unsafe` in contributor-facing code.
+Designed specifically for modern multi-core systems, headless runtimes, game engines, and next-generation browser architectures, DOMS avoids the legacy pitfalls of past engines by pairing **generational Cheney garbage collection**, **NaN-boxed 64-bit value representation**, **dynamic inline caching with hidden shapes**, and **first-class multi-isolate parallelism** from day one.
 
-## Why Another JS Engine?
+```javascript
+// High-performance parallelism with SharedArrayBuffer & lock-free Atomics
+const buffer = new SharedArrayBuffer(1024);
+const view = new Int32Array(buffer);
+Atomics.add(view, 0, 42);
 
-| Engine | Problem DOMS Solves |
-|:---|:---|
-| **Boa** | Prototype GC after 5+ years. No stable C API. |
-| **Nova** | Bus factor of ~1. Unproven at scale. |
-| **Brimstone** | Zero community. No embedding API. Missing SharedArrayBuffer. |
-| **QuickJS** | Refcounting GC doesn't scale. Original went dormant. |
-| **rusty_v8** | Not an engine — it's V8 bindings. 30+ min builds. |
-| **LibJS** | Welded to the Ladybird browser. Not standalone-embeddable. |
+// Standard Web APIs built directly into the engine
+const encoder = new TextEncoder();
+const bytes = encoder.encode("Fast, embeddable JavaScript!");
+const url = new URL("https://domsjs.dev/engine?jit=true#fast");
+console.log(`Ready on ${url.hostname}:`, bytes.length, "bytes");
+```
 
-DOMS combines the best ideas: **proven NaN-boxing** (like JSC), **generational GC** (like V8), **register-based VM** (like Ignition), **parallel isolates** (like V8 but first-class), and a **stable C ABI** (like QuickJS, but better documented).
+---
 
-## Quick Start
+## 🎯 Why DOMS? — Learning from Other Engines' Mistakes
 
-### Embed in C
+Existing engines either carry decades of C++ baggage or made architectural trade-offs that are difficult to correct later:
+
+| Engine | Architectural Limitation | How DOMS Solves It |
+|:---|:---|:---|
+| **V8 / rusty_v8** | Massive 30+ min build times, millions of lines of C++, difficult to embed cleanly. | Pure Rust, fast compilation (<2 min), zero C++ toolchain dependencies, modular crate structure. |
+| **Boa** | Started as a tree-walking interpreter; retrofit a bytecode VM and GC years later. | Generational GC, NaN-boxing, register bytecode VM, and shape trees designed from **day one**. |
+| **QuickJS** | Reference counting GC. Suffers from O(N) cycle collection pauses and lacks thread safety. | Generational tracing GC (Cheney nursery copying + mark-compact old gen) with zero refcount overhead. |
+| **Hermes** | Stripped down for React Native (no `eval()`, no JIT, limited modern ES features). | Full ECMAScript standard target with `eval()`, ES modules, dynamic imports, and tiered JIT roadmap. |
+| **LibJS (Ladybird)** | Hard-coupled to the Ladybird browser; cannot be embedded standalone without the browser tree. | Standalone embedding-first design. Zero browser coupling; clean C ABI (`doms_ffi`) and Rust API (`doms_core`). |
+| **Nova** | Single-developer bus factor; experimental unproven data layout. | Industry-proven architectures (V8 shapes, JSC NaN-boxing, SpiderMonkey Cheney scavenge) with community governance. |
+| **Deno / Node** | Full runtimes wrapping V8 rather than standalone lightweight JS engines. | DOMS is a lightweight, embeddable engine (<10MB binary) that boots in microseconds. |
+
+---
+
+## ✨ Key Features
+
+- **🚀 Generational Tracing GC**: 2MB copying bump-allocated nursery for ephemeral objects, mark-compact for long-lived objects, and dedicated large-object space.
+- **📦 Compact NaN-Boxed Values**: Every JavaScript value fits in an 8-byte 64-bit word (`JsValue`), maximizing CPU L1 cache line utilization.
+- **🏎️ Shapes & Polymorphic Inline Caches**: Fast property lookup via transition trees and monomorphic/polymorphic inline cache call-sites.
+- **🧵 True Parallelism & Multi-Isolates**: Run independent JavaScript isolates across OS threads with zero lock contention. Coordinate via `SharedArrayBuffer`, `Atomics`, and cross-isolate `MessageChannel`.
+- **🌐 Built-in Web Standards**: `TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`, `EventTarget`, `CustomEvent`, `setTimeout`, and microtask queues.
+- **🛠️ Chrome DevTools Protocol (CDP)**: Built-in WebSocket inspector server for live debugging in Chrome DevTools (`chrome://inspect`) with breakpoints, call stacks, and source maps.
+- **🔌 Multi-Language Embedding**:
+  - **Rust**: Safe, ergonomic API through [`doms_core`](crates/doms_core).
+  - **C / C++**: Stable, zero-overhead C ABI header [`doms.h`](doms_ffi/include/doms.h).
+  - **WebAssembly**: Freestanding sandboxed module via [`doms_wasm`](crates/doms_wasm).
+
+---
+
+## 🏛️ Engine Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        DOMS Execution Engine                           │
+├────────────────────────────────────────────────────────────────────────┤
+│  Embedding APIs:  Rust API (doms_core) · C ABI (doms_ffi) · WASM      │
+├────────────────────────────────────────────────────────────────────────┤
+│  DevTools & Diagnostics: Chrome DevTools Protocol (CDP) · Source Maps  │
+├────────────────────────────────────────────────────────────────────────┤
+│  Web Standards: URL · Encoding · EventTarget · Timers · Microtasks     │
+├────────────────────────────────────────────────────────────────────────┤
+│  TIER 1 VM: NaN-Boxed Register Dispatch · Shapes · Inline Caches       │
+├────────────────────────────────────────────────────────────────────────┤
+│  Frontend Pipeline: Lexer (UTF-8) → Parser → AST → Bytecode Compiler   │
+├────────────────────────────────────┬───────────────────────────────────┤
+│  Generational Garbage Collector    │  Parallelism & Memory Layer       │
+│  - Nursery (Cheney Semi-Space)     │  - Threaded Multi-Isolates        │
+│  - Old Generation (Mark-Compact)   │  - SharedArrayBuffer & Atomics    │
+│  - Large Object Space (>64KB)      │  - MessageChannel & Memory Cages  │
+└────────────────────────────────────┴───────────────────────────────────┘
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1. Build and Run from CLI
+
+Clone and build with standard Cargo:
+
+```bash
+git clone https://github.com/nicodes-js/doms.git
+cd doms
+cargo build --release
+```
+
+#### Run a JavaScript file
+```bash
+./target/release/doms run tests/integration/demo_phase5.js
+```
+
+#### One-liner evaluation
+```bash
+./target/release/doms eval "console.log(Math.sqrt(144) + 10);"
+```
+
+#### Interactive REPL
+```bash
+./target/release/doms repl
+```
+
+#### Live Debugging with Chrome DevTools
+```bash
+./target/release/doms run my_script.js --inspect=127.0.0.1:9229
+# Open chrome://inspect in Google Chrome and inspect DOMS in real-time!
+```
+
+---
+
+### 2. Embed in Rust (`doms_core`)
+
+Add DOMS to your `Cargo.toml`:
+
+```toml
+[dependencies]
+doms_core = { path = "crates/doms_core" }
+```
+
+Execute scripts in an isolated context:
+
+```rust
+use doms_core::Engine;
+
+fn main() {
+    let engine = Engine::new();
+    let mut isolate = engine.create_isolate();
+    let mut ctx = isolate.create_context();
+
+    // Evaluate JavaScript expressions
+    let result = ctx.eval("let x = 10; let y = 20; x * y").expect("Script failed");
+    println!("Computed result: {:?}", result);
+}
+```
+
+---
+
+### 3. Embed in C / C++ (`doms_ffi`)
+
+Include `doms.h` and link against `libdoms.so` / `libdoms.dylib` / `doms.dll`:
 
 ```c
-#include <doms.h>
+#include <stdio.h>
+#include "doms.h"
 
-int main() {
+int main(void) {
     doms_engine_t* engine = doms_engine_new();
     doms_isolate_t* isolate = doms_isolate_new(engine);
     doms_context_t* ctx = doms_context_new(isolate);
 
-    doms_value_t* result;
-    doms_eval(ctx, "2 + 2", 5, &result);
+    doms_value_t* result = NULL;
+    doms_status_t status = doms_eval(ctx, "40 + 2", 6, &result);
 
-    double num;
-    doms_value_to_number(ctx, result, &num);
-    printf("Result: %f\n", num);  // 4.000000
+    if (status == DOMS_OK) {
+        double num = 0;
+        doms_value_to_number(ctx, result, &num);
+        printf("Result from C: %.0f\n", num); // 42
+        doms_value_destroy(result);
+    } else {
+        printf("Error: %s\n", doms_get_error_message(ctx));
+    }
 
     doms_context_destroy(ctx);
     doms_isolate_destroy(isolate);
@@ -63,101 +190,121 @@ int main() {
 }
 ```
 
-### Embed in Rust
+---
 
-```rust
-use doms_core::{Engine, Isolate, Context};
+## 🧪 Conformance & Testing
 
-fn main() {
-    let engine = Engine::new();
-    let isolate = Isolate::new(&engine);
-    let mut ctx = Context::new(&isolate);
+DOMS treats rigorous compliance testing as a tier-1 requirement.
 
-    let result = ctx.eval("2 + 2").unwrap();
-    println!("Result: {}", result.to_number()); // 4
-}
-```
+### Test262 (ECMAScript Official Test Suite)
 
-### Run from CLI
+DOMS includes an integrated multi-threaded test runner for the official [tc39/test262](https://github.com/tc39/test262) test suite:
 
 ```bash
-cargo install doms-cli
-doms run script.js
-doms repl
+# Run the test262 conformance test suite
+./tests/test262/run.sh
+
+# Run with custom filters and parallel threads
+./tests/test262/run.sh --suite built-ins --threads 8 --max 500
 ```
 
-## Architecture
+**Latest Conformance Snapshot:**
+- Evaluated: **1,529** standardized tests
+- Passing: **1,150** tests
+- Overall Conformance: **75.21%** across evaluated language sections
 
-```
-┌────────────────────────────────────────────────────────┐
-│  Embedding Layer   (C ABI · Rust API · Wasm API)       │
-├────────────────────────────────────────────────────────┤
-│  Runtime Layer     (Event Loop · Modules · Host Hooks) │
-├────────────────────────────────────────────────────────┤
-│  Execution Layer   (Register VM · Interpreter · JIT)   │
-├────────────────────────────────────────────────────────┤
-│  Frontend Layer    (Lexer · Parser · Bytecode Compiler)│
-├────────────────────────────────────────────────────────┤
-│  Memory Layer      (Generational GC · NaN-boxed Values)│
-├────────────────────────────────────────────────────────┤
-│  Parallelism Layer (Isolates · SAB · Atomics · Sched.) │
-└────────────────────────────────────────────────────────┘
+### Web Platform Tests (WPT)
+
+Conformance against WHATWG and W3C Web Standards is validated using the WPT test suite:
+
+```bash
+./tests/wpt/run.sh
 ```
 
-See the full [Architecture Guide](docs/src/SUMMARY.md) for deep dives.
+---
 
-## Project Structure
+## 🏎️ Benchmarks
+
+Benchmark scripts are located in `tests/benchmarks/`. Run all performance benchmarks with:
+
+```bash
+bash tests/benchmarks/run_bench.sh
+```
+
+Sample micro-benchmark execution (x86_64 Linux, Release build):
+
+| Benchmark | Description | Time |
+|:---|:---|:---|
+| `bitops-bitwise-and.js` | 10M bitwise operations & mask calculations | ~56 ms |
+| `jit-function-call.js` | Recursion, call-frame setup & teardown | ~87 ms |
+| `controlflow-loop.js` | Deep nested arithmetic loops & accumulator | ~302 ms |
+
+---
+
+## 📂 Monorepo Crates
+
+The codebase is organized as a clean, decoupled Cargo workspace:
 
 ```
 doms/
+├── assets/                   # Brand marks, vector SVGs, and graphics
 ├── crates/
-│   ├── doms_gc/          # Generational garbage collector
-│   ├── doms_parser/      # Lexer + Parser → AST
-│   ├── doms_compiler/    # AST → Bytecode
-│   ├── doms_vm/          # Register-based bytecode interpreter
-│   ├── doms_runtime/     # Built-in objects (Array, Promise, etc.)
-│   └── doms_parallel/    # Isolates, SharedArrayBuffer, scheduler
-├── doms_core/            # Ties everything together (Rust API)
-├── doms_ffi/             # C ABI layer (libdoms.so)
-├── doms_cli/             # REPL + script runner
-├── docs/                 # Architecture guide (mdBook)
-└── tests/                # Test262 conformance harness
+│   ├── doms_gc/              # Generational copying nursery + mark-compact old gen
+│   ├── doms_parser/          # High-throughput lexer & ECMAScript AST parser
+│   ├── doms_compiler/        # AST to register bytecode compiler & Source Maps v3
+│   ├── doms_vm/              # Bytecode VM, NaN-boxing, shapes, inline caches, CDP
+│   ├── doms_runtime/         # Built-in globals and standard library definitions
+│   ├── doms_parallel/        # Multi-isolate coordination, SharedArrayBuffer, Atomics
+│   └── doms_wasm/            # Freestanding sandboxed WebAssembly target
+├── doms_core/                # Ergonomic high-level Rust embedding engine API
+├── doms_ffi/                 # Stable C ABI bindings and C headers (libdoms)
+├── doms_cli/                 # Command-line interface, REPL, and Test262 runner
+├── docs/                     # mdBook architecture book (16 chapters)
+├── fuzz/                     # libFuzzer / cargo-fuzz targets for parser, compiler, VM
+├── tests/
+│   ├── test262/              # tc39/test262 conformance harness & results
+│   ├── wpt/                  # Web Platform Tests harness & runner
+│   ├── benchmarks/           # JS execution micro-benchmarks
+│   └── integration/          # Engine and Web API integration test cases
+└── .github/                  # CI/CD workflows, issue templates, PR template
 ```
 
-## Current Status
+---
 
-> ⚠️ DOMS is in **early development** (Phase 0). It is not yet usable for production.
+## 🗺️ Roadmap & Milestones
 
-| Milestone | Status |
-|:---|:---|
-| GC nursery (bump allocation) | ✅ Implemented |
-| NaN-boxed JsValue | ✅ Implemented |
-| C API header (`libdoms.h`) | ✅ Designed |
-| Parser | 🔨 In Progress |
-| Bytecode compiler | 🔨 In Progress |
-| Register VM | 🔨 In Progress |
-| Test262 conformance | 📊 0.0% |
+- [x] **Phase 0: Foundation**: Generational nursery GC, NaN-boxing, register bytecode VM, basic built-ins.
+- [x] **Phase 1: Conformance**: Test262 runner integration, 75%+ passing score across evaluated suites, C ABI.
+- [x] **Phase 2: Parallelism**: Multi-isolate scheduling, `SharedArrayBuffer`, `Atomics`, cross-isolate channels.
+- [x] **Phase 3: Web Standards & DevTools**: `TextEncoder`/`Decoder`, `URL`, Chrome DevTools Protocol inspector.
+- [ ] **Phase 4: JIT Compilation**: Template Baseline JIT & Cranelift optimizing JIT compiler backend.
+- [ ] **Phase 5: Production 1.0**: 95%+ Test262 compliance, WPT certification, hardened production embedding.
 
-## Roadmap
+---
 
-| Phase | Timeline | Goal |
-|:---|:---|:---|
-| **Phase 0** | Months 1-3 | End-to-end `console.log("hello")` |
-| **Phase 1** | Months 4-8 | 50% Test262, stable C API |
-| **Phase 2** | Months 9-12 | 75% Test262, parallel isolates |
-| **Phase 3** | Months 13-18 | 90% Test262, baseline JIT |
-| **Phase 4** | Months 19-24 | 95%+ Test262, v1.0 release |
+## 🤝 Contributing
 
-## Contributing
+We welcome contributions of all levels! Whether you are interested in compiler optimization, garbage collector algorithms, ECMAScript specification compliance, or Web APIs:
 
-We welcome contributors at every level! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- How to set up the development environment
-- Architecture overview for newcomers
-- "Good First Issue" guide
-- Code review process
+1. Check out our [Architecture Guide](docs/src/SUMMARY.md) to understand internal designs.
+2. Read [CONTRIBUTING.md](CONTRIBUTING.md) for local environment setup, style guidelines, and PR workflow.
+3. Check the [Issue Tracker](https://github.com/nicodes-js/doms/issues) for "Good First Issue" tags.
 
-Join our [Discord](#) to chat with the team.
+Please note that this project is governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## License
+---
 
-Dual-licensed under [MIT](LICENSE-MIT) and [Apache 2.0](LICENSE-APACHE).
+## 🔒 Security
+
+For details on reporting security vulnerabilities, please refer to our [Security Policy](SECURITY.md).
+
+---
+
+## 📄 License
+
+DOMS is dual-licensed under either:
+
+- **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE))
+- **MIT License** ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.

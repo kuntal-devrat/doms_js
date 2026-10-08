@@ -17,7 +17,7 @@ fn main() {
 
     match args[1].as_str() {
         "-v" | "--version" => {
-            println!("DOMS.js v1.0.0 (Phase 5 - Web Standards, Live DevTools & WASM)");
+            println!("DOMS.js v{} (Modular Embeddable Parallel ECMAScript Engine)", env!("CARGO_PKG_VERSION"));
         }
         "-h" | "--help" => {
             print_help();
@@ -39,7 +39,7 @@ fn main() {
                             i += 1;
                         }
                     }
-                    "-m" | "--max" => {
+                    "-m" | "--max" | "--max-tests" => {
                         if i + 1 < args.len() {
                             if let Ok(n) = args[i + 1].parse::<usize>() {
                                 config.max_tests = Some(n);
@@ -57,6 +57,21 @@ fn main() {
                     }
                     "-v" | "--verbose" => {
                         config.verbose = true;
+                    }
+                    "--test262-dir" => {
+                        if i + 1 < args.len() {
+                            config.test262_dir = std::path::PathBuf::from(args[i + 1].clone());
+                            i += 1;
+                        }
+                    }
+                    "-o" | "--output" => {
+                        if i + 1 < args.len() {
+                            config.output_file = Some(std::path::PathBuf::from(args[i + 1].clone()));
+                            i += 1;
+                        }
+                    }
+                    "--clean" | "--reset" => {
+                        config.clean_summary = true;
                     }
                     pos_arg if !pos_arg.starts_with('-') => {
                         config.suite_filter = Some(pos_arg.to_string());
@@ -198,7 +213,7 @@ fn run_file(filepath: &str, inspect: bool, inspect_brk: bool, inspect_addr: &str
 }
 
 fn run_repl() {
-    println!("DOMS.js v0.1.0 Interactive REPL");
+    println!("DOMS.js v{} Interactive REPL", env!("CARGO_PKG_VERSION"));
     println!("Type JavaScript expressions or statements. Press Ctrl+C or Ctrl+D to exit.\n");
 
     let stdin = io::stdin();

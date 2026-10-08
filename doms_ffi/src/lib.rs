@@ -111,7 +111,7 @@ pub unsafe extern "C" fn doms_eval(
         }
         Err(err) => {
             unsafe {
-                (*ctx).last_error = Some(err);
+                (*ctx).last_error = std::ffi::CString::new(err.to_string()).ok();
             }
             doms_status_t::ErrorRuntime
         }
@@ -361,7 +361,7 @@ pub unsafe extern "C" fn doms_call(
         }
         Err(e) => {
             unsafe {
-                (*ctx).last_error = Some(e.to_string());
+                (*ctx).last_error = std::ffi::CString::new(e.to_string()).ok();
             }
             doms_status_t::ErrorRuntime
         }
@@ -511,7 +511,7 @@ pub unsafe extern "C" fn doms_get_error_message(ctx: *mut doms_context_t) -> *co
     }
     unsafe {
         match &(*ctx).last_error {
-            Some(msg) => msg.as_ptr() as *const c_char,
+            Some(msg) => msg.as_ptr(),
             None => ptr::null(),
         }
     }

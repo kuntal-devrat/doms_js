@@ -55,12 +55,12 @@ impl Default for DomsWasmSandbox {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn doms_wasm_version() -> *const u8 {
-    c"DOMS.js Wasm v1.0.0 (Phase 5)".as_ptr() as *const u8
+    concat!("DOMS.js Wasm v", env!("CARGO_PKG_VERSION"), "\0").as_ptr()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn doms_wasm_alloc(size: usize) -> *mut u8 {
-    let mut vec = Vec::with_capacity(size);
+    let mut vec = vec![0u8; size];
     let ptr = vec.as_mut_ptr();
     std::mem::forget(vec);
     ptr
@@ -70,7 +70,7 @@ pub extern "C" fn doms_wasm_alloc(size: usize) -> *mut u8 {
 pub extern "C" fn doms_wasm_free(ptr: *mut u8, size: usize) {
     if !ptr.is_null() && size > 0 {
         unsafe {
-            let _ = Vec::from_raw_parts(ptr, 0, size);
+            let _ = Vec::from_raw_parts(ptr, size, size);
         }
     }
 }

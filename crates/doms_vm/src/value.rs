@@ -48,7 +48,7 @@ const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 const PAYLOAD32_MASK: u64 = 0x0000_0000_FFFF_FFFF;
 
 /// A NaN-boxed JavaScript value.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct JsValue(pub u64);
 
@@ -242,6 +242,11 @@ impl JsValue {
     #[inline]
     pub fn as_string_ptr(&self) -> Option<*mut u8> {
         if self.is_string() { Some((self.0 & PAYLOAD_MASK) as *mut u8) } else { None }
+    }
+
+    #[inline]
+    pub fn as_symbol_ptr(&self) -> Option<*mut u8> {
+        if self.is_symbol() { Some((self.0 & PAYLOAD_MASK) as *mut u8) } else { None }
     }
 
     // ── Raw access ──

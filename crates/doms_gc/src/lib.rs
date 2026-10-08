@@ -25,6 +25,8 @@
 //! - [`Trace`] — Trait implemented by all GC-managed types.
 //! - [`GcHeader`] — Object metadata header prepended to every allocation.
 
+#![deny(unsafe_op_in_unsafe_fn)]
+
 pub mod gc_ref;
 pub mod header;
 pub mod heap;
@@ -35,8 +37,8 @@ pub mod trace;
 
 pub use gc_ref::GcRef;
 pub use header::GcHeader;
-pub use heap::Heap;
+pub use heap::{Heap, RememberedSet};
 pub use large_object::LargeObjectSpace;
 pub use nursery::Nursery;
-pub use old_gen::OldGen;
-pub use trace::{Trace, Tracer};
+pub use old_gen::{FreeChunk, OldGen};
+pub use trace::{Trace, TraceVisitor, Tracer, TypeRegistry};

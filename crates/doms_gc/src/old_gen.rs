@@ -28,6 +28,15 @@ pub enum MarkState {
     Complete,
 }
 
+/// A free memory chunk in the old generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreeChunk {
+    /// Byte offset from `start`.
+    pub offset: usize,
+    /// Size of the chunk in bytes.
+    pub size: usize,
+}
+
 /// The old generation — tenured object space.
 pub struct OldGen {
     /// Start of the old generation memory region.
@@ -46,6 +55,8 @@ pub struct OldGen {
     pub mark_state: MarkState,
     /// Worklist for incremental tracing.
     pub mark_worklist: Vec<*mut u8>,
+    /// Free chunks reclaimed by sweep for reuse.
+    pub free_chunks: Vec<FreeChunk>,
 }
 
 impl OldGen {
@@ -75,6 +86,7 @@ impl OldGen {
             bytes_used: 0,
             mark_state: MarkState::Idle,
             mark_worklist: Vec::new(),
+            free_chunks: Vec::new(),
         }
     }
 
@@ -94,15 +106,39 @@ impl OldGen {
         // SAFETY: payload_ptr is a valid GC allocation in the nursery.
         let header = unsafe { &*((payload_ptr as *const GcHeader).sub(1)) };
         let total_size = header.total_size();
+        let src = unsafe { payload_ptr.sub(HEADER_SIZE) };
 
-        // Check space.
+        // Try to allocate from the free list first.
+        for i in 0..self.free_chunks.len() {
+            if self.free_chunks[i].size >= total_size {
+                let chunk = self.free_chunks.remove(i);
+                let dest = unsafe { self.start.add(chunk.offset) };
+                // SAFETY: dest is within bounds, non-overlapping with nursery.
+                unsafe {
+                    ptr::copy_nonoverlapping(src, dest, total_size);
+                    let new_header = dest as *mut GcHeader;
+                    (*new_header).set_tenured();
+                }
+                let remaining_sz = chunk.size - total_size;
+                if remaining_sz >= HEADER_SIZE + GC_ALIGN {
+                    self.free_chunks.push(FreeChunk {
+                        offset: chunk.offset + total_size,
+                        size: remaining_sz,
+                    });
+                }
+                self.object_count += 1;
+                self.bytes_used += total_size;
+                return Some(unsafe { dest.add(HEADER_SIZE) });
+            }
+        }
+
+        // Check bump pointer space.
         let remaining = unsafe { self.limit.offset_from(self.cursor) } as usize;
         if total_size > remaining {
             return None;
         }
 
-        // Copy header + payload.
-        let src = unsafe { payload_ptr.sub(HEADER_SIZE) };
+        // Copy header + payload via bump pointer.
         // SAFETY: Non-overlapping copy, both regions are valid.
         unsafe {
             ptr::copy_nonoverlapping(src, self.cursor, total_size);
@@ -243,13 +279,70 @@ impl OldGen {
         self.object_count = live_count;
         self.mark_state = MarkState::Idle;
         self.mark_worklist.clear();
+        self.free_chunks.clear();
         reclaimed
     }
 
-    /// Sweep unmarked objects and reset marks.
+    /// Sweep unmarked objects without moving live objects.
+    ///
+    /// Reclaims memory from unmarked objects into the free list, resetting
+    /// mark bits for live objects. Unlike `compact()`, `sweep()` does not slide
+    /// objects, ensuring that existing pointers remain completely valid.
     /// Returns the number of bytes reclaimed.
     pub fn sweep(&mut self) -> usize {
-        self.compact()
+        let mut scan = self.start;
+        let mut live_bytes = 0;
+        let mut live_count = 0;
+        let mut reclaimed_bytes = 0;
+        self.free_chunks.clear();
+
+        let mut current_free_offset: Option<usize> = None;
+        let mut current_free_size = 0;
+
+        while scan < self.cursor {
+            unsafe {
+                let header = &mut *(scan as *mut GcHeader);
+                let sz = header.total_size();
+                if sz == 0 {
+                    break;
+                }
+                let offset = scan.offset_from(self.start) as usize;
+                if header.is_marked() {
+                    header.clear_marked();
+                    live_bytes += sz;
+                    live_count += 1;
+                    if let Some(off) = current_free_offset.take() {
+                        self.free_chunks.push(FreeChunk {
+                            offset: off,
+                            size: current_free_size,
+                        });
+                        current_free_size = 0;
+                    }
+                } else {
+                    // Mark bit not set: object is dead. Zero its header/payload and add to free list.
+                    ptr::write_bytes(scan, 0, sz);
+                    reclaimed_bytes += sz;
+                    if current_free_offset.is_none() {
+                        current_free_offset = Some(offset);
+                    }
+                    current_free_size += sz;
+                }
+                scan = scan.add(sz);
+            }
+        }
+
+        if let Some(off) = current_free_offset {
+            self.free_chunks.push(FreeChunk {
+                offset: off,
+                size: current_free_size,
+            });
+        }
+
+        self.bytes_used = live_bytes;
+        self.object_count = live_count;
+        self.mark_state = MarkState::Idle;
+        self.mark_worklist.clear();
+        reclaimed_bytes
     }
 }
 
@@ -369,6 +462,41 @@ mod tests {
         let reclaimed = old_gen.compact();
         assert!(reclaimed > 0);
         assert_eq!(old_gen.object_count, 1);
+    }
+
+    #[test]
+    fn test_old_gen_sweep_and_reuse() {
+        let mut nursery = Nursery::new(4096);
+        let mut old_gen = OldGen::new(4096);
+
+        let p1 = nursery.allocate(16, TypeTag::Object).unwrap();
+        let p2 = nursery.allocate(16, TypeTag::Object).unwrap();
+        let p3 = nursery.allocate(16, TypeTag::Object).unwrap();
+
+        let old_p1 = unsafe { old_gen.promote(p1).unwrap() };
+        let _old_p2 = unsafe { old_gen.promote(p2).unwrap() };
+        let old_p3 = unsafe { old_gen.promote(p3).unwrap() };
+
+        assert_eq!(old_gen.object_count, 3);
+
+        // Mark only p1 and p3 (p2 is dead)
+        old_gen.start_incremental_marking(&[old_p1, old_p3]);
+
+        // Sweep: p2 is swept without moving p1 or p3
+        let reclaimed = old_gen.sweep();
+        assert!(reclaimed > 0);
+        assert_eq!(old_gen.object_count, 2);
+        assert!(!old_gen.free_chunks.is_empty());
+
+        // Live object pointers must NOT have changed!
+        assert!(old_gen.contains(old_p1));
+        assert!(old_gen.contains(old_p3));
+
+        // Allocating another object should reuse the freed chunk
+        let p4 = nursery.allocate(16, TypeTag::Object).unwrap();
+        let old_p4 = unsafe { old_gen.promote(p4).unwrap() };
+        assert_eq!(old_gen.object_count, 3);
+        assert!(old_gen.contains(old_p4));
     }
 }
 

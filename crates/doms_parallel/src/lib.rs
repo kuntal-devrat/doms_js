@@ -11,5 +11,5 @@ pub mod shared_array_buffer;
 pub use atomics::{Atomics, AtomicsError};
 pub use memory_cage::{CagedAllocation, CagedBuffer, MemoryCage, DEFAULT_CAGE_SIZE};
 pub use message_channel::{ChannelError, MessageChannel, MessageData, MessagePort};
-pub use scheduler::Scheduler;
+pub use scheduler::{Scheduler, TaskHandle, TaskPriority};
 pub use shared_array_buffer::SharedArrayBuffer;

@@ -109,6 +109,7 @@ fn register_encoding(vm: &mut Vm) {
             buffer: Arc::new(sab),
             kind: TypedArrayKind::Uint8,
             length: bytes.len(),
+            byte_offset: 0,
         }))
     });
     vm.set_property(text_encoder_proto, "encode", encode_fn);
@@ -129,6 +130,7 @@ fn register_encoding(vm: &mut Vm) {
                 buffer: Arc::new(sab),
                 kind: TypedArrayKind::Uint8,
                 length: bytes.len(),
+                byte_offset: 0,
             }))
         });
         vm.set_property(instance, "encode", encode_fn);

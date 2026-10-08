@@ -139,6 +139,41 @@ impl ShapeRegistry {
         }
         false
     }
+
+    /// Return all property names defined in this shape in insertion order.
+    pub fn all_properties(&self, shape_id: ShapeId) -> Vec<String> {
+        if let Some(s) = self.get(shape_id) {
+            let mut props: Vec<(&String, u32)> = s.property_offsets.iter().map(|(k, info)| (k, info.offset)).collect();
+            props.sort_by_key(|(_, off)| *off);
+            props.into_iter().map(|(k, _)| k.clone()).collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Remove a property from a shape, returning a new shape ID without the property.
+    pub fn remove_property(&mut self, current_shape_id: ShapeId, key: &str) -> ShapeId {
+        let parent = match self.get(current_shape_id) {
+            Some(p) => p,
+            None => return current_shape_id,
+        };
+        if !parent.property_offsets.contains_key(key) {
+            return current_shape_id;
+        }
+        let mut property_offsets = parent.property_offsets.clone();
+        property_offsets.remove(key);
+        let next_offset = parent.next_offset;
+        let new_id = self.shapes.len() as ShapeId;
+        let new_shape = Shape {
+            id: new_id,
+            parent: Some(current_shape_id),
+            property_offsets,
+            transitions: HashMap::new(),
+            next_offset,
+        };
+        self.shapes.push(new_shape);
+        new_id
+    }
 }
 
 impl Default for ShapeRegistry {

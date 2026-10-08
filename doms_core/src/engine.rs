@@ -87,6 +87,19 @@ impl Default for Isolate {
     }
 }
 
+/// Comprehensive error hierarchy for JavaScript engine execution.
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    #[error("Parse error: {0}")]
+    Parser(#[from] doms_parser::ParseError),
+    #[error("Compile error: {0}")]
+    Compiler(#[from] doms_compiler::CompileError),
+    #[error("Runtime error: {0}")]
+    Runtime(#[from] doms_vm::VmError),
+    #[error("Execution error: {0}")]
+    Generic(String),
+}
+
 /// An execution context within an isolate.
 ///
 /// A context represents a global scope: it has its own global object and
@@ -103,18 +116,68 @@ impl<'isolate> Context<'isolate> {
         Self { isolate }
     }
 
-    /// Evaluate a JavaScript source string and return the result.
+    /// Evaluate a JavaScript source string, draining microtasks, and return the result.
     ///
-    /// This is a convenience method that parses, compiles, and executes
-    /// the source in one step.
+    /// This is a convenience method that parses, compiles, executes
+    /// the source, and drains microtasks in one step.
     ///
     /// # Errors
     ///
-    /// Returns an error string if parsing, compilation, or execution fails.
-    pub fn eval(&mut self, source: &str) -> Result<JsValue, String> {
-        let program = doms_parser::parse(source).map_err(|e| e.to_string())?;
-        let chunk = doms_compiler::compile(&program).map_err(|e| e.to_string())?;
-        self.isolate.vm.run(&chunk).map_err(|e| e.to_string())
+    /// Returns an [`EngineError`] if parsing, compilation, or execution fails.
+    pub fn eval(&mut self, source: &str) -> Result<JsValue, EngineError> {
+        let program = doms_parser::parse(source)?;
+        let chunk = doms_compiler::compile(&program)?;
+        let result = self.isolate.vm.run(&chunk)?;
+        let _ = self.isolate.vm.drain_microtasks();
+        Ok(result)
+    }
+
+    /// Evaluate an ES6 module source string, executing it, draining microtasks,
+    /// and returning the module namespace object containing all exported bindings.
+    pub fn eval_module(&mut self, source: &str) -> Result<JsValue, EngineError> {
+        let program = doms_parser::parse_module(source)?;
+        let chunk = doms_compiler::compile(&program)?;
+        let old_exports = std::mem::take(&mut self.isolate.vm.current_exports);
+        let _ = self.isolate.vm.run(&chunk)?;
+        let _ = self.isolate.vm.drain_microtasks();
+        let exports = std::mem::replace(&mut self.isolate.vm.current_exports, old_exports);
+
+        let mod_obj = self.isolate.vm.alloc_object();
+        for (k, v) in exports {
+            self.isolate.vm.set_property(mod_obj, &k, v);
+        }
+        if let Some(tag_sym) = self.isolate.vm.symbol_to_string_tag {
+            let tag_val = self.isolate.vm.alloc_string("Module".to_string());
+            self.isolate.vm.set_symbol_property(mod_obj, tag_sym, tag_val);
+        }
+        Ok(mod_obj)
+    }
+
+    /// Register a module namespace object under a specifier for `import` resolution.
+    pub fn register_module(&mut self, specifier: &str, module_obj: JsValue) {
+        self.isolate.vm.modules.insert(specifier.to_string(), module_obj);
+    }
+
+    /// Evaluate an ES6 module and register it under the given specifier.
+    pub fn load_module(&mut self, specifier: &str, source: &str) -> Result<JsValue, EngineError> {
+        let mod_obj = self.eval_module(source)?;
+        self.register_module(specifier, mod_obj);
+        Ok(mod_obj)
+    }
+
+    /// Drain all queued microtasks.
+    pub fn drain_microtasks(&mut self) -> Result<(), EngineError> {
+        self.isolate.vm.drain_microtasks().map_err(EngineError::from)
+    }
+
+    /// Step the event loop once. Returns `true` if work was performed.
+    pub fn step_event_loop(&mut self) -> Result<bool, EngineError> {
+        self.isolate.vm.step_event_loop().map_err(EngineError::from)
+    }
+
+    /// Run the event loop until all timers and microtasks have completed.
+    pub fn run_event_loop(&mut self) -> Result<(), EngineError> {
+        self.isolate.vm.run_event_loop().map_err(EngineError::from)
     }
 
     /// Get a reference to the isolate's heap.
@@ -169,5 +232,59 @@ mod tests {
         let _iso1 = engine.create_isolate();
         let _iso2 = engine.create_isolate();
         // Both isolates are independent — no shared state.
+    }
+
+    #[test]
+    fn test_context_eval_error_hierarchy() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let mut ctx = isolate.create_context();
+
+        // Syntax error -> EngineError::Parser
+        let parse_err = ctx.eval("let = ;");
+        assert!(matches!(parse_err, Err(EngineError::Parser(_))));
+
+        // Runtime error -> EngineError::Runtime
+        let rt_err = ctx.eval("nonExistentFunction();");
+        assert!(matches!(rt_err, Err(EngineError::Runtime(_))));
+    }
+
+    #[test]
+    fn test_context_microtasks_draining() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let mut ctx = isolate.create_context();
+
+        let res = ctx.eval("var resolvedVal = 0; Promise.resolve(42).then(v => { resolvedVal = v; }); resolvedVal;");
+        assert!(res.is_ok());
+        // Since eval drains microtasks, the promise reaction has executed:
+        let val = ctx.eval("resolvedVal").unwrap().to_int32().unwrap();
+        assert_eq!(val, 42);
+    }
+
+    #[test]
+    fn test_context_eval_module() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let mut ctx = isolate.create_context();
+
+        let mod_ns = ctx.eval_module("export var a = 10; export var b = 20;").unwrap();
+        assert!(mod_ns.is_object());
+        let a_val = ctx.isolate.vm.get_property(mod_ns, "a").to_int32().unwrap();
+        let b_val = ctx.isolate.vm.get_property(mod_ns, "b").to_int32().unwrap();
+        assert_eq!(a_val, 10);
+        assert_eq!(b_val, 20);
+    }
+
+    #[test]
+    fn test_context_load_and_import_module() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let mut ctx = isolate.create_context();
+
+        ctx.load_module("calc", "export var factor = 2; export function double(x) { return x * 2; }").unwrap();
+        let mod_res = ctx.eval_module("import { factor, double } from 'calc'; export var res = double(21);").unwrap();
+        let val = ctx.isolate.vm.get_property(mod_res, "res").to_int32();
+        assert_eq!(val, Some(42));
     }
 }

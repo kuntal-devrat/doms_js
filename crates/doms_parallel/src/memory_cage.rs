@@ -6,12 +6,29 @@
 //! Any out-of-bounds access or corrupted offset is strictly clamped within the cage,
 //! preventing arbitrary process memory tampering or security escapes.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 
 /// Standard memory cage virtual size (4 GiB virtual reservation window).
 pub const DEFAULT_CAGE_SIZE: usize = 4 * 1024 * 1024 * 1024; // 4 GiB
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn mmap(addr: *mut u8, len: usize, prot: i32, flags: i32, fd: i32, offset: i64) -> *mut u8;
+    fn munmap(addr: *mut u8, len: usize) -> i32;
+}
+
+#[cfg(unix)]
+const PROT_READ: i32 = 1;
+#[cfg(unix)]
+const PROT_WRITE: i32 = 2;
+#[cfg(unix)]
+const MAP_PRIVATE: i32 = 0x02;
+#[cfg(unix)]
+const MAP_ANONYMOUS: i32 = 0x20;
+#[cfg(unix)]
+const MAP_NORESERVE: i32 = 0x4000;
 
 /// Represents an individual allocation bounded inside the memory cage.
 #[derive(Debug, Clone)]
@@ -28,25 +45,57 @@ pub struct MemoryCage {
     allocated_bytes: AtomicUsize,
     allocations: Mutex<HashMap<usize, CagedAllocation>>,
     next_id: AtomicUsize,
+    is_mmap: bool,
     #[allow(dead_code)]
-    backing_memory: Vec<u8>,
+    fallback_memory: Option<Vec<u8>>,
 }
+
+unsafe impl Send for MemoryCage {}
+unsafe impl Sync for MemoryCage {}
 
 impl MemoryCage {
     /// Create a new Memory Cage with a specified virtual reservation capacity.
     pub fn new(size: usize) -> Self {
-        let mut backing = Vec::with_capacity(1024);
-        backing.resize(1024.min(size), 0);
+        #[cfg(unix)]
+        {
+            let map_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
+            let ptr = unsafe {
+                mmap(
+                    std::ptr::null_mut(),
+                    size,
+                    PROT_READ | PROT_WRITE,
+                    map_flags,
+                    -1,
+                    0,
+                )
+            };
+            let map_failed = usize::MAX as *mut u8;
+            if ptr != map_failed && !ptr.is_null() {
+                return Self {
+                    cage_base: ptr as usize,
+                    cage_size: size,
+                    allocated_bytes: AtomicUsize::new(0),
+                    allocations: Mutex::new(HashMap::new()),
+                    next_id: AtomicUsize::new(1),
+                    is_mmap: true,
+                    fallback_memory: None,
+                };
+            }
+        }
 
-        let base_ptr = backing.as_ptr() as usize;
+        // Fallback for non-unix or if mmap fails
+        let fallback_size = size.min(1024 * 1024);
+        let mut fallback = vec![0u8; fallback_size];
+        let base = fallback.as_mut_ptr() as usize;
 
         Self {
-            cage_base: base_ptr,
+            cage_base: base,
             cage_size: size,
             allocated_bytes: AtomicUsize::new(0),
             allocations: Mutex::new(HashMap::new()),
             next_id: AtomicUsize::new(1),
-            backing_memory: backing,
+            is_mmap: false,
+            fallback_memory: Some(fallback),
         }
     }
 
@@ -65,6 +114,11 @@ impl MemoryCage {
         self.cage_size
     }
 
+    /// Whether this cage is backed by real OS mmap virtual memory.
+    pub fn is_virtual_mmap(&self) -> bool {
+        self.is_mmap
+    }
+
     /// Currently allocated bytes within the cage.
     pub fn allocated_bytes(&self) -> usize {
         self.allocated_bytes.load(Ordering::SeqCst)
@@ -77,8 +131,8 @@ impl MemoryCage {
         }
 
         let current = self.allocated_bytes.load(Ordering::SeqCst);
-        if current + size > self.cage_size {
-            return Err("MemoryCage: allocation exceeds 4GiB cage capacity");
+        if current.saturating_add(size) > self.cage_size {
+            return Err("MemoryCage: allocation exceeds cage capacity");
         }
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
@@ -91,14 +145,21 @@ impl MemoryCage {
         };
 
         let mut map = self.allocations.lock().unwrap();
-        map.insert(id, alloc.clone());
+        map.insert(id, alloc);
         self.allocated_bytes.fetch_add(size, Ordering::SeqCst);
+
+        let data = if self.is_mmap {
+            let slice_ptr = (self.cage_base + offset) as *mut u8;
+            CagedBufferStorage::Virtual(slice_ptr)
+        } else {
+            CagedBufferStorage::Heap(Arc::new(Mutex::new(vec![0u8; size])))
+        };
 
         Ok(CagedBuffer {
             id,
             offset_in_cage: offset,
             size,
-            data: Arc::new(Mutex::new(vec![0u8; size])),
+            storage: data,
         })
     }
 
@@ -108,13 +169,33 @@ impl MemoryCage {
     }
 }
 
+impl Drop for MemoryCage {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if self.is_mmap && self.cage_base != 0 {
+            unsafe {
+                munmap(self.cage_base as *mut u8, self.cage_size);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum CagedBufferStorage {
+    Virtual(*mut u8),
+    Heap(Arc<Mutex<Vec<u8>>>),
+}
+
+unsafe impl Send for CagedBufferStorage {}
+unsafe impl Sync for CagedBufferStorage {}
+
 /// A slice of memory strictly allocated and guarded by the Memory Cage.
 #[derive(Debug, Clone)]
 pub struct CagedBuffer {
     pub id: usize,
     pub offset_in_cage: usize,
     pub size: usize,
-    data: Arc<Mutex<Vec<u8>>>,
+    storage: CagedBufferStorage,
 }
 
 impl CagedBuffer {
@@ -123,7 +204,7 @@ impl CagedBuffer {
             id: 0,
             offset_in_cage: 0,
             size: 0,
-            data: Arc::new(Mutex::new(Vec::new())),
+            storage: CagedBufferStorage::Heap(Arc::new(Mutex::new(Vec::new()))),
         }
     }
 
@@ -140,8 +221,15 @@ impl CagedBuffer {
         if index >= self.size {
             return None;
         }
-        let lock = self.data.lock().unwrap();
-        lock.get(index).copied()
+        match &self.storage {
+            CagedBufferStorage::Virtual(ptr) => unsafe {
+                Some(*ptr.add(index))
+            },
+            CagedBufferStorage::Heap(h) => {
+                let lock = h.lock().unwrap();
+                lock.get(index).copied()
+            }
+        }
     }
 
     /// Write a byte at `index` with strict bounds checking.
@@ -149,12 +237,20 @@ impl CagedBuffer {
         if index >= self.size {
             return false;
         }
-        let mut lock = self.data.lock().unwrap();
-        if let Some(byte) = lock.get_mut(index) {
-            *byte = value;
-            true
-        } else {
-            false
+        match &self.storage {
+            CagedBufferStorage::Virtual(ptr) => unsafe {
+                *ptr.add(index) = value;
+                true
+            },
+            CagedBufferStorage::Heap(h) => {
+                let mut lock = h.lock().unwrap();
+                if let Some(byte) = lock.get_mut(index) {
+                    *byte = value;
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 
@@ -163,11 +259,20 @@ impl CagedBuffer {
         if offset >= self.size {
             return 0;
         }
-        let lock = self.data.lock().unwrap();
         let available = self.size - offset;
         let to_copy = out.len().min(available);
-        out[..to_copy].copy_from_slice(&lock[offset..offset + to_copy]);
-        to_copy
+        match &self.storage {
+            CagedBufferStorage::Virtual(ptr) => unsafe {
+                let src_ptr = ptr.add(offset);
+                std::ptr::copy_nonoverlapping(src_ptr, out.as_mut_ptr(), to_copy);
+                to_copy
+            },
+            CagedBufferStorage::Heap(h) => {
+                let lock = h.lock().unwrap();
+                out[..to_copy].copy_from_slice(&lock[offset..offset + to_copy]);
+                to_copy
+            }
+        }
     }
 
     /// Copy bytes from input buffer into this caged buffer.
@@ -175,11 +280,20 @@ impl CagedBuffer {
         if offset >= self.size {
             return 0;
         }
-        let mut lock = self.data.lock().unwrap();
         let available = self.size - offset;
         let to_copy = src.len().min(available);
-        lock[offset..offset + to_copy].copy_from_slice(&src[..to_copy]);
-        to_copy
+        match &self.storage {
+            CagedBufferStorage::Virtual(ptr) => unsafe {
+                let dst_ptr = ptr.add(offset);
+                std::ptr::copy_nonoverlapping(src.as_ptr(), dst_ptr, to_copy);
+                to_copy
+            },
+            CagedBufferStorage::Heap(h) => {
+                let mut lock = h.lock().unwrap();
+                lock[offset..offset + to_copy].copy_from_slice(&src[..to_copy]);
+                to_copy
+            }
+        }
     }
 }
 
@@ -192,6 +306,8 @@ mod tests {
         let cage = MemoryCage::with_defaults();
         assert_eq!(cage.cage_size(), DEFAULT_CAGE_SIZE);
         assert_eq!(cage.allocated_bytes(), 0);
+        #[cfg(unix)]
+        assert!(cage.is_virtual_mmap());
     }
 
     #[test]

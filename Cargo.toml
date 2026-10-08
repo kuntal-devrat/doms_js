@@ -18,7 +18,7 @@ members = [
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/nicodes-js/doms"
+repository = "https://github.com/kuntal-devrat/doms_js"
 homepage = "https://domsjs.dev"
 description = "A modular, embeddable JavaScript engine with first-class parallelism support"
 categories = ["compilers", "wasm", "web-programming"]
@@ -38,8 +38,11 @@ doms_wasm = { path = "crates/doms_wasm" }
 # External dependencies
 thiserror = "2"
 log = "0.4"
+unicode-ident = "1.0"
 
 [profile.release]
-lto = "thin"
-codegen-units = 1
 opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = true

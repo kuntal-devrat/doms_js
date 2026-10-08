@@ -13,5 +13,6 @@
 pub mod engine;
 pub mod value;
 
-pub use engine::{Context, Engine, Isolate};
+pub use engine::{Context, Engine, EngineError, Isolate};
 pub use value::JsValue;
+

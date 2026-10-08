@@ -64,6 +64,14 @@ jobs:
       - run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      - name: Build mdBook architecture documentation
+        run: |
+          if command -v mdbook >/dev/null 2>&1; then
+            mdbook build docs
+          else
+            curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+            /tmp/mdbook build docs
+          fi
 
   test262:
     name: Test262 Conformance

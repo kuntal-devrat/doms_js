@@ -16,6 +16,18 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
     parser.parse_program()
 }
 
+/// Parse a JavaScript module source code string into an AST [`Program`].
+pub fn parse_module(source: &str) -> Result<Program, ParseError> {
+    let mut parser = Parser::new_module(source)?;
+    parser.parse_program()
+}
+
+/// Parse a JavaScript source code string into an AST [`Program`] in strict mode.
+pub fn parse_strict(source: &str) -> Result<Program, ParseError> {
+    let mut parser = Parser::new_strict(source)?;
+    parser.parse_program()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

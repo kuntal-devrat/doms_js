@@ -18,6 +18,7 @@
 //! - **Pause time:** Proportional to nursery size and survival rate.
 
 use crate::header::{GC_ALIGN, GcHeader, HEADER_SIZE, TypeTag};
+use crate::trace::{TraceVisitor, TypeRegistry};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -56,6 +57,8 @@ pub struct Nursery {
     pub scavenge_count: u64,
     /// Total objects allocated.
     pub total_allocations: u64,
+    /// Registry mapping TypeTags to interior trace visitors.
+    pub type_registry: TypeRegistry,
 }
 
 impl Nursery {
@@ -102,7 +105,13 @@ impl Nursery {
             bytes_allocated: 0,
             scavenge_count: 0,
             total_allocations: 0,
+            type_registry: TypeRegistry::new(),
         }
+    }
+
+    /// Register a trace visitor for interior reference tracing during scavenge.
+    pub fn register_tracer(&mut self, tag: TypeTag, visitor: TraceVisitor) {
+        self.type_registry.register(tag, visitor);
     }
 
     /// Create a nursery with the default semi-space size (4 MB).
@@ -256,19 +265,19 @@ impl Nursery {
             // SAFETY: scan points to a valid GcHeader in to-space.
             let header = unsafe { &*(scan as *const GcHeader) };
             let total_size = header.total_size();
+            let tag = header.tag();
 
-            // TODO: In a real engine, we'd dispatch on header.tag() to call
-            // the appropriate Trace implementation, which would report all
-            // GC references in this object. For now, we skip interior tracing
-            // because we don't yet have a type registry.
-            //
-            // The full implementation will look like:
-            //   let payload = scan + HEADER_SIZE;
-            //   type_registry.trace(header.tag(), payload, |ref_ptr| {
-            //       if self.contains(ref_ptr) {
-            //           *ref_ptr = self.copy_object(ref_ptr, &mut to_cursor, to_limit);
-            //       }
-            //   });
+            let payload = unsafe { scan.add(HEADER_SIZE) };
+            unsafe {
+                self.type_registry.trace(tag, payload, &mut |ref_slot: *mut *mut u8| {
+                    if !ref_slot.is_null() {
+                        let child_ptr = *ref_slot;
+                        if !child_ptr.is_null() && self.contains(child_ptr) {
+                            *ref_slot = self.copy_object(child_ptr, &mut to_cursor, to_limit);
+                        }
+                    }
+                });
+            }
 
             // Advance scan to the next object.
             // SAFETY: total_size is the aligned size written during allocation.
@@ -610,5 +619,46 @@ mod tests {
         let nursery = Nursery::new(TEST_SPACE_SIZE);
         let outside: u8 = 0;
         assert!(!nursery.contains(&outside as *const u8));
+    }
+
+    #[test]
+    fn test_scavenge_with_interior_references() {
+        let mut nursery = Nursery::new(TEST_SPACE_SIZE);
+
+        // Register a tracer for TypeTag::Object that treats the first 8 bytes as a pointer slot.
+        unsafe fn trace_first_slot(payload: *mut u8, visitor: &mut dyn FnMut(*mut *mut u8)) {
+            let slot = payload as *mut *mut u8;
+            visitor(slot);
+        }
+        nursery.register_tracer(TypeTag::Object, trace_first_slot);
+
+        // Allocate child object B.
+        let child_ptr = nursery.allocate(16, TypeTag::Raw).unwrap();
+        unsafe {
+            *(child_ptr as *mut u64) = 0xCAFEBABE;
+        }
+
+        // Allocate parent object A, containing a pointer to child B.
+        let parent_ptr = nursery.allocate(16, TypeTag::Object).unwrap();
+        unsafe {
+            *(parent_ptr as *mut *mut u8) = child_ptr;
+        }
+
+        // Root ONLY parent A. Child B is NOT directly rooted.
+        let mut roots = vec![parent_ptr];
+        nursery.scavenge(&mut roots);
+
+        let new_parent_ptr = roots[0];
+        assert!(nursery.contains(new_parent_ptr));
+        assert_ne!(new_parent_ptr, parent_ptr); // moved to to-space
+
+        // Verify child was also moved to to-space via Cheney interior scan!
+        let new_child_ptr = unsafe { *(new_parent_ptr as *const *mut u8) };
+        assert!(nursery.contains(new_child_ptr));
+        assert_ne!(new_child_ptr, child_ptr); // child moved
+
+        // Verify child payload is intact
+        let child_val = unsafe { *(new_child_ptr as *const u64) };
+        assert_eq!(child_val, 0xCAFEBABE);
     }
 }

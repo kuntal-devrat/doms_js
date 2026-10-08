@@ -86,8 +86,44 @@ pub struct JsGenerator {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypedArrayKind {
-    Int32,
+    Int8,
     Uint8,
+    Uint8Clamped,
+    Int16,
+    Uint16,
+    Int32,
+    Uint32,
+    Float32,
+    Float64,
+    BigInt64,
+    BigUint64,
+}
+
+impl TypedArrayKind {
+    pub fn bytes_per_element(&self) -> usize {
+        match self {
+            Self::Int8 | Self::Uint8 | Self::Uint8Clamped => 1,
+            Self::Int16 | Self::Uint16 => 2,
+            Self::Int32 | Self::Uint32 | Self::Float32 => 4,
+            Self::Float64 | Self::BigInt64 | Self::BigUint64 => 8,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Int8 => "Int8Array",
+            Self::Uint8 => "Uint8Array",
+            Self::Uint8Clamped => "Uint8ClampedArray",
+            Self::Int16 => "Int16Array",
+            Self::Uint16 => "Uint16Array",
+            Self::Int32 => "Int32Array",
+            Self::Uint32 => "Uint32Array",
+            Self::Float32 => "Float32Array",
+            Self::Float64 => "Float64Array",
+            Self::BigInt64 => "BigInt64Array",
+            Self::BigUint64 => "BigUint64Array",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,18 +131,21 @@ pub struct JsTypedArray {
     pub buffer: Arc<doms_parallel::SharedArrayBuffer>,
     pub kind: TypedArrayKind,
     pub length: usize,
+    pub byte_offset: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct JsFunction {
     pub name: Option<String>,
     pub params: Vec<String>,
+    pub local_names: Vec<String>,
     pub chunk: Arc<BytecodeChunk>,
     pub upvalues: Vec<JsValue>,
     pub is_async: bool,
     pub is_generator: bool,
     pub call_count: u32,
     pub jit_entry: Option<crate::jit::JitFunction>,
+    pub is_strict: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -119,7 +158,13 @@ pub enum ObjectKind {
     Error { name: String, message: String },
     Promise(JsPromise),
     Generator(JsGenerator),
+    ArrayBuffer(Arc<doms_parallel::SharedArrayBuffer>),
     SharedArrayBuffer(Arc<doms_parallel::SharedArrayBuffer>),
+    DataView {
+        buffer: Arc<doms_parallel::SharedArrayBuffer>,
+        byte_offset: usize,
+        byte_length: usize,
+    },
     TypedArray(JsTypedArray),
     Worker(Arc<std::sync::Mutex<doms_parallel::MessagePort>>),
     Map(Vec<(JsValue, JsValue)>),
@@ -136,6 +181,19 @@ pub enum ObjectKind {
     Date(f64),
     Symbol(Option<String>),
     BigInt(i64),
+    Proxy {
+        target: JsValue,
+        handler: JsValue,
+    },
+    StringObject(String),
+    NumberObject(f64),
+    BooleanObject(bool),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Accessor {
+    pub getter: Option<JsValue>,
+    pub setter: Option<JsValue>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,25 +202,59 @@ pub struct JsObject {
     pub prototype: Option<JsValue>,
     pub slots: Vec<JsValue>,
     pub kind: ObjectKind,
+    pub accessors: Option<Box<std::collections::HashMap<String, Accessor>>>,
+    pub symbol_properties: Option<Box<std::collections::HashMap<JsValue, JsValue>>>,
+    pub symbol_accessors: Option<Box<std::collections::HashMap<JsValue, Accessor>>>,
+    pub symbol_order: Option<Vec<JsValue>>,
 }
 
 impl JsObject {
-    pub fn new_ordinary(shape_id: ShapeId, prototype: Option<JsValue>) -> Self {
+    fn new_with_kind(shape_id: ShapeId, prototype: Option<JsValue>, kind: ObjectKind) -> Self {
         Self {
             shape_id,
             prototype,
             slots: Vec::new(),
-            kind: ObjectKind::Ordinary,
+            kind,
+            accessors: None,
+            symbol_properties: None,
+            symbol_accessors: None,
+            symbol_order: None,
         }
     }
 
-    pub fn new_array(shape_id: ShapeId, prototype: Option<JsValue>, elements: Vec<JsValue>) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Array(elements),
+    pub fn insert_symbol_property(&mut self, sym: JsValue, val: JsValue) {
+        let syms = self.symbol_properties.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        syms.insert(sym, val);
+        let order = self.symbol_order.get_or_insert_with(Vec::new);
+        if !order.contains(&sym) {
+            order.push(sym);
         }
+    }
+
+    pub fn insert_symbol_accessor_getter(&mut self, sym: JsValue, getter: JsValue) {
+        let accs = self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        accs.entry(sym).or_insert(Accessor { getter: None, setter: None }).getter = Some(getter);
+        let order = self.symbol_order.get_or_insert_with(Vec::new);
+        if !order.contains(&sym) {
+            order.push(sym);
+        }
+    }
+
+    pub fn insert_symbol_accessor_setter(&mut self, sym: JsValue, setter: JsValue) {
+        let accs = self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        accs.entry(sym).or_insert(Accessor { getter: None, setter: None }).setter = Some(setter);
+        let order = self.symbol_order.get_or_insert_with(Vec::new);
+        if !order.contains(&sym) {
+            order.push(sym);
+        }
+    }
+
+    pub fn new_ordinary(shape_id: ShapeId, prototype: Option<JsValue>) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Ordinary)
+    }
+
+    pub fn new_array(shape_id: ShapeId, prototype: Option<JsValue>, elements: Vec<JsValue>) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Array(elements))
     }
 
     pub fn new_function(
@@ -170,12 +262,7 @@ impl JsObject {
         prototype: Option<JsValue>,
         func: JsFunction,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Function(func),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Function(func))
     }
 
     pub fn new_native_function(
@@ -183,12 +270,7 @@ impl JsObject {
         prototype: Option<JsValue>,
         native: NativeFunction,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::NativeFunction(native),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::NativeFunction(native))
     }
 
     pub fn new_string(
@@ -196,12 +278,40 @@ impl JsObject {
         prototype: Option<JsValue>,
         content: String,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::String(content),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::String(content))
+    }
+
+    pub fn new_proxy(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        target: JsValue,
+        handler: JsValue,
+    ) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Proxy { target, handler })
+    }
+
+    pub fn new_string_object(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        content: String,
+    ) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::StringObject(content))
+    }
+
+    pub fn new_number_object(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        value: f64,
+    ) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::NumberObject(value))
+    }
+
+    pub fn new_boolean_object(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        value: bool,
+    ) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::BooleanObject(value))
     }
 
     pub fn new_error(
@@ -210,12 +320,7 @@ impl JsObject {
         name: String,
         message: String,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Error { name, message },
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Error { name, message })
     }
 
     pub fn new_promise(
@@ -224,17 +329,30 @@ impl JsObject {
         state: PromiseState,
         result: JsValue,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Promise(JsPromise {
-                state,
-                result,
-                fulfill_reactions: Vec::new(),
-                reject_reactions: Vec::new(),
-            }),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Promise(JsPromise {
+            state,
+            result,
+            fulfill_reactions: Vec::new(),
+            reject_reactions: Vec::new(),
+        }))
+    }
+
+    pub fn new_array_buffer(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        ab: Arc<doms_parallel::SharedArrayBuffer>,
+    ) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::ArrayBuffer(ab))
+    }
+
+    pub fn new_data_view(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        buffer: Arc<doms_parallel::SharedArrayBuffer>,
+        byte_offset: usize,
+        byte_length: usize,
+    ) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::DataView { buffer, byte_offset, byte_length })
     }
 
     pub fn new_shared_array_buffer(
@@ -242,12 +360,7 @@ impl JsObject {
         prototype: Option<JsValue>,
         sab: Arc<doms_parallel::SharedArrayBuffer>,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::SharedArrayBuffer(sab),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::SharedArrayBuffer(sab))
     }
 
     pub fn new_typed_array(
@@ -255,12 +368,7 @@ impl JsObject {
         prototype: Option<JsValue>,
         typed_array: JsTypedArray,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::TypedArray(typed_array),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::TypedArray(typed_array))
     }
 
     pub fn new_generator(
@@ -268,12 +376,7 @@ impl JsObject {
         prototype: Option<JsValue>,
         generator: JsGenerator,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Generator(generator),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Generator(generator))
     }
 
     pub fn new_worker(
@@ -281,84 +384,51 @@ impl JsObject {
         prototype: Option<JsValue>,
         port: Arc<std::sync::Mutex<doms_parallel::MessagePort>>,
     ) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Worker(port),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Worker(port))
     }
 
     pub fn new_map(shape_id: ShapeId, prototype: Option<JsValue>) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Map(Vec::new()),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Map(Vec::new()))
     }
 
     pub fn new_set(shape_id: ShapeId, prototype: Option<JsValue>) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Set(Vec::new()),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Set(Vec::new()))
     }
 
     pub fn new_weak_ref(shape_id: ShapeId, prototype: Option<JsValue>, target: JsValue) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::WeakRef(target),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::WeakRef(target))
     }
 
     pub fn new_finalization_registry(shape_id: ShapeId, prototype: Option<JsValue>, callback: JsValue) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::FinalizationRegistry { callback, entries: Vec::new() },
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::FinalizationRegistry { callback, entries: Vec::new() })
     }
 
     pub fn new_regexp(shape_id: ShapeId, prototype: Option<JsValue>, pattern: String, flags: String) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::RegExp { pattern, flags },
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::RegExp { pattern, flags })
     }
 
     pub fn new_date(shape_id: ShapeId, prototype: Option<JsValue>, time_ms: f64) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Date(time_ms),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Date(time_ms))
     }
 
     pub fn new_symbol(shape_id: ShapeId, prototype: Option<JsValue>, desc: Option<String>) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::Symbol(desc),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::Symbol(desc))
     }
 
     pub fn new_bigint(shape_id: ShapeId, prototype: Option<JsValue>, val: i64) -> Self {
-        Self {
-            shape_id,
-            prototype,
-            slots: Vec::new(),
-            kind: ObjectKind::BigInt(val),
-        }
+        Self::new_with_kind(shape_id, prototype, ObjectKind::BigInt(val))
+    }
+
+    pub fn define_getter(&mut self, key: String, getter: JsValue) {
+        let accs = self.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let acc = accs.entry(key).or_default();
+        acc.getter = Some(getter);
+    }
+
+    pub fn define_setter(&mut self, key: String, setter: JsValue) {
+        let accs = self.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let acc = accs.entry(key).or_default();
+        acc.setter = Some(setter);
     }
 
     #[inline]
@@ -386,6 +456,54 @@ impl Trace for JsObject {
         for slot in &self.slots {
             if let Some(p) = slot.as_heap_ptr() {
                 tracer.trace_ref(p);
+            }
+        }
+        if let Some(accs) = &self.accessors {
+            for acc in accs.values() {
+                if let Some(g) = acc.getter {
+                    if let Some(p) = g.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+                if let Some(s) = acc.setter {
+                    if let Some(p) = s.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+            }
+        }
+        if let Some(syms) = &self.symbol_properties {
+            for (k, v) in syms.iter() {
+                if let Some(p) = k.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+                if let Some(p) = v.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
+        }
+        if let Some(sym_accs) = &self.symbol_accessors {
+            for (k, acc) in sym_accs.iter() {
+                if let Some(p) = k.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+                if let Some(g) = acc.getter {
+                    if let Some(p) = g.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+                if let Some(s) = acc.setter {
+                    if let Some(p) = s.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+            }
+        }
+        if let Some(order) = &self.symbol_order {
+            for k in order {
+                if let Some(p) = k.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
             }
         }
         match &self.kind {
@@ -455,6 +573,14 @@ impl Trace for JsObject {
                             tracer.trace_ref(p);
                         }
                     }
+                }
+            }
+            ObjectKind::Proxy { target, handler } => {
+                if let Some(p) = target.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+                if let Some(p) = handler.as_heap_ptr() {
+                    tracer.trace_ref(p);
                 }
             }
             _ => {}

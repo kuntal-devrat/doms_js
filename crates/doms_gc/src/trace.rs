@@ -153,6 +153,57 @@ impl<T: Trace> Trace for Box<T> {
     }
 }
 
+use crate::header::TypeTag;
+
+/// Function signature for walking interior reference slots of an object payload.
+///
+/// The first argument is the object payload pointer (`*mut u8`).
+/// The second argument is a visitor callback called for each slot (`*mut *mut u8`)
+/// holding a GC pointer within the payload.
+pub type TraceVisitor = unsafe fn(*mut u8, &mut dyn FnMut(*mut *mut u8));
+
+/// Registry mapping type tags to their interior trace visitor functions.
+#[derive(Clone, Copy)]
+pub struct TypeRegistry {
+    visitors: [Option<TraceVisitor>; 32],
+}
+
+impl TypeRegistry {
+    pub const fn new() -> Self {
+        Self {
+            visitors: [None; 32],
+        }
+    }
+
+    /// Register a trace visitor function for a given TypeTag.
+    pub fn register(&mut self, tag: TypeTag, visitor: TraceVisitor) {
+        let idx = tag as usize;
+        if idx < self.visitors.len() {
+            self.visitors[idx] = Some(visitor);
+        }
+    }
+
+    /// Trace the interior pointers of a payload with the given type tag.
+    ///
+    /// # Safety
+    /// `payload` must point to a valid object payload for `tag`.
+    #[inline]
+    pub unsafe fn trace(&self, tag: TypeTag, payload: *mut u8, visit: &mut dyn FnMut(*mut *mut u8)) {
+        let idx = tag as usize;
+        if idx < self.visitors.len() {
+            if let Some(v) = self.visitors[idx] {
+                unsafe { v(payload, visit) };
+            }
+        }
+    }
+}
+
+impl Default for TypeRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

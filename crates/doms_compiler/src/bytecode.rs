@@ -6,7 +6,9 @@ use std::sync::Arc;
 pub struct FunctionDef {
     pub name: Option<String>,
     pub params: Vec<String>,
+    pub local_names: Vec<String>,
     pub chunk: BytecodeChunk,
+    pub is_strict: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,12 +28,21 @@ pub enum OpCode {
     LoadTrue,
     LoadFalse,
     This,
+    LoadSuper,
 
     // Objects & Arrays
     CreateObject,
     CreateArray(u16),
+    CreateRegExp(u16, u16),
+    GetKeys,
     GetProp(u16),
     SetProp(u16),
+    DefineGetter(u16),
+    DefineSetter(u16),
+    DefineComputedGetter,
+    DefineComputedSetter,
+    DefineClassElement(u8),
+    InheritClass,
     GetElem,
     SetElem,
 
@@ -57,6 +68,7 @@ pub enum OpCode {
     Mul,
     Div,
     Mod,
+    Exp,
 
     // Unary
     Pos,
@@ -79,10 +91,13 @@ pub enum OpCode {
     Instanceof,
     In,
 
-    // Bitwise
+    // Bitwise & Shift
     BitAnd,
     BitOr,
     BitXor,
+    Shl,
+    Shr,
+    Ushr,
 
     // Control Flow
     Jump(i32),
@@ -98,7 +113,19 @@ pub enum OpCode {
     GetLocal(u16),
     SetLocal(u16),
     GetGlobal(u16), // index into constants pool for identifier name
+    GetGlobalSafe(u16),
     SetGlobal(u16),
+    DefGlobal(u16),
+    DefLexical(u16),
+    DefConst(u16),
+    InitConst(u16),
+    DeleteProp(u16),
+    DeleteElem,
+    DeleteIdent(u16),
+
+    // Scopes
+    PushScope,
+    PopScope,
 
     // Stack Management
     Pop,
@@ -106,11 +133,25 @@ pub enum OpCode {
     Halt,
 }
 
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ConstantKey {
+    Number(u64),
+    String(String),
+    Boolean(bool),
+    Function(usize),
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BytecodeChunk {
     pub instructions: Vec<OpCode>,
     pub constants: Vec<Constant>,
     pub lines: Vec<usize>,
+    pub top_lex_names: Vec<String>,
+    pub top_var_names: Vec<String>,
+    pub top_func_names: Vec<String>,
+    constant_indices: HashMap<ConstantKey, u16>,
 }
 
 impl BytecodeChunk {
@@ -126,13 +167,20 @@ impl BytecodeChunk {
     }
 
     pub fn add_constant(&mut self, val: Constant) -> u16 {
-        for (i, existing) in self.constants.iter().enumerate() {
-            if existing == &val {
-                return i as u16;
-            }
+        let key = match &val {
+            Constant::Number(n) => ConstantKey::Number(n.to_bits()),
+            Constant::String(s) => ConstantKey::String(s.clone()),
+            Constant::Boolean(b) => ConstantKey::Boolean(*b),
+            Constant::Function(f) => ConstantKey::Function(Arc::as_ptr(f) as usize),
+        };
+
+        if let Some(&idx) = self.constant_indices.get(&key) {
+            return idx;
         }
+
         let idx = self.constants.len() as u16;
         self.constants.push(val);
+        self.constant_indices.insert(key, idx);
         idx
     }
 
