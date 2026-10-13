@@ -27,6 +27,16 @@ fn main() {
             let mut i = 2;
             while i < args.len() {
                 match args[i].as_str() {
+                    "-h" | "--help" => {
+                        println!("Usage: doms test262 [OPTIONS] [SUITE_FILTER]");
+                        println!("Options:");
+                        println!("  -s, --suite <SUITE>     Filter by suite directory (e.g. language/eval-code)");
+                        println!("  -f, --filter <PATTERN>  Filter test paths containing pattern");
+                        println!("  -t, --threads <N>       Number of worker threads (default: hardware concurrency)");
+                        println!("  -v, --verbose           Print verbose pass/fail info for each test");
+                        println!("  -m, --max <N>           Run at most N tests");
+                        return;
+                    }
                     "-s" | "--suite" => {
                         if i + 1 < args.len() {
                             config.suite_filter = Some(args[i + 1].clone());

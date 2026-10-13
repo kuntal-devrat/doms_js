@@ -4,6 +4,8 @@
 pub struct Local {
     pub name: String,
     pub depth: usize,
+    pub slot: u16,
+    pub is_lexical: bool,
 }
 
 /// Information about a captured upvalue in lexical scoping.
@@ -17,6 +19,7 @@ pub struct UpvalueInfo {
 #[derive(Debug, Default, Clone)]
 pub struct SymbolTable {
     pub locals: Vec<Local>,
+    pub all_local_names: Vec<String>,
     pub scope_depth: usize,
     pub upvalues: Vec<UpvalueInfo>,
 }
@@ -45,24 +48,46 @@ impl SymbolTable {
     }
 
     pub fn define_local(&mut self, name: String) -> u16 {
-        let slot = self.locals.len() as u16;
-        self.locals.push(Local { name, depth: self.scope_depth });
+        let is_lexical = self.scope_depth > 1;
+        let slot = self.all_local_names.len() as u16;
+        self.all_local_names.push(name.clone());
+        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical });
+        slot
+    }
+
+    pub fn define_local_lexical(&mut self, name: String) -> u16 {
+        let slot = self.all_local_names.len() as u16;
+        self.all_local_names.push(name.clone());
+        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical: true });
         slot
     }
 
     pub fn define_local_at_depth(&mut self, name: String, depth: usize) -> u16 {
-        let slot = self.locals.len() as u16;
-        self.locals.push(Local { name, depth });
+        let slot = self.all_local_names.len() as u16;
+        self.all_local_names.push(name.clone());
+        self.locals.push(Local { name, depth, slot, is_lexical: false });
         slot
     }
 
     pub fn resolve_local(&self, name: &str) -> Option<u16> {
-        for (i, local) in self.locals.iter().enumerate().rev() {
+        for local in self.locals.iter().rev() {
             if local.name == name {
-                return Some(i as u16);
+                return Some(local.slot);
             }
         }
         None
+    }
+
+    pub fn is_local_in_current_scope(&self, name: &str) -> bool {
+        for local in self.locals.iter().rev() {
+            if local.depth < self.scope_depth {
+                break;
+            }
+            if local.name == name {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn add_upvalue(&mut self, index: u16, is_local: bool, name: &str) -> u16 {

@@ -4,6 +4,7 @@ use crate::shape::ShapeId;
 use crate::value::JsValue;
 use doms_compiler::bytecode::BytecodeChunk;
 use doms_gc::trace::{Trace, Tracer};
+use num_bigint::BigInt;
 use std::sync::Arc;
 
 pub type NativeFn = fn(&mut crate::interpreter::Vm, JsValue, &[JsValue]) -> Result<JsValue, crate::interpreter::VmError>;
@@ -82,6 +83,9 @@ pub struct JsGenerator {
     pub ip: usize,
     pub stack: Vec<JsValue>,
     pub state: GeneratorState,
+    pub this_val: JsValue,
+    pub arguments: Option<JsValue>,
+    pub mapped_arguments: Option<Vec<bool>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +143,7 @@ pub struct JsFunction {
     pub name: Option<String>,
     pub params: Vec<String>,
     pub local_names: Vec<String>,
+    pub lexical_local_names: Vec<String>,
     pub chunk: Arc<BytecodeChunk>,
     pub upvalues: Vec<JsValue>,
     pub is_async: bool,
@@ -146,6 +151,9 @@ pub struct JsFunction {
     pub call_count: u32,
     pub jit_entry: Option<crate::jit::JitFunction>,
     pub is_strict: bool,
+    pub has_param_exprs: bool,
+    pub is_method: bool,
+    pub is_arrow: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -169,6 +177,8 @@ pub enum ObjectKind {
     Worker(Arc<std::sync::Mutex<doms_parallel::MessagePort>>),
     Map(Vec<(JsValue, JsValue)>),
     Set(Vec<JsValue>),
+    WeakMap(Vec<(JsValue, JsValue)>),
+    WeakSet(Vec<JsValue>),
     WeakRef(JsValue),
     FinalizationRegistry {
         callback: JsValue,
@@ -180,7 +190,7 @@ pub enum ObjectKind {
     },
     Date(f64),
     Symbol(Option<String>),
-    BigInt(i64),
+    BigInt(BigInt),
     Proxy {
         target: JsValue,
         handler: JsValue,
@@ -188,6 +198,7 @@ pub enum ObjectKind {
     StringObject(String),
     NumberObject(f64),
     BooleanObject(bool),
+    BigIntObject(BigInt),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -209,7 +220,7 @@ pub struct JsObject {
 }
 
 impl JsObject {
-    fn new_with_kind(shape_id: ShapeId, prototype: Option<JsValue>, kind: ObjectKind) -> Self {
+    pub fn new_with_kind(shape_id: ShapeId, prototype: Option<JsValue>, kind: ObjectKind) -> Self {
         Self {
             shape_id,
             prototype,
@@ -395,6 +406,14 @@ impl JsObject {
         Self::new_with_kind(shape_id, prototype, ObjectKind::Set(Vec::new()))
     }
 
+    pub fn new_weak_map(shape_id: ShapeId, prototype: Option<JsValue>) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::WeakMap(Vec::new()))
+    }
+
+    pub fn new_weak_set(shape_id: ShapeId, prototype: Option<JsValue>) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::WeakSet(Vec::new()))
+    }
+
     pub fn new_weak_ref(shape_id: ShapeId, prototype: Option<JsValue>, target: JsValue) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::WeakRef(target))
     }
@@ -415,7 +434,7 @@ impl JsObject {
         Self::new_with_kind(shape_id, prototype, ObjectKind::Symbol(desc))
     }
 
-    pub fn new_bigint(shape_id: ShapeId, prototype: Option<JsValue>, val: i64) -> Self {
+    pub fn new_bigint(shape_id: ShapeId, prototype: Option<JsValue>, val: BigInt) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::BigInt(val))
     }
 
@@ -429,6 +448,17 @@ impl JsObject {
         let accs = self.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         let acc = accs.entry(key).or_default();
         acc.setter = Some(setter);
+    }
+
+    pub fn define_accessor(&mut self, key: String, getter: Option<JsValue>, setter: Option<JsValue>) {
+        let accs = self.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let acc = accs.entry(key).or_default();
+        if getter.is_some() {
+            acc.getter = getter;
+        }
+        if setter.is_some() {
+            acc.setter = setter;
+        }
     }
 
     #[inline]
@@ -560,6 +590,23 @@ impl Trace for JsObject {
                     }
                 }
             }
+            ObjectKind::WeakMap(entries) => {
+                for (k, v) in entries {
+                    if let Some(p) = k.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                    if let Some(p) = v.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+            }
+            ObjectKind::WeakSet(elements) => {
+                for el in elements {
+                    if let Some(p) = el.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+            }
             ObjectKind::FinalizationRegistry { callback, entries } => {
                 if let Some(p) = callback.as_heap_ptr() {
                     tracer.trace_ref(p);
@@ -606,6 +653,9 @@ pub fn js_values_equal(a: JsValue, b: JsValue) -> bool {
         let obj_b = unsafe { &*(ptr_b as *const JsObject) };
         if let (ObjectKind::String(sa), ObjectKind::String(sb)) = (&obj_a.kind, &obj_b.kind) {
             return sa == sb;
+        }
+        if let (ObjectKind::BigInt(ba), ObjectKind::BigInt(bb)) = (&obj_a.kind, &obj_b.kind) {
+            return ba == bb;
         }
     }
     false

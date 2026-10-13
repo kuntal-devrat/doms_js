@@ -12,5 +12,8 @@ doms_parallel.workspace = true
 doms_parser.workspace = true
 thiserror.workspace = true
 log.workspace = true
+num-bigint.workspace = true
+num-traits.workspace = true
+regress.workspace = true
 
 [dev-dependencies]

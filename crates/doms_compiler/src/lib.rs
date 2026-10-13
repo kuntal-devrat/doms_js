@@ -25,3 +25,11 @@ pub fn compile_strict(program: &Program) -> Result<BytecodeChunk, CompileError> 
     compiler.is_strict = true;
     compiler.compile(program)
 }
+
+/// Compile an AST [`Program`] for eval execution.
+pub fn compile_eval(program: &Program, is_strict: bool) -> Result<BytecodeChunk, CompileError> {
+    let mut compiler = Compiler::new();
+    compiler.is_strict = is_strict;
+    compiler.is_eval = true;
+    compiler.compile(program)
+}

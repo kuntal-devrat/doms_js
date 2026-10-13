@@ -93,10 +93,21 @@ impl JitCompiler {
                 gen_ptr: None,
                 locals: args.to_vec(),
                 local_names: Vec::new(),
+                lexical_local_names: Vec::new(),
                 scopes: Vec::new(),
+                upvalues_count: 0,
                 env_obj: None,
                 arguments: None,
                 is_strict: false,
+                new_target: None,
+                is_function: true,
+                is_method: false,
+                is_arrow: false,
+                has_param_exprs: false,
+                in_param_init: false,
+                is_indirect_eval: false,
+                callee_func: None,
+                mapped_arguments: None,
             });
 
             vm.run_until_depth(target_depth)

@@ -1,14 +1,20 @@
 //! Bytecode instruction set and chunk representation.
 
 use std::sync::Arc;
+use num_bigint::BigInt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDef {
     pub name: Option<String>,
     pub params: Vec<String>,
     pub local_names: Vec<String>,
+    pub lexical_local_names: Vec<String>,
     pub chunk: BytecodeChunk,
     pub is_strict: bool,
+    pub has_param_exprs: bool,
+    pub is_generator: bool,
+    pub is_arrow: bool,
+    pub is_method: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +23,7 @@ pub enum Constant {
     String(String),
     Boolean(bool),
     Function(Arc<FunctionDef>),
+    BigInt(BigInt),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +40,9 @@ pub enum OpCode {
     // Objects & Arrays
     CreateObject,
     CreateArray(u16),
+    ArrayPush,
+    ArraySpreadPush,
+    RequireObjectCoercible,
     CreateRegExp(u16, u16),
     GetKeys,
     GetProp(u16),
@@ -50,17 +60,27 @@ pub enum OpCode {
     CreateFunction(u16),
     CreateAsyncFunction(u16),
     CreateGenerator(u16),
+    CreateAsyncGenerator(u16),
+    GeneratorStart,
     Call(u8), // argc
     CallWithThis(u8), // argc with explicit this_val on stack
+    CallDirectEval(u8),
     Construct(u8), // new Ctor(args) with argc
+    CallSpread,
+    CallWithThisSpread,
+    ConstructSpread,
+    GetNewTarget,
     Return,
     Await,
     Yield,
 
     // Modules
     Export(u16),
+    ExportAll,
     ImportModule(u16),
     DynamicImport,
+    BindImport(u16, u16),
+    ReExport(u16, u16),
 
     // Arithmetic
     Add,
@@ -115,6 +135,7 @@ pub enum OpCode {
     GetGlobal(u16), // index into constants pool for identifier name
     GetGlobalSafe(u16),
     SetGlobal(u16),
+    SetGlobalDirect(u16),
     DefGlobal(u16),
     DefLexical(u16),
     DefConst(u16),
@@ -126,6 +147,8 @@ pub enum OpCode {
     // Scopes
     PushScope,
     PopScope,
+    PushCatchScope(u16),
+    EnterFunctionBody,
 
     // Stack Management
     Pop,
@@ -141,6 +164,7 @@ enum ConstantKey {
     String(String),
     Boolean(bool),
     Function(usize),
+    BigInt(BigInt),
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -151,6 +175,8 @@ pub struct BytecodeChunk {
     pub top_lex_names: Vec<String>,
     pub top_var_names: Vec<String>,
     pub top_func_names: Vec<String>,
+    pub imported_bindings: std::collections::HashSet<String>,
+    pub export_names: Vec<String>,
     constant_indices: HashMap<ConstantKey, u16>,
 }
 
@@ -172,6 +198,7 @@ impl BytecodeChunk {
             Constant::String(s) => ConstantKey::String(s.clone()),
             Constant::Boolean(b) => ConstantKey::Boolean(*b),
             Constant::Function(f) => ConstantKey::Function(Arc::as_ptr(f) as usize),
+            Constant::BigInt(bi) => ConstantKey::BigInt(bi.clone()),
         };
 
         if let Some(&idx) = self.constant_indices.get(&key) {

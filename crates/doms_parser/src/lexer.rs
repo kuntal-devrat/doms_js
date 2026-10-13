@@ -1,5 +1,6 @@
 //! Lexer for JavaScript source code.
 
+use num_bigint::BigInt;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -12,6 +13,8 @@ pub enum LexError {
     UnterminatedComment(usize, usize),
     #[error("Invalid number literal at line {0}, col {1}")]
     InvalidNumber(usize, usize),
+    #[error("Invalid escape sequence at line {0}, col {1}")]
+    InvalidEscape(usize, usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,7 +75,8 @@ pub enum TokenKind {
     Ident(String),
     PrivateIdent(String),
     Number(f64),
-    StringLit { value: String, has_escape: bool },
+    BigInt(BigInt),
+    StringLit { value: String, has_escape: bool, has_legacy_escape: bool, has_unpaired_surrogate: bool },
     TemplateLiteral { quasis: Vec<String>, raw_exprs: Vec<String> },
     RegExp { pattern: String, flags: String },
 
@@ -193,6 +197,7 @@ impl TokenKind {
             TokenKind::Protected => Some("protected".to_string()),
             TokenKind::Public => Some("public".to_string()),
             TokenKind::Static => Some("static".to_string()),
+            TokenKind::PrivateIdent(s) => Some(format!("#{}", s)),
             _ => None,
         }
     }
@@ -310,24 +315,94 @@ pub fn is_reserved_word(s: &str) -> bool {
     )
 }
 
-fn can_precede_slash_operator(prev: &Option<TokenKind>) -> bool {
+fn is_expr_brace_context(prev: &Option<TokenKind>) -> bool {
+    match prev {
+        Some(TokenKind::LParen)
+        | Some(TokenKind::LBracket)
+        | Some(TokenKind::Comma)
+        | Some(TokenKind::Colon)
+        | Some(TokenKind::Question)
+        | Some(TokenKind::Eq)
+        | Some(TokenKind::PlusEq)
+        | Some(TokenKind::MinusEq)
+        | Some(TokenKind::StarEq)
+        | Some(TokenKind::SlashEq)
+        | Some(TokenKind::PercentEq)
+        | Some(TokenKind::StarStarEq)
+        | Some(TokenKind::LtLtEq)
+        | Some(TokenKind::GtGtEq)
+        | Some(TokenKind::GtGtGtEq)
+        | Some(TokenKind::AmpEq)
+        | Some(TokenKind::PipeEq)
+        | Some(TokenKind::CaretEq)
+        | Some(TokenKind::AmpAmpEq)
+        | Some(TokenKind::PipePipeEq)
+        | Some(TokenKind::QuestionQuestionEq)
+        | Some(TokenKind::Plus)
+        | Some(TokenKind::Minus)
+        | Some(TokenKind::Star)
+        | Some(TokenKind::Slash)
+        | Some(TokenKind::Percent)
+        | Some(TokenKind::StarStar)
+        | Some(TokenKind::Lt)
+        | Some(TokenKind::LtEq)
+        | Some(TokenKind::Gt)
+        | Some(TokenKind::GtEq)
+        | Some(TokenKind::LtLt)
+        | Some(TokenKind::GtGt)
+        | Some(TokenKind::GtGtGt)
+        | Some(TokenKind::EqEq)
+        | Some(TokenKind::EqEqEq)
+        | Some(TokenKind::NotEq)
+        | Some(TokenKind::NotEqEq)
+        | Some(TokenKind::Amp)
+        | Some(TokenKind::Pipe)
+        | Some(TokenKind::Caret)
+        | Some(TokenKind::AmpAmp)
+        | Some(TokenKind::PipePipe)
+        | Some(TokenKind::QuestionQuestion)
+        | Some(TokenKind::Bang)
+        | Some(TokenKind::Tilde)
+        | Some(TokenKind::DotDotDot)
+        | Some(TokenKind::Return)
+        | Some(TokenKind::Throw)
+        | Some(TokenKind::Yield)
+        | Some(TokenKind::Await)
+        | Some(TokenKind::Case)
+        | Some(TokenKind::In)
+        | Some(TokenKind::Instanceof)
+        | Some(TokenKind::Typeof)
+        | Some(TokenKind::Void)
+        | Some(TokenKind::Delete) => true,
+        _ => false,
+    }
+}
+
+fn can_precede_slash_operator(prev: &Option<TokenKind>, last_rbrace_was_expr: bool) -> bool {
     match prev {
         Some(TokenKind::Ident(_))
         | Some(TokenKind::Number(_))
+        | Some(TokenKind::BigInt(_))
         | Some(TokenKind::StringLit { .. })
         | Some(TokenKind::TemplateLiteral { .. })
         | Some(TokenKind::RParen)
         | Some(TokenKind::RBracket)
         | Some(TokenKind::This)
+        | Some(TokenKind::Super)
         | Some(TokenKind::True)
         | Some(TokenKind::False)
         | Some(TokenKind::Null)
+        | Some(TokenKind::Undefined)
         | Some(TokenKind::PlusPlus)
-        | Some(TokenKind::MinusMinus) => true,
+        | Some(TokenKind::MinusMinus)
+        | Some(TokenKind::RegExp { .. })
+        | Some(TokenKind::PrivateIdent(_)) => true,
+        Some(TokenKind::RBrace) => last_rbrace_was_expr,
         _ => false,
     }
 }
 
+#[derive(Clone)]
 pub struct Lexer<'a> {
     source: &'a str,
     bytes: &'a [u8],
@@ -337,10 +412,66 @@ pub struct Lexer<'a> {
     col: usize,
     prev_token_kind: Option<TokenKind>,
     seen_line_terminator: bool,
+    brace_stack: Vec<bool>,
+    fn_expr_stack: Vec<bool>,
+    last_rbrace_was_expr: bool,
+    pub is_strict: bool,
+}
+
+fn flush_surrogate(s: &mut String) -> bool {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    if len >= 3 && bytes[len - 3] == 0xED && (0xA0..=0xAF).contains(&bytes[len - 2]) && (0x80..=0xBF).contains(&bytes[len - 1]) {
+        s.truncate(len - 3);
+        s.push('\u{FFFD}');
+        true
+    } else {
+        false
+    }
+}
+
+fn push_unicode_code_unit(s: &mut String, code: u32) -> bool {
+    if (0xD800..=0xDBFF).contains(&code) {
+        let unp = flush_surrogate(s);
+        unsafe {
+            s.as_mut_vec().extend_from_slice(&[
+                0xED,
+                (0x80 | ((code >> 6) & 0x3F)) as u8,
+                (0x80 | (code & 0x3F)) as u8,
+            ]);
+        }
+        unp
+    } else if (0xDC00..=0xDFFF).contains(&code) {
+        let bytes = s.as_bytes();
+        let len = bytes.len();
+        if len >= 3 && bytes[len - 3] == 0xED && (0xA0..=0xAF).contains(&bytes[len - 2]) && (0x80..=0xBF).contains(&bytes[len - 1]) {
+            let b1 = bytes[len - 2] as u32;
+            let b2 = bytes[len - 1] as u32;
+            let high = 0xD800 | ((b1 & 0x0F) << 6) | (b2 & 0x3F);
+            s.truncate(len - 3);
+            let combined = 0x10000 + ((high - 0xD800) << 10) + (code - 0xDC00);
+            if let Some(ch) = char::from_u32(combined) {
+                s.push(ch);
+                return false;
+            }
+        }
+        s.push('\u{FFFD}');
+        true
+    } else {
+        let unp = flush_surrogate(s);
+        if let Some(ch) = char::from_u32(code) {
+            s.push(ch);
+            unp
+        } else {
+            s.push('\u{FFFD}');
+            true
+        }
+    }
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
+        let is_strict = Self::detect_use_strict(source);
         let mut lexer = Self {
             source,
             bytes: source.as_bytes(),
@@ -350,9 +481,66 @@ impl<'a> Lexer<'a> {
             col: 1,
             prev_token_kind: None,
             seen_line_terminator: false,
+            brace_stack: Vec::new(),
+            fn_expr_stack: Vec::new(),
+            last_rbrace_was_expr: false,
+            is_strict,
         };
         lexer.peeked = lexer.next_char_from_bytes();
         lexer
+    }
+
+    pub fn new_strict(source: &'a str) -> Self {
+        let mut lexer = Self::new(source);
+        lexer.is_strict = true;
+        lexer
+    }
+
+    fn detect_use_strict(source: &str) -> bool {
+        let mut chars = source.chars().peekable();
+        while let Some(&c) = chars.peek() {
+            if c.is_whitespace() {
+                chars.next();
+            } else if c == '/' {
+                chars.next();
+                if chars.peek() == Some(&'/') {
+                    chars.next();
+                    while let Some(ch) = chars.next() {
+                        if ch == '\n' || ch == '\r' {
+                            break;
+                        }
+                    }
+                } else if chars.peek() == Some(&'*') {
+                    chars.next();
+                    let mut prev = ' ';
+                    while let Some(ch) = chars.next() {
+                        if prev == '*' && ch == '/' {
+                            break;
+                        }
+                        prev = ch;
+                    }
+                } else {
+                    return false;
+                }
+            } else {
+                break;
+            }
+        }
+        let rest: String = chars.take(15).collect();
+        rest.starts_with("\"use strict\"") || rest.starts_with("'use strict'")
+    }
+
+    #[inline(always)]
+    fn record_token(&mut self, kind: TokenKind) -> TokenKind {
+        if kind == TokenKind::Function {
+            let is_expr = is_expr_brace_context(&self.prev_token_kind);
+            self.fn_expr_stack.push(is_expr);
+        }
+        if kind != TokenKind::RBrace {
+            self.last_rbrace_was_expr = false;
+        }
+        self.prev_token_kind = Some(kind.clone());
+        kind
     }
 
     #[inline(always)]
@@ -513,13 +701,27 @@ impl<'a> Lexer<'a> {
             } else if c == '/' && !in_class {
                 // End of regex pattern
                 let mut flags = String::new();
+                let mut seen_flags = [false; 26];
                 while let Some(fc) = self.peek() {
+                    if fc == '\\' {
+                        return Err(LexError::UnexpectedChar('\\', line, col));
+                    }
                     if fc.is_ascii_alphabetic() {
+                        let idx = (fc as u8).wrapping_sub(b'a') as usize;
+                        if !matches!(fc, 'd' | 'g' | 'i' | 'm' | 's' | 'u' | 'v' | 'y') || seen_flags[idx] {
+                            return Err(LexError::UnexpectedChar(fc, line, col));
+                        }
+                        seen_flags[idx] = true;
                         flags.push(fc);
                         self.advance();
+                    } else if unicode_ident::is_xid_continue(fc) || fc == '$' || fc == '_' {
+                        return Err(LexError::UnexpectedChar(fc, line, col));
                     } else {
                         break;
                     }
+                }
+                if regress::Regex::with_flags(&pattern, flags.as_str()).is_err() {
+                    return Err(LexError::UnexpectedChar('/', line, col));
                 }
                 return Ok(TokenKind::RegExp { pattern, flags });
             } else {
@@ -547,14 +749,14 @@ impl<'a> Lexer<'a> {
                     col,
                     has_preceding_line_terminator,
                 };
-                self.prev_token_kind = Some(TokenKind::Eof);
+                self.record_token(TokenKind::Eof);
                 return Ok(tok);
             }
         };
 
-        if ch == '/' && !can_precede_slash_operator(&self.prev_token_kind) {
+        if ch == '/' && !can_precede_slash_operator(&self.prev_token_kind, self.last_rbrace_was_expr) {
             let kind = self.read_regexp(line, col)?;
-            self.prev_token_kind = Some(kind.clone());
+            let kind = self.record_token(kind);
             return Ok(Token {
                 kind,
                 line,
@@ -565,7 +767,7 @@ impl<'a> Lexer<'a> {
 
         if is_identifier_start(ch) || ch == '\\' {
             let kind = self.read_identifier_or_keyword(line, col)?;
-            self.prev_token_kind = Some(kind.clone());
+            let kind = self.record_token(kind);
             return Ok(Token {
                 kind,
                 line,
@@ -580,8 +782,7 @@ impl<'a> Lexer<'a> {
                 if is_identifier_start(next_c) || next_c == '\\' {
                     let ident_token = self.read_identifier_or_keyword(line, col)?;
                     let name = ident_token.as_prop_name().unwrap_or_default();
-                    let kind = TokenKind::PrivateIdent(name);
-                    self.prev_token_kind = Some(kind.clone());
+                    let kind = self.record_token(TokenKind::PrivateIdent(name));
                     return Ok(Token {
                         kind,
                         line,
@@ -597,7 +798,7 @@ impl<'a> Lexer<'a> {
             let next_c = self.peek2();
             if next_c.is_some_and(|c| c.is_ascii_digit()) {
                 let kind = self.read_number(line, col)?;
-                self.prev_token_kind = Some(kind.clone());
+                let kind = self.record_token(kind);
                 return Ok(Token {
                     kind,
                     line,
@@ -609,8 +810,7 @@ impl<'a> Lexer<'a> {
                 self.advance(); // '.'
                 self.advance(); // '.'
                 self.advance(); // '.'
-                let kind = TokenKind::DotDotDot;
-                self.prev_token_kind = Some(kind.clone());
+                let kind = self.record_token(TokenKind::DotDotDot);
                 return Ok(Token {
                     kind,
                     line,
@@ -622,7 +822,7 @@ impl<'a> Lexer<'a> {
 
         if ch.is_ascii_digit() {
             let kind = self.read_number(line, col)?;
-            self.prev_token_kind = Some(kind.clone());
+            let kind = self.record_token(kind);
             return Ok(Token {
                 kind,
                 line,
@@ -633,7 +833,7 @@ impl<'a> Lexer<'a> {
 
         if ch == '"' || ch == '\'' {
             let kind = self.read_string(ch, line, col)?;
-            self.prev_token_kind = Some(kind.clone());
+            let kind = self.record_token(kind);
             return Ok(Token {
                 kind,
                 line,
@@ -644,7 +844,7 @@ impl<'a> Lexer<'a> {
 
         if ch == '`' {
             let kind = self.read_template_literal(line, col)?;
-            self.prev_token_kind = Some(kind.clone());
+            let kind = self.record_token(kind);
             return Ok(Token {
                 kind,
                 line,
@@ -715,8 +915,20 @@ impl<'a> Lexer<'a> {
             '.' => TokenKind::Dot,
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
-            '{' => TokenKind::LBrace,
-            '}' => TokenKind::RBrace,
+            '{' => {
+                let is_expr = if self.prev_token_kind == Some(TokenKind::RParen) && !self.fn_expr_stack.is_empty() {
+                    self.fn_expr_stack.pop().unwrap_or(false)
+                } else {
+                    is_expr_brace_context(&self.prev_token_kind)
+                };
+                self.brace_stack.push(is_expr);
+                TokenKind::LBrace
+            }
+            '}' => {
+                let was_expr = self.brace_stack.pop().unwrap_or(false);
+                self.last_rbrace_was_expr = was_expr;
+                TokenKind::RBrace
+            }
             '[' => TokenKind::LBracket,
             ']' => TokenKind::RBracket,
             '~' => TokenKind::Tilde,
@@ -846,7 +1058,7 @@ impl<'a> Lexer<'a> {
             _ => return Err(LexError::UnexpectedChar(ch, line, col)),
         };
 
-        self.prev_token_kind = Some(kind.clone());
+        let kind = self.record_token(kind);
         Ok(Token {
             kind,
             line,
@@ -1012,18 +1224,32 @@ impl<'a> Lexer<'a> {
                     self.advance(); // '0'
                     self.advance(); // 'x'
                     let mut hex_str = String::new();
+                    let mut last_was_underscore = false;
+                    if self.peek() == Some('_') {
+                        return Err(LexError::InvalidNumber(line, col));
+                    }
                     while let Some(c) = self.peek() {
                         if c.is_ascii_hexdigit() {
                             hex_str.push(c);
                             self.advance();
+                            last_was_underscore = false;
                         } else if c == '_' {
+                            if last_was_underscore {
+                                return Err(LexError::InvalidNumber(line, col));
+                            }
                             self.advance();
+                            last_was_underscore = true;
                         } else {
                             break;
                         }
                     }
+                    if last_was_underscore || hex_str.is_empty() {
+                        return Err(LexError::InvalidNumber(line, col));
+                    }
                     if self.peek() == Some('n') {
                         self.advance(); // consume 'n'
+                        let bi = BigInt::parse_bytes(hex_str.as_bytes(), 16).unwrap_or_default();
+                        return Ok(TokenKind::BigInt(bi));
                     }
                     let num = u64::from_str_radix(&hex_str, 16)
                         .map(|v| v as f64)
@@ -1034,18 +1260,32 @@ impl<'a> Lexer<'a> {
                     self.advance(); // '0'
                     self.advance(); // 'b'
                     let mut bin_str = String::new();
+                    let mut last_was_underscore = false;
+                    if self.peek() == Some('_') {
+                        return Err(LexError::InvalidNumber(line, col));
+                    }
                     while let Some(c) = self.peek() {
                         if c == '0' || c == '1' {
                             bin_str.push(c);
                             self.advance();
+                            last_was_underscore = false;
                         } else if c == '_' {
+                            if last_was_underscore {
+                                return Err(LexError::InvalidNumber(line, col));
+                            }
                             self.advance();
+                            last_was_underscore = true;
                         } else {
                             break;
                         }
                     }
+                    if last_was_underscore || bin_str.is_empty() {
+                        return Err(LexError::InvalidNumber(line, col));
+                    }
                     if self.peek() == Some('n') {
                         self.advance(); // consume 'n'
+                        let bi = BigInt::parse_bytes(bin_str.as_bytes(), 2).unwrap_or_default();
+                        return Ok(TokenKind::BigInt(bi));
                     }
                     let num = u64::from_str_radix(&bin_str, 2)
                         .map(|v| v as f64)
@@ -1056,18 +1296,32 @@ impl<'a> Lexer<'a> {
                     self.advance(); // '0'
                     self.advance(); // 'o'
                     let mut oct_str = String::new();
+                    let mut last_was_underscore = false;
+                    if self.peek() == Some('_') {
+                        return Err(LexError::InvalidNumber(line, col));
+                    }
                     while let Some(c) = self.peek() {
                         if matches!(c, '0'..='7') {
                             oct_str.push(c);
                             self.advance();
+                            last_was_underscore = false;
                         } else if c == '_' {
+                            if last_was_underscore {
+                                return Err(LexError::InvalidNumber(line, col));
+                            }
                             self.advance();
+                            last_was_underscore = true;
                         } else {
                             break;
                         }
                     }
+                    if last_was_underscore || oct_str.is_empty() {
+                        return Err(LexError::InvalidNumber(line, col));
+                    }
                     if self.peek() == Some('n') {
                         self.advance(); // consume 'n'
+                        let bi = BigInt::parse_bytes(oct_str.as_bytes(), 8).unwrap_or_default();
+                        return Ok(TokenKind::BigInt(bi));
                     }
                     let num = u64::from_str_radix(&oct_str, 8)
                         .map(|v| v as f64)
@@ -1078,24 +1332,82 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        // Check if starts with 0
+        if self.peek() == Some('0') {
+            if let Some(next_c) = self.peek2() {
+                if next_c.is_ascii_digit() {
+                    // Legacy octal or non-octal decimal starting with '0' e.g. 010, 08, 09
+                    if self.is_strict {
+                        return Err(LexError::InvalidNumber(line, col));
+                    }
+                    // Non-strict: read digits
+                    self.advance(); // consume '0'
+                    let mut oct_digits = String::new();
+                    let mut is_pure_octal = true;
+                    while let Some(c) = self.peek() {
+                        if c.is_ascii_digit() {
+                            if !matches!(c, '0'..='7') {
+                                is_pure_octal = false;
+                            }
+                            oct_digits.push(c);
+                            self.advance();
+                        } else if c == '_' {
+                            // Numeric separator is NEVER allowed in legacy octal or non-octal decimal!
+                            return Err(LexError::InvalidNumber(line, col));
+                        } else {
+                            break;
+                        }
+                    }
+                    // BigInt cannot have legacy octal or non-octal leading zeros: 01n, 08n are invalid!
+                    if self.peek() == Some('n') {
+                        return Err(LexError::InvalidNumber(line, col));
+                    }
+                    let num = if is_pure_octal {
+                        u64::from_str_radix(&oct_digits, 8).map(|v| v as f64).unwrap_or(f64::NAN)
+                    } else {
+                        format!("0{}", oct_digits).parse::<f64>().unwrap_or(f64::NAN)
+                    };
+                    return Ok(TokenKind::Number(num));
+                } else if next_c == '_' {
+                    // 0_... is NEVER allowed! (0_0, 0_1, etc.)
+                    return Err(LexError::InvalidNumber(line, col));
+                }
+            }
+        }
+
         // Standard decimal, possibly starting with '.' or digits
         let mut has_dot = false;
         let mut has_exp = false;
+        let mut last_was_underscore = false;
 
         while let Some(c) = self.peek() {
             if c.is_ascii_digit() {
                 s.push(c);
                 self.advance();
+                last_was_underscore = false;
+            } else if c == '_' {
+                if last_was_underscore || s.is_empty() {
+                    return Err(LexError::InvalidNumber(line, col));
+                }
+                self.advance();
+                last_was_underscore = true;
             } else if c == '.' && !has_dot && !has_exp {
-                // Peek ahead to ensure it's not a method call like 42.toString()
-                if self.peek2().is_some_and(|next_c| next_c.is_ascii_alphabetic() || next_c == '$' || next_c == '_') {
-                    // It's followed by an identifier (e.g. 42.toString), stop before the dot
-                    break;
+                if last_was_underscore {
+                    // 1_.2 is invalid!
+                    return Err(LexError::InvalidNumber(line, col));
                 }
                 has_dot = true;
                 s.push(c);
                 self.advance();
+                // 1._2 or 1._ is invalid!
+                if self.peek() == Some('_') {
+                    return Err(LexError::InvalidNumber(line, col));
+                }
             } else if (c == 'e' || c == 'E') && !has_exp {
+                if last_was_underscore {
+                    // 1_e2 is invalid!
+                    return Err(LexError::InvalidNumber(line, col));
+                }
                 has_exp = true;
                 s.push(c);
                 self.advance();
@@ -1105,19 +1417,43 @@ impl<'a> Lexer<'a> {
                         self.advance();
                     }
                 }
-            } else if c == '_' {
-                self.advance(); // skip numeric separator
+                // 1e_2 or 1e+_2 is invalid!
+                if self.peek() == Some('_') {
+                    return Err(LexError::InvalidNumber(line, col));
+                }
             } else {
                 break;
             }
         }
 
+        if last_was_underscore {
+            return Err(LexError::InvalidNumber(line, col));
+        }
+
         // BigInt literal suffix 'n'
         if self.peek() == Some('n') {
             self.advance();
+            if has_dot || has_exp {
+                return Err(LexError::InvalidNumber(line, col));
+            }
+            if s.len() > 1 && s.starts_with('0') {
+                return Err(LexError::InvalidNumber(line, col));
+            }
+            if let Some(next_c) = self.peek() {
+                if next_c.is_alphabetic() || next_c == '_' || next_c == '$' || next_c > '\x7f' {
+                    return Err(LexError::InvalidNumber(line, col));
+                }
+            }
+            let bi = BigInt::parse_bytes(s.as_bytes(), 10).unwrap_or_default();
+            return Ok(TokenKind::BigInt(bi));
         }
 
         let num = s.parse::<f64>().map_err(|_| LexError::InvalidNumber(line, col))?;
+        if let Some(next_c) = self.peek() {
+            if next_c.is_alphabetic() || next_c == '_' || next_c == '$' || next_c > '\x7f' {
+                return Err(LexError::InvalidNumber(line, col));
+            }
+        }
         Ok(TokenKind::Number(num))
     }
 
@@ -1125,16 +1461,21 @@ impl<'a> Lexer<'a> {
         self.advance(); // consume opening quote
         let mut s = String::new();
         let mut has_escape = false;
+        let mut has_legacy_escape = false;
+        let mut has_unpaired_surrogate = false;
         while let Some(c) = self.advance() {
-            if is_line_terminator(c) {
+            if c == '\r' || c == '\n' {
                 return Err(LexError::UnterminatedString(line, col));
             }
             if c == quote {
-                return Ok(TokenKind::StringLit { value: s, has_escape });
+                if flush_surrogate(&mut s) {
+                    has_unpaired_surrogate = true;
+                }
+                return Ok(TokenKind::StringLit { value: s, has_escape, has_legacy_escape, has_unpaired_surrogate });
             } else if c == '\\' {
                 has_escape = true;
                 if let Some(escaped) = self.advance() {
-                    if is_line_terminator(escaped) {
+                    if escaped == '\r' || escaped == '\n' || escaped == '\u{2028}' || escaped == '\u{2029}' {
                         // Line continuation: \ followed by line terminator
                         if escaped == '\r' && self.peek() == Some('\n') {
                             self.advance();
@@ -1142,30 +1483,28 @@ impl<'a> Lexer<'a> {
                         continue;
                     }
                     match escaped {
-                        'n' => s.push('\n'),
-                        'r' => s.push('\r'),
-                        't' => s.push('\t'),
-                        'b' => s.push('\x08'),
-                        'f' => s.push('\x0C'),
-                        'v' => s.push('\x0B'),
-                        '0' => s.push('\0'),
-                        '\\' => s.push('\\'),
-                        '\'' => s.push('\''),
-                        '"' => s.push('"'),
+                        'n' => { flush_surrogate(&mut s); s.push('\n'); }
+                        'r' => { flush_surrogate(&mut s); s.push('\r'); }
+                        't' => { flush_surrogate(&mut s); s.push('\t'); }
+                        'b' => { flush_surrogate(&mut s); s.push('\x08'); }
+                        'f' => { flush_surrogate(&mut s); s.push('\x0C'); }
+                        'v' => { flush_surrogate(&mut s); s.push('\x0B'); }
+                        '\\' => { flush_surrogate(&mut s); s.push('\\'); }
+                        '\'' => { flush_surrogate(&mut s); s.push('\''); }
+                        '"' => { flush_surrogate(&mut s); s.push('"'); }
                         'x' => {
-                            // 2 hex digits
+                            // Exactly 2 hex digits required
                             let mut hex = String::new();
                             for _ in 0..2 {
-                                if let Some(h) = self.advance() {
-                                    if h.is_ascii_hexdigit() {
-                                        hex.push(h);
-                                    }
+                                match self.advance() {
+                                    Some(h) if h.is_ascii_hexdigit() => hex.push(h),
+                                    _ => return Err(LexError::InvalidEscape(line, col)),
                                 }
                             }
-                            if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                if let Some(ch) = char::from_u32(code) {
-                                    s.push(ch);
-                                }
+                            let code = u32::from_str_radix(&hex, 16)
+                                .map_err(|_| LexError::InvalidEscape(line, col))?;
+                            if push_unicode_code_unit(&mut s, code) {
+                                has_unpaired_surrogate = true;
                             }
                         }
                         'u' => {
@@ -1178,34 +1517,109 @@ impl<'a> Lexer<'a> {
                                     }
                                     if ch.is_ascii_hexdigit() {
                                         hex.push(ch);
+                                    } else {
+                                        return Err(LexError::InvalidEscape(line, col));
                                     }
                                 }
-                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                    if let Some(ch) = char::from_u32(code) {
-                                        s.push(ch);
-                                    }
+                                if hex.is_empty() || hex.len() > 6 {
+                                    return Err(LexError::InvalidEscape(line, col));
+                                }
+                                let code = u32::from_str_radix(&hex, 16)
+                                    .map_err(|_| LexError::InvalidEscape(line, col))?;
+                                if code > 0x10FFFF {
+                                    return Err(LexError::InvalidEscape(line, col));
+                                }
+                                if push_unicode_code_unit(&mut s, code) {
+                                    has_unpaired_surrogate = true;
                                 }
                             } else {
-                                // 4 hex digits
+                                // Exactly 4 hex digits required
                                 let mut hex = String::new();
                                 for _ in 0..4 {
-                                    if let Some(h) = self.advance() {
-                                        if h.is_ascii_hexdigit() {
-                                            hex.push(h);
-                                        }
+                                    match self.advance() {
+                                        Some(h) if h.is_ascii_hexdigit() => hex.push(h),
+                                        _ => return Err(LexError::InvalidEscape(line, col)),
                                     }
                                 }
-                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                    if let Some(ch) = char::from_u32(code) {
-                                        s.push(ch);
-                                    }
+                                let code = u32::from_str_radix(&hex, 16)
+                                    .map_err(|_| LexError::InvalidEscape(line, col))?;
+                                if push_unicode_code_unit(&mut s, code) {
+                                    has_unpaired_surrogate = true;
                                 }
                             }
                         }
-                        _ => s.push(escaped),
+                        '0' => {
+                            if let Some(next_c) = self.peek() {
+                                if next_c.is_ascii_digit() {
+                                    if self.is_strict {
+                                        return Err(LexError::InvalidEscape(line, col));
+                                    }
+                                    has_legacy_escape = true;
+                                    if ('0'..='7').contains(&next_c) {
+                                        let mut oct = next_c as u32 - '0' as u32;
+                                        self.advance();
+                                        if let Some(next_c2) = self.peek() {
+                                            if ('0'..='7').contains(&next_c2) {
+                                                oct = oct * 8 + (next_c2 as u32 - '0' as u32);
+                                                self.advance();
+                                            }
+                                        }
+                                        flush_surrogate(&mut s);
+                                        s.push(char::from_u32(oct).unwrap_or('\0'));
+                                    } else {
+                                        // e.g. \08 or \09: \0 followed by 8 or 9
+                                        flush_surrogate(&mut s);
+                                        s.push('\0');
+                                    }
+                                } else {
+                                    flush_surrogate(&mut s);
+                                    s.push('\0');
+                                }
+                            } else {
+                                flush_surrogate(&mut s);
+                                s.push('\0');
+                            }
+                        }
+                        '1'..='7' => {
+                            if self.is_strict {
+                                return Err(LexError::InvalidEscape(line, col));
+                            }
+                            has_legacy_escape = true;
+                            let mut oct = escaped as u32 - '0' as u32;
+                            for _ in 0..2 {
+                                if let Some(c) = self.peek() {
+                                    if ('0'..='7').contains(&c) {
+                                        let next_oct = oct * 8 + (c as u32 - '0' as u32);
+                                        if next_oct <= 255 {
+                                            oct = next_oct;
+                                            self.advance();
+                                        } else {
+                                            break;
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            flush_surrogate(&mut s);
+                            s.push(char::from_u32(oct).unwrap_or(escaped));
+                        }
+                        '8' | '9' => {
+                            if self.is_strict {
+                                return Err(LexError::InvalidEscape(line, col));
+                            }
+                            has_legacy_escape = true;
+                            flush_surrogate(&mut s);
+                            s.push(escaped);
+                        }
+                        _ => {
+                            flush_surrogate(&mut s);
+                            s.push(escaped);
+                        }
                     }
                 }
             } else {
+                flush_surrogate(&mut s);
                 s.push(c);
             }
         }
@@ -1220,10 +1634,12 @@ impl<'a> Lexer<'a> {
 
         while let Some(c) = self.advance() {
             if c == '`' {
+                flush_surrogate(&mut current_quasi);
                 quasis.push(current_quasi);
                 return Ok(TokenKind::TemplateLiteral { quasis, raw_exprs });
             } else if c == '$' && self.peek() == Some('{') {
                 self.advance(); // consume '{'
+                flush_surrogate(&mut current_quasi);
                 quasis.push(std::mem::take(&mut current_quasi));
 
                 let mut expr_str = String::new();
@@ -1312,18 +1728,18 @@ impl<'a> Lexer<'a> {
                         continue;
                     }
                     match escaped {
-                        'n' => current_quasi.push('\n'),
-                        'r' => current_quasi.push('\r'),
-                        't' => current_quasi.push('\t'),
-                        'b' => current_quasi.push('\x08'),
-                        'f' => current_quasi.push('\x0C'),
-                        'v' => current_quasi.push('\x0B'),
-                        '0' => current_quasi.push('\0'),
-                        '\\' => current_quasi.push('\\'),
-                        '\'' => current_quasi.push('\''),
-                        '"' => current_quasi.push('"'),
-                        '`' => current_quasi.push('`'),
-                        '$' => current_quasi.push('$'),
+                        'n' => { flush_surrogate(&mut current_quasi); current_quasi.push('\n'); }
+                        'r' => { flush_surrogate(&mut current_quasi); current_quasi.push('\r'); }
+                        't' => { flush_surrogate(&mut current_quasi); current_quasi.push('\t'); }
+                        'b' => { flush_surrogate(&mut current_quasi); current_quasi.push('\x08'); }
+                        'f' => { flush_surrogate(&mut current_quasi); current_quasi.push('\x0C'); }
+                        'v' => { flush_surrogate(&mut current_quasi); current_quasi.push('\x0B'); }
+                        '0' => { flush_surrogate(&mut current_quasi); current_quasi.push('\0'); }
+                        '\\' => { flush_surrogate(&mut current_quasi); current_quasi.push('\\'); }
+                        '\'' => { flush_surrogate(&mut current_quasi); current_quasi.push('\''); }
+                        '"' => { flush_surrogate(&mut current_quasi); current_quasi.push('"'); }
+                        '`' => { flush_surrogate(&mut current_quasi); current_quasi.push('`'); }
+                        '$' => { flush_surrogate(&mut current_quasi); current_quasi.push('$'); }
                         'x' => {
                             let mut hex = String::new();
                             for _ in 0..2 {
@@ -1334,9 +1750,7 @@ impl<'a> Lexer<'a> {
                                 }
                             }
                             if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                if let Some(ch) = char::from_u32(code) {
-                                    current_quasi.push(ch);
-                                }
+                                push_unicode_code_unit(&mut current_quasi, code);
                             }
                         }
                         'u' => {
@@ -1348,9 +1762,7 @@ impl<'a> Lexer<'a> {
                                     if ch.is_ascii_hexdigit() { hex.push(ch); }
                                 }
                                 if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                    if let Some(ch) = char::from_u32(code) {
-                                        current_quasi.push(ch);
-                                    }
+                                    push_unicode_code_unit(&mut current_quasi, code);
                                 }
                             } else {
                                 let mut hex = String::new();
@@ -1360,13 +1772,12 @@ impl<'a> Lexer<'a> {
                                     }
                                 }
                                 if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                    if let Some(ch) = char::from_u32(code) {
-                                        current_quasi.push(ch);
-                                    }
+                                    push_unicode_code_unit(&mut current_quasi, code);
                                 }
                             }
                         }
                         other => {
+                            flush_surrogate(&mut current_quasi);
                             current_quasi.push(other);
                         }
                     }
@@ -1375,8 +1786,10 @@ impl<'a> Lexer<'a> {
                 if self.peek() == Some('\n') {
                     self.advance();
                 }
+                flush_surrogate(&mut current_quasi);
                 current_quasi.push('\n');
             } else {
+                flush_surrogate(&mut current_quasi);
                 current_quasi.push(c);
             }
         }

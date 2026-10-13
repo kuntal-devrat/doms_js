@@ -531,15 +531,14 @@ fn register_fetch(vm: &mut Vm) {
         if init.is_object() {
             if let Some(ptr) = init.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let Some(shape) = vm.shapes.get(obj.shape_id) {
-                    let pairs: Vec<(String, JsValue)> = shape
-                        .property_offsets
-                        .iter()
-                        .filter_map(|(k, info)| obj.get_slot(info.offset).map(|v| (k.clone(), v)))
-                        .collect();
-                    for (k, v) in pairs {
-                        vm.set_property(store, &k.to_ascii_lowercase(), v);
-                    }
+                let pairs: Vec<(String, JsValue)> = vm
+                    .shapes
+                    .all_property_entries(obj.shape_id)
+                    .into_iter()
+                    .filter_map(|(k, offset)| obj.get_slot(offset).map(|v| (k, v)))
+                    .collect();
+                for (k, v) in pairs {
+                    vm.set_property(store, &k.to_ascii_lowercase(), v);
                 }
             }
         }
@@ -601,16 +600,15 @@ fn register_fetch(vm: &mut Vm) {
             if h_init.is_object() {
                 if let Some(ptr) = h_init.as_object_ptr() {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
-                    if let Some(shape) = vm.shapes.get(obj.shape_id) {
-                        let pairs: Vec<(String, JsValue)> = shape
-                            .property_offsets
-                            .iter()
-                            .filter_map(|(k, info)| obj.get_slot(info.offset).map(|v| (k.clone(), v)))
-                            .collect();
-                        let store = vm.get_property(headers_obj, "__store__");
-                        for (k, v) in pairs {
-                            vm.set_property(store, &k.to_ascii_lowercase(), v);
-                        }
+                    let pairs: Vec<(String, JsValue)> = vm
+                        .shapes
+                        .all_property_entries(obj.shape_id)
+                        .into_iter()
+                        .filter_map(|(k, offset)| obj.get_slot(offset).map(|v| (k, v)))
+                        .collect();
+                    let store = vm.get_property(headers_obj, "__store__");
+                    for (k, v) in pairs {
+                        vm.set_property(store, &k.to_ascii_lowercase(), v);
                     }
                 }
             }

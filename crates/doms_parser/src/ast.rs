@@ -1,5 +1,7 @@
 //! Abstract Syntax Tree (AST) definitions for DOMS JavaScript parser.
 
+use num_bigint::BigInt;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub body: Vec<Statement>,
@@ -33,8 +35,8 @@ pub enum Statement {
     While { condition: Expression, body: Box<Statement> },
     For { init: Option<Box<Statement>>, condition: Option<Expression>, update: Option<Expression>, body: Box<Statement> },
     DoWhile { body: Box<Statement>, condition: Expression },
-    ForIn { left: String, right: Expression, body: Box<Statement> },
-    ForOf { left: String, right: Expression, body: Box<Statement> },
+    ForIn { var_kind: Option<VarKind>, left: String, right: Expression, body: Box<Statement> },
+    ForOf { var_kind: Option<VarKind>, left: String, right: Expression, body: Box<Statement>, is_await: bool },
     Labeled { label: String, body: Box<Statement> },
     Switch { discriminant: Expression, cases: Vec<SwitchCase> },
     Break(Option<String>),
@@ -45,8 +47,16 @@ pub enum Statement {
     FunctionDecl { name: String, params: Vec<String>, body: Vec<Statement> },
     AsyncFunctionDecl { name: String, params: Vec<String>, body: Vec<Statement> },
     GeneratorDecl { name: String, params: Vec<String>, body: Vec<Statement> },
+    AsyncGeneratorDecl { name: String, params: Vec<String>, body: Vec<Statement> },
     Import { specifiers: Vec<(String, Option<String>)>, source: String, is_default: bool, is_all: bool },
-    Export { decl: Option<Box<Statement>>, is_default: bool },
+    Export {
+        decl: Option<Box<Statement>>,
+        is_default: bool,
+        specifiers: Vec<(String, Option<String>)>,
+        source: Option<String>,
+        is_all: bool,
+        all_as: Option<String>,
+    },
     Empty,
     Debugger,
     With { object: Expression, body: Box<Statement> },
@@ -73,12 +83,19 @@ pub enum Expression {
     Array(Vec<Expression>),
     Conditional { condition: Box<Expression>, then_expr: Box<Expression>, else_expr: Box<Expression> },
     FunctionExpr { name: Option<String>, params: Vec<String>, body: Vec<Statement> },
+    ArrowExpr { params: Vec<String>, body: Vec<Statement> },
+    MethodExpr { name: Option<String>, params: Vec<String>, body: Vec<Statement> },
+    AsyncFunctionExpr { name: Option<String>, params: Vec<String>, body: Vec<Statement> },
     GeneratorExpr { name: Option<String>, params: Vec<String>, body: Vec<Statement> },
+    AsyncGeneratorExpr { name: Option<String>, params: Vec<String>, body: Vec<Statement> },
+    NewTarget,
     Sequence(Vec<Expression>),
     Await(Box<Expression>),
     Yield(Option<Box<Expression>>),
     DynamicImport(Box<Expression>),
     Update { op: UpdateOp, is_prefix: bool, expr: Box<Expression> },
+    Grouping(Box<Expression>),
+    Spread(Box<Expression>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,11 +107,12 @@ pub enum UpdateOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Number(f64),
-    String { value: String, has_escape: bool },
+    String { value: String, has_escape: bool, has_legacy_escape: bool },
     Boolean(bool),
     Null,
     Undefined,
     RegExp { pattern: String, flags: String },
+    BigInt(BigInt),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

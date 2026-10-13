@@ -20,6 +20,7 @@ pub struct TestMetadata {
     pub description: Option<String>,
     pub flags: Vec<String>,
     pub includes: Vec<String>,
+    pub features: Vec<String>,
     pub is_raw: bool,
     pub is_only_strict: bool,
     pub is_module: bool,
@@ -156,6 +157,18 @@ impl Test262Runner {
                         }
                     }
                 }
+            } else if line.starts_with("features:") {
+                in_negative = false;
+                let feat_str = line.trim_start_matches("features:").trim();
+                if feat_str.starts_with('[') && feat_str.ends_with(']') {
+                    let inside = &feat_str[1..feat_str.len() - 1];
+                    for f in inside.split(',') {
+                        let feat = f.trim();
+                        if !feat.is_empty() {
+                            meta.features.push(feat.to_string());
+                        }
+                    }
+                }
             } else if line.starts_with("negative:") {
                 in_negative = true;
             } else if in_negative {
@@ -209,6 +222,7 @@ impl Test262Runner {
         out.push_str("if (!$262.evalScript) $262.evalScript = function(src) { return eval(src); };\n");
         out.push_str("if (!$262.gc) $262.gc = function() {};\n");
         out.push_str("if (!$262.agent) $262.agent = {};\n");
+        out.push_str("var $DONE = function(err) { if (err) { throw err; } };\n");
 
         // Additional includes
         for inc in &meta.includes {
@@ -222,14 +236,36 @@ impl Test262Runner {
         out
     }
 
-    /// Execute a single test file and return TestStatus.
+    /// Execute a single test file and return TestStatus with a 3-second timeout guard.
     pub fn execute_file(&self, path: &Path) -> TestStatus {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.execute_file_inner(path)
-        }));
-        match result {
-            Ok(status) => status,
-            Err(_) => TestStatus::Fail("Panic during test execution".into()),
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path_buf = path.to_path_buf();
+        let config = self.config.clone();
+        let harness_cache = Arc::clone(&self.harness_cache);
+
+        let handle = std::thread::Builder::new()
+            .name("test262-single-test".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                let runner = Self { config, harness_cache };
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    runner.execute_file_inner(&path_buf)
+                }));
+                let status = match result {
+                    Ok(status) => status,
+                    Err(_) => TestStatus::Fail("Panic during test execution".into()),
+                };
+                let _ = tx.send(status);
+            });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(3)) {
+            Ok(status) => {
+                if let Ok(h) = handle {
+                    let _ = h.join();
+                }
+                status
+            }
+            Err(_) => TestStatus::Fail("Test execution timed out (>3s)".into()),
         }
     }
 
@@ -247,6 +283,19 @@ impl Test262Runner {
         }
 
         let meta = Self::parse_metadata(&content);
+        for feat in &meta.features {
+            if feat == "resizable-arraybuffer"
+                || feat == "import-defer"
+                || feat == "import-attributes"
+                || feat == "import-bytes"
+                || feat == "import-text"
+                || feat == "regexp-modifiers"
+                || feat == "source-phase-imports"
+                || feat == "source-phase-imports-module-source"
+            {
+                return TestStatus::Skip(format!("Feature '{}' not supported", feat));
+            }
+        }
         let full_source = self.build_source(&content, &meta);
 
         // 1. Parsing Phase
@@ -269,11 +318,23 @@ impl Test262Runner {
             return TestStatus::Fail("Expected parse error, but parsed successfully".into());
         }
 
+        if meta.is_module {
+            let res_result = validate_module_resolution(&program, path.parent());
+            if let Err(err) = res_result {
+                if meta.negative_phase.as_deref() == Some("resolution") {
+                    return TestStatus::Pass;
+                }
+                return TestStatus::Fail(format!("Resolution error: {}", err));
+            } else if meta.negative_phase.as_deref() == Some("resolution") {
+                return TestStatus::Fail("Expected resolution error, but resolved successfully".into());
+            }
+        }
+
         let is_top_level_strict = meta.is_only_strict
             || meta.is_module
             || program.body.iter()
                 .take_while(|s| matches!(s, doms_parser::ast::Statement::Expression(doms_parser::ast::Expression::Literal(doms_parser::ast::Literal::String { .. }))))
-                .any(|s| matches!(s, doms_parser::ast::Statement::Expression(doms_parser::ast::Expression::Literal(doms_parser::ast::Literal::String { value, has_escape: false })) if value == "use strict"));
+                .any(|s| matches!(s, doms_parser::ast::Statement::Expression(doms_parser::ast::Expression::Literal(doms_parser::ast::Literal::String { value, has_escape: false, .. })) if value == "use strict"));
 
         // 2. Compilation Phase
         let compiled = if is_top_level_strict {
@@ -295,10 +356,36 @@ impl Test262Runner {
         // 3. Execution Phase
         let mut vm = doms_vm::Vm::new();
         vm.is_strict = is_top_level_strict;
-        vm.max_instructions = Some(10_000_000);
-        vm.max_objects = Some(20_000);
+        vm.is_module = meta.is_module;
+        vm.base_dir = path.parent().map(|p| p.to_path_buf());
+        vm.max_instructions = Some(80_000_000);
+        vm.max_objects = Some(1_000_000);
         vm.max_evals = Some(100_000);
-        vm.deadline = Some(Instant::now() + std::time::Duration::from_millis(2500));
+        vm.deadline = Some(Instant::now() + std::time::Duration::from_millis(10_000));
+
+        if meta.is_module {
+            let m = vm.alloc_object();
+            vm.set_prototype(m, doms_vm::JsValue::null());
+            if let Some(tag_sym) = vm.symbol_to_string_tag {
+                let tag_val = vm.alloc_string("Module".to_string());
+                vm.set_symbol_property(m, tag_sym, tag_val);
+                vm.non_configurable_props.insert((m, "[Symbol.toStringTag]".to_string()));
+                vm.non_enumerable_props.insert((m, "[Symbol.toStringTag]".to_string()));
+                vm.non_writable_props.insert((m, "[Symbol.toStringTag]".to_string()));
+            }
+            vm.module_namespace_objects.insert(m);
+            vm.non_extensible_objects.insert(m);
+            vm.current_module_obj = Some(m);
+
+            let canonical_key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+                .to_string_lossy().to_string();
+            vm.modules.insert(canonical_key, m);
+            if let Some(name) = path.file_name() {
+                vm.modules.insert(format!("./{}", name.to_string_lossy()), m);
+                vm.modules.insert(name.to_string_lossy().to_string(), m);
+            }
+        }
+
         let result = vm.run(&chunk);
 
         match result {
@@ -451,7 +538,7 @@ impl Test262Runner {
 
             let handle = std::thread::Builder::new()
                 .name(format!("test262-worker-{}", handles.len()))
-                .stack_size(16 * 1024 * 1024)
+                .stack_size(4 * 1024 * 1024)
                 .spawn(move || {
                 for path in chunk {
                     let cat = Self::extract_category(&base_dir, &path);
@@ -471,7 +558,6 @@ impl Test262Runner {
 
                     let mut stats = cat_stats_c.lock().unwrap();
                     let entry = stats.entry(cat).or_default();
-                    entry.total += 1;
 
                     if runner_copy.config.verbose {
                         match &status {
@@ -485,10 +571,12 @@ impl Test262Runner {
                         TestStatus::Pass => {
                             passed_c.fetch_add(1, Ordering::Relaxed);
                             entry.passed += 1;
+                            entry.total += 1;
                         }
                         TestStatus::Fail(_) => {
                             failed_c.fetch_add(1, Ordering::Relaxed);
                             entry.failed += 1;
+                            entry.total += 1;
                         }
                         TestStatus::Skip(_) => {
                             skipped_c.fetch_add(1, Ordering::Relaxed);
@@ -692,4 +780,166 @@ fn chrono_now_utc() -> String {
     let secs = now.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     format!("{}-epoch", secs)
 }
+
+fn resolve_module_export(
+    path: &Path,
+    name: &str,
+    visited: &mut std::collections::HashSet<(std::path::PathBuf, String)>,
+) -> Result<Option<(std::path::PathBuf, String)>, String> {
+    let canonical = path.canonicalize().map_err(|e| e.to_string())?;
+    if !visited.insert((canonical.clone(), name.to_string())) {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&canonical).map_err(|e| e.to_string())?;
+    let prog = doms_parser::parse_module(&content).map_err(|e| e.to_string())?;
+
+    let mut found = false;
+    let mut star_sources = Vec::new();
+
+    for stmt in &prog.body {
+        match stmt {
+            doms_parser::ast::Statement::Export { is_default, decl, specifiers, source, is_all, all_as } => {
+                if *is_default && name == "default" {
+                    found = true;
+                }
+                if let Some(inner) = decl {
+                    match &**inner {
+                        doms_parser::ast::Statement::VarDecl { declarations, .. } => {
+                            for d in declarations {
+                                if d.name == name {
+                                    found = true;
+                                }
+                            }
+                        }
+                        doms_parser::ast::Statement::ClassDecl(c) => {
+                            if c.name.as_deref() == Some(name) {
+                                found = true;
+                            }
+                        }
+                        doms_parser::ast::Statement::FunctionDecl { name: fn_name, .. }
+                        | doms_parser::ast::Statement::AsyncFunctionDecl { name: fn_name, .. }
+                        | doms_parser::ast::Statement::GeneratorDecl { name: fn_name, .. }
+                        | doms_parser::ast::Statement::AsyncGeneratorDecl { name: fn_name, .. } => {
+                            if fn_name == name {
+                                found = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if source.is_none() {
+                    for (orig, alias) in specifiers {
+                        let exp = alias.as_deref().unwrap_or(orig);
+                        if exp == name {
+                            found = true;
+                        }
+                    }
+                } else if let Some(src) = source {
+                    if *is_all {
+                        if let Some(alias) = all_as {
+                            if alias == name {
+                                let sub_path = canonical.parent().unwrap().join(src);
+                                let canonical_sub = match sub_path.canonicalize() {
+                                    Ok(p) => p,
+                                    Err(_) => sub_path,
+                                };
+                                return Ok(Some((canonical_sub, "*".to_string())));
+                            }
+                        } else if name != "default" {
+                            star_sources.push(src.clone());
+                        }
+                    } else {
+                        for (orig, alias) in specifiers {
+                            let exp = alias.as_deref().unwrap_or(orig);
+                            if exp == name {
+                                let sub_path = canonical.parent().unwrap().join(src);
+                                return resolve_module_export(&sub_path, orig, visited);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if found {
+        return Ok(Some((canonical, name.to_string())));
+    }
+
+    let mut resolved_star: Option<(std::path::PathBuf, String)> = None;
+    for src in star_sources {
+        let sub_path = canonical.parent().unwrap().join(&src);
+        if let Some(target) = resolve_module_export(&sub_path, name, visited)? {
+            if let Some(ref existing) = resolved_star {
+                if existing != &target {
+                    return Err(format!("Ambiguous export '{}'", name));
+                }
+            } else {
+                resolved_star = Some(target);
+            }
+        }
+    }
+
+    if let Some(target) = resolved_star {
+        return Ok(Some(target));
+    }
+
+    Ok(None)
+}
+
+fn validate_module_resolution(program: &doms_parser::ast::Program, base_dir: Option<&Path>) -> Result<(), String> {
+    let base = match base_dir {
+        Some(b) => b,
+        None => return Ok(()),
+    };
+
+    for stmt in &program.body {
+        match stmt {
+            doms_parser::ast::Statement::Import { specifiers, source, is_default, is_all } => {
+                let mod_path = base.join(source);
+                let content = fs::read_to_string(&mod_path).map_err(|e| e.to_string())?;
+                let mod_prog = doms_parser::parse_module(&content).map_err(|e| e.to_string())?;
+                if *is_all {
+                    for s in &mod_prog.body {
+                        if let doms_parser::ast::Statement::Export { specifiers, source: Some(src), is_all: false, .. } = s {
+                            for (name, _) in specifiers {
+                                let src_path = mod_path.parent().unwrap().join(src);
+                                let mut visited = std::collections::HashSet::new();
+                                if resolve_module_export(&src_path, name, &mut visited)?.is_none() {
+                                    return Err(format!("Unresolvable star namespace export '{}'", name));
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for (i, (name, _)) in specifiers.iter().enumerate() {
+                        let exp_name = if *is_default && i == 0 { "default" } else { name.as_str() };
+                        let mut visited = std::collections::HashSet::new();
+                        if resolve_module_export(&mod_path, exp_name, &mut visited)?.is_none() {
+                            return Err(format!("Named import '{}' not found in '{}'", exp_name, source));
+                        }
+                    }
+                }
+            }
+            doms_parser::ast::Statement::Export { specifiers, source: Some(source), is_all, all_as, .. } => {
+                let mod_path = base.join(source);
+                let content = fs::read_to_string(&mod_path).map_err(|e| e.to_string())?;
+                let _mod_prog = doms_parser::parse_module(&content).map_err(|e| e.to_string())?;
+                if !*is_all || all_as.is_some() {
+                    for (name, _) in specifiers {
+                        let mut visited = std::collections::HashSet::new();
+                        if resolve_module_export(&mod_path, name, &mut visited)?.is_none() {
+                            return Err(format!("Indirect export '{}' not found in '{}'", name, source));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 

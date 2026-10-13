@@ -39,6 +39,9 @@ doms_wasm = { path = "crates/doms_wasm" }
 thiserror = "2"
 log = "0.4"
 unicode-ident = "1.0"
+num-bigint = "0.4.8"
+num-traits = "0.2.19"
+regress = "0.12"
 
 [profile.release]
 opt-level = 3

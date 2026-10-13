@@ -39,6 +39,7 @@ const TAG_INT32: u64 = 0xFFF9_0000_0000_0000;
 const TAG_BOOLEAN: u64 = 0xFFFA_0000_0000_0000;
 const TAG_NULL: u64 = 0xFFFB_0000_0000_0000;
 const TAG_UNDEFINED: u64 = 0xFFFC_0000_0000_0000;
+const TAG_UNINITIALIZED: u64 = 0xFFFC_0000_0000_0001;
 const TAG_OBJECT: u64 = 0xFFFD_0000_0000_0000;
 const TAG_STRING: u64 = 0xFFFE_0000_0000_0000;
 const TAG_SYMBOL: u64 = 0xFFFF_0000_0000_0000;
@@ -88,6 +89,12 @@ impl JsValue {
     #[inline]
     pub const fn undefined() -> Self {
         Self(TAG_UNDEFINED)
+    }
+
+    /// Create the TDZ uninitialized value.
+    #[inline]
+    pub const fn uninitialized() -> Self {
+        Self(TAG_UNINITIALIZED)
     }
 
     /// Create a `JsValue` pointing to a heap-allocated object.
@@ -153,6 +160,11 @@ impl JsValue {
     #[inline]
     pub fn is_undefined(&self) -> bool {
         self.0 == TAG_UNDEFINED
+    }
+
+    #[inline]
+    pub fn is_uninitialized(&self) -> bool {
+        self.0 == TAG_UNINITIALIZED
     }
 
     #[inline]

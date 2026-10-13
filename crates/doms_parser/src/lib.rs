@@ -28,6 +28,17 @@ pub fn parse_strict(source: &str) -> Result<Program, ParseError> {
     parser.parse_program()
 }
 
+/// Parse an eval JavaScript source code string into an AST [`Program`].
+pub fn parse_eval(
+    source: &str,
+    is_strict: bool,
+    in_method: bool,
+    in_function: bool,
+) -> Result<Program, ParseError> {
+    let mut parser = Parser::new_eval(source, is_strict, in_method, in_function)?;
+    parser.parse_program()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

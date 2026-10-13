@@ -9,5 +9,7 @@ description = "Bytecode compiler and instruction set for the DOMS JavaScript eng
 doms_parser.workspace = true
 thiserror.workspace = true
 log.workspace = true
+num-bigint.workspace = true
+num-traits.workspace = true
 
 [dev-dependencies]
