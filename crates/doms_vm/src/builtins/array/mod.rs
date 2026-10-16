@@ -17,8 +17,23 @@ pub(super) fn register_array_builtins(vm: &mut Vm) {
 
     vm.set_property(array_proto, "constructor", array_constructor);
 
+    let proto_methods = [
+        "push", "pop", "shift", "unshift", "slice", "splice", "indexOf", "lastIndexOf",
+        "includes", "join", "concat", "reverse", "sort", "forEach", "map", "filter",
+        "reduce", "reduceRight", "some", "every", "find", "findIndex", "findLast",
+        "findLastIndex", "flat", "flatMap", "at", "toReversed", "toSorted", "toSpliced",
+        "with", "entries", "keys", "values", "constructor",
+    ];
+    for m in proto_methods {
+        vm.non_enumerable_props.insert((array_proto, m.to_string()));
+    }
+
     vm.set_property(array_constructor, "isArray", is_array_fn);
     vm.set_property(array_constructor, "prototype", array_proto);
+    for s in ["isArray", "from", "of", "prototype"] {
+        vm.non_enumerable_props.insert((array_constructor, s.to_string()));
+    }
+
     add_species_getter(vm, array_constructor);
     vm.globals.insert("Array".to_string(), array_constructor);
     if vm.global_object.is_object() {

@@ -37,8 +37,10 @@ pub(super) fn register_predicates(vm: &mut Vm, object_proto: JsValue) {
                     if key == "length" {
                         return Ok(JsValue::from_boolean(false));
                     }
-                    if key.parse::<usize>().map(|idx| idx < elements.len()).unwrap_or(false) {
-                        return Ok(JsValue::from_boolean(true));
+                    if let Ok(idx) = key.parse::<usize>() {
+                        if let Some(elem) = elements.get(idx) {
+                            return Ok(JsValue::from_boolean(!elem.is_hole()));
+                        }
                     }
                     false
                 }

@@ -23,16 +23,9 @@ pub(super) fn register_constructor(vm: &mut Vm) -> (JsValue, JsValue) {
         Ok(vm.alloc_array(args.to_vec()))
     });
 
-    let is_array_fn = vm.alloc_native_function("isArray", 1, |_vm, _this, args| {
-        if let Some(arg) = args.first() {
-            if let Some(ptr) = arg.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if matches!(obj.kind, ObjectKind::Array(_)) {
-                    return Ok(JsValue::from_boolean(true));
-                }
-            }
-        }
-        Ok(JsValue::from_boolean(false))
+    let is_array_fn = vm.alloc_native_function("isArray", 1, |vm, _this, args| {
+        let arg = args.first().copied().unwrap_or(JsValue::undefined());
+        Ok(JsValue::from_boolean(vm.is_array(arg)))
     });
     (array_constructor, is_array_fn)
 }

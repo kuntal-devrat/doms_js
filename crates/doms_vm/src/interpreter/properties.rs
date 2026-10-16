@@ -60,6 +60,16 @@ impl Vm {
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
 
+            // 1. Check own accessor
+            if let Some(accs) = &obj.accessors {
+                if let Some(acc) = accs.get(key) {
+                    if let Some(setter) = acc.setter {
+                        let _ = self.call(setter, target, &[value]);
+                    }
+                    return;
+                }
+            }
+
             if let ObjectKind::Array(elements) = &mut obj.kind {
                 if key == "length" {
                     if let Some(new_len) = value.to_number().map(|n| n as usize) {
@@ -81,16 +91,6 @@ impl Vm {
             if let ObjectKind::TypedArray(ta) = &mut obj.kind {
                 if let Ok(idx) = key.parse::<usize>() {
                     Self::write_typed_array_element(ta, idx, value);
-                    return;
-                }
-            }
-
-            // 1. Check own accessor
-            if let Some(accs) = &obj.accessors {
-                if let Some(acc) = accs.get(key) {
-                    if let Some(setter) = acc.setter {
-                        let _ = self.call(setter, target, &[value]);
-                    }
                     return;
                 }
             }
@@ -128,6 +128,9 @@ impl Vm {
                 obj.shape_id = new_shape_id;
                 obj.set_slot(offset, value);
             }
+        }
+        if target == self.global_object {
+            self.globals.insert(key.to_string(), value);
         }
         self.sync_mapped_arguments_write(target, key, value);
     }
@@ -174,7 +177,9 @@ impl Vm {
                 obj.set_slot(offset, value);
             }
         }
-        self.sync_mapped_arguments_write(target, key, value);
+        if target == self.global_object {
+            self.globals.insert(key.to_string(), value);
+        }
     }
 
     pub fn sync_mapped_arguments_write(&mut self, target: JsValue, key: &str, val: JsValue) {
@@ -220,5 +225,48 @@ impl Vm {
 
     pub fn has_own_property(&self, target: JsValue, key: &str) -> bool {
         self.has_own_property_key(target, &PropertyKeyVal::String(key.to_string()))
+    }
+
+    pub fn create_data_property_or_throw(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<(), VmError> {
+        let key_string = key.to_string();
+        if let Some(ptr) = target.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Proxy { target: tgt, handler: hdl } = &obj.kind {
+                let tgt = *tgt;
+                let hdl = *hdl;
+                let trap = self.get_property(hdl, "defineProperty");
+                if self.is_callable(trap) {
+                    let key_val = self.alloc_string(key_string.clone());
+                    let desc = self.alloc_object();
+                    self.set_property(desc, "value", value);
+                    self.set_property(desc, "writable", JsValue::from_boolean(true));
+                    self.set_property(desc, "enumerable", JsValue::from_boolean(true));
+                    self.set_property(desc, "configurable", JsValue::from_boolean(true));
+                    let res = self.call(trap, hdl, &[tgt, key_val, desc])?;
+                    if !res.is_truthy() {
+                        return Err(VmError::TypeError(format!("Proxy trap defineProperty returned false for '{}'", key)));
+                    }
+                    return Ok(());
+                } else {
+                    return self.create_data_property_or_throw(tgt, key, value);
+                }
+            }
+
+            // Check non-configurable: CreateDataProperty requires configurable: true.
+            // If property is already non-configurable, redefining it as configurable fails.
+            if self.non_configurable_props.contains(&(target, key_string.clone())) {
+                return Err(VmError::TypeError(format!("Cannot redefine non-configurable property '{}'", key)));
+            }
+
+            // Check non-extensible
+            if self.non_extensible_objects.contains(&target) && !self.has_own_property(target, key) {
+                return Err(VmError::TypeError(format!("Cannot add property '{}' to non-extensible object", key)));
+            }
+        }
+
+        self.non_writable_props.remove(&(target, key_string.clone()));
+        self.non_enumerable_props.remove(&(target, key_string.clone()));
+        self.set_own_property(target, key, value);
+        Ok(())
     }
 }

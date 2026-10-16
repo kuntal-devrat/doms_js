@@ -111,6 +111,7 @@ pub enum Literal {
     Boolean(bool),
     Null,
     Undefined,
+    Hole,
     RegExp { pattern: String, flags: String },
     BigInt(BigInt),
 }

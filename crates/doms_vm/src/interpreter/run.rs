@@ -137,6 +137,7 @@ impl Vm {
                 }
                 OpCode::LoadNull => self.push(JsValue::null()),
                 OpCode::LoadUndefined => self.push(JsValue::undefined()),
+                OpCode::LoadHole => self.push(JsValue::hole()),
                 OpCode::LoadTrue => self.push(JsValue::from_boolean(true)),
                 OpCode::LoadFalse => self.push(JsValue::from_boolean(false)),
                 OpCode::This => {

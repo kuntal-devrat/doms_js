@@ -51,15 +51,31 @@ pub(super) fn register_function_builtins(vm: &mut Vm) {
         let bound_this = args.first().copied().unwrap_or(JsValue::undefined());
         let bound_args: Vec<JsValue> = if args.len() > 1 { args[1..].to_vec() } else { Vec::new() };
 
+        let target_len = vm.get_property(target_fn, "length").to_number().unwrap_or(0.0) as usize;
+        let bound_length = if target_len > bound_args.len() { target_len - bound_args.len() } else { 0 };
+        let target_name = vm.get_property(target_fn, "name");
+        let target_name_str = if target_name.is_string() {
+            vm.to_string_value(target_name)
+        } else {
+            String::new()
+        };
+        let bound_name = format!("bound {}", target_name_str);
+
         let bound_closure = vm.alloc_closure_native_function(
-            "bound",
-            0,
+            &bound_name,
+            (bound_length.min(255)) as u8,
             Arc::new(move |vm, _call_this, call_args| {
                 let mut combined_args = bound_args.clone();
                 combined_args.extend_from_slice(call_args);
-                vm.call(target_fn, bound_this, &combined_args)
+                if vm.is_constructing {
+                    vm.construct(target_fn, &combined_args)
+                } else {
+                    vm.call(target_fn, bound_this, &combined_args)
+                }
             }),
         );
+        vm.non_enumerable_props.insert((bound_closure, "length".to_string()));
+        vm.non_enumerable_props.insert((bound_closure, "name".to_string()));
         Ok(bound_closure)
     });
 

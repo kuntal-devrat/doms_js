@@ -25,6 +25,9 @@ impl Vm {
                 // 1. Array elements or string characters
                 if let ObjectKind::Array(ref elements) = obj.kind {
                     for i in 0..elements.len() {
+                        if elements[i].is_hole() {
+                            continue;
+                        }
                         let k = i.to_string();
                         if !self.deleted_props.contains(&(obj_val, k.clone()))
                             && !self.non_enumerable_props.contains(&(obj_val, k.clone()))

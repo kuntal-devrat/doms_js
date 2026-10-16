@@ -46,6 +46,12 @@ impl JsValue {
         Self(TAG_UNINITIALIZED)
     }
 
+    /// Create the array hole value.
+    #[inline]
+    pub const fn hole() -> Self {
+        Self(TAG_HOLE)
+    }
+
     /// Create a `JsValue` pointing to a heap-allocated object.
     ///
     /// # Safety

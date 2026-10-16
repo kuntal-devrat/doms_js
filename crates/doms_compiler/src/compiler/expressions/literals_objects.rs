@@ -26,6 +26,9 @@ impl Compiler {
             Literal::Undefined => {
                 self.chunk.emit(OpCode::LoadUndefined, 0);
             }
+            Literal::Hole => {
+                self.chunk.emit(OpCode::LoadHole, 0);
+            }
             Literal::RegExp { pattern, flags } => {
                 let p_idx = self.chunk.add_constant(Constant::String(pattern.clone()));
                 let f_idx = self.chunk.add_constant(Constant::String(flags.clone()));

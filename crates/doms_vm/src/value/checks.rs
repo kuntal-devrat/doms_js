@@ -41,6 +41,11 @@ impl JsValue {
     }
 
     #[inline]
+    pub fn is_hole(&self) -> bool {
+        self.0 == TAG_HOLE
+    }
+
+    #[inline]
     pub fn is_nullish(&self) -> bool {
         self.is_null() || self.is_undefined()
     }

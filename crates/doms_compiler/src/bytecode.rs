@@ -32,6 +32,7 @@ pub enum OpCode {
     LoadConst(u16),
     LoadNull,
     LoadUndefined,
+    LoadHole,
     LoadTrue,
     LoadFalse,
     This,

@@ -31,6 +31,26 @@ pub(super) fn register_define_property(vm: &mut Vm) -> JsValue {
         let has_get = !get_val.is_undefined();
         let has_set = !set_val.is_undefined();
 
+        let key_name = match &prop_key {
+            PropertyKeyVal::String(s) => s.clone(),
+            PropertyKeyVal::Symbol(sym) => format!("[Symbol:{:x}]", sym.raw_bits()),
+        };
+
+        let is_non_configurable = vm.non_configurable_props.contains(&(target, key_name.clone()));
+        if is_non_configurable {
+            let conf_val = vm.get_property(desc, "configurable");
+            if !conf_val.is_undefined() && conf_val.is_truthy() {
+                return Err(VmError::TypeError("Cannot redefine property: configurable is false".into()));
+            }
+            let is_non_writable = vm.non_writable_props.contains(&(target, key_name.clone()));
+            if is_non_writable {
+                let writ_val = vm.get_property(desc, "writable");
+                if !writ_val.is_undefined() && writ_val.is_truthy() {
+                    return Err(VmError::TypeError("Cannot redefine property: writable is false".into()));
+                }
+            }
+        }
+
         match prop_key {
             PropertyKeyVal::Symbol(sym) => {
                 if has_get || has_set {
@@ -56,23 +76,21 @@ pub(super) fn register_define_property(vm: &mut Vm) -> JsValue {
                         }
                     }
                 } else {
-                    let val = vm.get_property(desc, "value");
-                    if let Some(ptr) = target.as_object_ptr() {
-                        let obj = unsafe { &mut *(ptr as *mut JsObject) };
-                        obj.insert_symbol_property(sym, val);
+                    let has_val = vm.has_property(desc, "value").unwrap_or(false);
+                    if has_val || !vm.has_own_property_key(target, &PropertyKeyVal::Symbol(sym)) {
+                        let val = vm.get_property(desc, "value");
+                        if let Some(ptr) = target.as_object_ptr() {
+                            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                            obj.insert_symbol_property(sym, val);
+                        }
                     }
                 }
             }
-            PropertyKeyVal::String(prop_name) => {
-                let is_non_configurable = vm.non_configurable_props.contains(&(target, prop_name.clone()));
+            PropertyKeyVal::String(ref prop_name) => {
                 if is_non_configurable {
-                    let conf_val = vm.get_property(desc, "configurable");
-                    if !conf_val.is_undefined() && conf_val.is_truthy() {
-                        return Err(VmError::TypeError("Cannot redefine property: configurable is false".into()));
-                    }
                     let has_accessor = if let Some(ptr) = target.as_object_ptr() {
                         let obj = unsafe { &*(ptr as *mut JsObject) };
-                        obj.accessors.as_ref().map_or(false, |accs| accs.contains_key(&prop_name))
+                        obj.accessors.as_ref().map_or(false, |accs| accs.contains_key(prop_name))
                     } else {
                         false
                     };
@@ -84,10 +102,6 @@ pub(super) fn register_define_property(vm: &mut Vm) -> JsValue {
                     }
                     let is_non_writable = vm.non_writable_props.contains(&(target, prop_name.clone()));
                     if is_non_writable {
-                        let writ_val = vm.get_property(desc, "writable");
-                        if !writ_val.is_undefined() && writ_val.is_truthy() {
-                            return Err(VmError::TypeError("Cannot redefine property: writable is false".into()));
-                        }
                         if vm.has_property(desc, "value").unwrap_or(false) {
                             let new_val = vm.get_property(desc, "value");
                             let curr_val = vm.get_property(target, &prop_name);
@@ -123,37 +137,39 @@ pub(super) fn register_define_property(vm: &mut Vm) -> JsValue {
                         }
                     }
                 }
+            }
+        }
 
-                let conf_val = vm.get_property(desc, "configurable");
-                if !conf_val.is_undefined() {
-                    let is_conf = conf_val.is_truthy();
-                    if !is_conf {
-                        vm.non_configurable_props.insert((target, prop_name.clone()));
-                    } else {
-                        vm.non_configurable_props.remove(&(target, prop_name.clone()));
-                    }
-                }
+        let conf_val = vm.get_property(desc, "configurable");
+        if !conf_val.is_undefined() {
+            let is_conf = conf_val.is_truthy();
+            if !is_conf {
+                vm.non_configurable_props.insert((target, key_name.clone()));
+            } else {
+                vm.non_configurable_props.remove(&(target, key_name.clone()));
+            }
+        }
 
-                let enum_val = vm.get_property(desc, "enumerable");
-                if !enum_val.is_undefined() {
-                    let is_enum = enum_val.is_truthy();
-                    if !is_enum {
-                        vm.non_enumerable_props.insert((target, prop_name.clone()));
-                    } else {
-                        vm.non_enumerable_props.remove(&(target, prop_name.clone()));
-                    }
-                }
+        let enum_val = vm.get_property(desc, "enumerable");
+        if !enum_val.is_undefined() {
+            let is_enum = enum_val.is_truthy();
+            if !is_enum {
+                vm.non_enumerable_props.insert((target, key_name.clone()));
+            } else {
+                vm.non_enumerable_props.remove(&(target, key_name.clone()));
+            }
+        }
 
-                let writ_val = vm.get_property(desc, "writable");
-                if !writ_val.is_undefined() {
-                    let is_writ = writ_val.is_truthy();
-                    if !is_writ {
-                        vm.non_writable_props.insert((target, prop_name.clone()));
-                        vm.sync_mapped_arguments_delete(target, &prop_name);
-                    } else {
-                        vm.non_writable_props.remove(&(target, prop_name.clone()));
-                    }
+        let writ_val = vm.get_property(desc, "writable");
+        if !writ_val.is_undefined() {
+            let is_writ = writ_val.is_truthy();
+            if !is_writ {
+                vm.non_writable_props.insert((target, key_name.clone()));
+                if let PropertyKeyVal::String(prop_name) = &prop_key {
+                    vm.sync_mapped_arguments_delete(target, prop_name);
                 }
+            } else {
+                vm.non_writable_props.remove(&(target, key_name.clone()));
             }
         }
 

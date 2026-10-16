@@ -101,7 +101,9 @@ impl Vm {
                 }
                 if let Ok(idx) = key.parse::<usize>() {
                     if let Some(elem) = elements.get(idx) {
-                        return *elem;
+                        if !elem.is_hole() {
+                            return *elem;
+                        }
                     }
                 }
                 if let Some(method) = self.get_array_method(key) {

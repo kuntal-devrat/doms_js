@@ -8,7 +8,7 @@ mod descriptor;
 mod group_by;
 mod integrity;
 mod legacy_accessors;
-mod names;
+pub(crate) mod names;
 mod predicates;
 mod prototype;
 mod statics;
@@ -32,7 +32,7 @@ pub(super) fn register_object_builtins(vm: &mut Vm) {
     register_predicates(vm, object_proto);
     let group_by_fn = register_group_by(vm);
     let define_property_fn = register_define_property(vm);
-    let get_own_prop_desc_fn = register_descriptor(vm);
+    let (get_own_prop_desc_fn, get_own_prop_descriptors_fn) = register_descriptor(vm);
     let (get_own_prop_names_fn, get_own_prop_symbols_fn) = register_names_and_symbols(vm);
     let (
         prevent_extensions_fn,
@@ -51,6 +51,7 @@ pub(super) fn register_object_builtins(vm: &mut Vm) {
 
     vm.set_property(object_constructor, "defineProperty", define_property_fn);
     vm.set_property(object_constructor, "getOwnPropertyDescriptor", get_own_prop_desc_fn);
+    vm.set_property(object_constructor, "getOwnPropertyDescriptors", get_own_prop_descriptors_fn);
     vm.set_property(object_constructor, "getOwnPropertyNames", get_own_prop_names_fn);
     vm.set_property(object_constructor, "getOwnPropertySymbols", get_own_prop_symbols_fn);
     vm.set_property(object_constructor, "preventExtensions", prevent_extensions_fn);
@@ -69,7 +70,19 @@ pub(super) fn register_object_builtins(vm: &mut Vm) {
     vm.set_property(object_constructor, "assign", assign_fn);
     vm.set_property(object_constructor, "groupBy", group_by_fn);
     vm.set_property(object_constructor, "prototype", object_proto);
-    vm.non_enumerable_props.insert((object_constructor, "prototype".to_string()));
+
+    let statics = [
+        "is", "create", "defineProperties", "defineProperty",
+        "getOwnPropertyDescriptor", "getOwnPropertyDescriptors",
+        "getOwnPropertyNames", "getOwnPropertySymbols",
+        "preventExtensions", "isExtensible", "freeze", "isFrozen",
+        "seal", "isSealed", "getPrototypeOf", "setPrototypeOf",
+        "hasOwn", "fromEntries", "keys", "values", "entries",
+        "assign", "groupBy", "prototype",
+    ];
+    for name in statics {
+        vm.non_enumerable_props.insert((object_constructor, name.to_string()));
+    }
 
     vm.globals.insert("Object".to_string(), object_constructor);
     if vm.global_object.is_object() {

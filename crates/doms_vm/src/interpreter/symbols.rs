@@ -152,30 +152,23 @@ impl Vm {
         if self.module_reexports.contains_key(&(target, key.to_string())) {
             return Ok(true);
         }
-        let ptr = target.as_object_ptr().unwrap();
-        let obj = unsafe { &*(ptr as *mut JsObject) };
-        if let ObjectKind::Proxy { target: tgt, handler: hdl } = &obj.kind {
-            let tgt = *tgt;
-            let hdl = *hdl;
-            let trap = self.get_property(hdl, "has");
-            if self.is_callable(trap) {
-                let key_val = self.alloc_string(key.to_string());
-                let res = self.call(trap, hdl, &[tgt, key_val])?;
-                return Ok(res.is_truthy());
-            }
-            return self.has_property(tgt, key);
-        }
         let mut curr = Some(target);
         while let Some(c_val) = curr {
             if let Some(c_ptr) = c_val.as_object_ptr() {
                 let c_obj = unsafe { &*(c_ptr as *mut JsObject) };
-                if self.shapes.has_property(c_obj.shape_id, key) {
-                    return Ok(true);
-                }
-                if let Some(accs) = &c_obj.accessors {
-                    if accs.contains_key(key) {
-                        return Ok(true);
+                if let ObjectKind::Proxy { target: tgt, handler: hdl } = &c_obj.kind {
+                    let tgt = *tgt;
+                    let hdl = *hdl;
+                    let trap = self.get_property(hdl, "has");
+                    if self.is_callable(trap) {
+                        let key_val = self.alloc_string(key.to_string());
+                        let res = self.call(trap, hdl, &[tgt, key_val])?;
+                        return Ok(res.is_truthy());
                     }
+                    return self.has_property(tgt, key);
+                }
+                if self.has_own_property_key(c_val, &PropertyKeyVal::String(key.to_string())) {
+                    return Ok(true);
                 }
                 curr = c_obj.prototype;
             } else {
@@ -212,8 +205,13 @@ impl Vm {
                 }
                 match &obj.kind {
                     ObjectKind::Array(elements) => {
-                        if key == "length" || key.parse::<usize>().map(|idx| idx < elements.len()).unwrap_or(false) {
+                        if key == "length" {
                             return true;
+                        }
+                        if let Ok(idx) = key.parse::<usize>() {
+                            if let Some(elem) = elements.get(idx) {
+                                return !elem.is_hole();
+                            }
                         }
                     }
                     ObjectKind::String(s) | ObjectKind::StringObject(s) => {

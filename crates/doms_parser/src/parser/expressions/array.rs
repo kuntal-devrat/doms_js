@@ -5,7 +5,7 @@ impl<'a> Parser<'a> {
         let mut elements = Vec::new();
         while !self.check(&TokenKind::RBracket) && self.current.kind != TokenKind::Eof {
             if self.match_token(&TokenKind::Comma)? {
-                elements.push(Expression::Literal(Literal::Undefined));
+                elements.push(Expression::Literal(Literal::Hole));
                 continue;
             }
             elements.push(self.parse_expression(1)?);

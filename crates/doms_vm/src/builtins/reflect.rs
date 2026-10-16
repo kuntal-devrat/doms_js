@@ -277,22 +277,12 @@ pub(super) fn register_reflect(vm: &mut Vm) {
             Some(t) if t.is_object() => *t,
             _ => return Err(VmError::TypeError("Reflect.ownKeys called on non-object".into())),
         };
-        let obj_ctor = vm.globals.get("Object").copied().unwrap_or(JsValue::undefined());
-        let keys_fn = vm.get_property(obj_ctor, "getOwnPropertyNames");
-        let syms_fn = vm.get_property(obj_ctor, "getOwnPropertySymbols");
-        let str_keys = vm.call(keys_fn, obj_ctor, &[target])?;
-        let sym_keys = vm.call(syms_fn, obj_ctor, &[target])?;
-        let mut all = Vec::new();
-        if let Some(ptr) = str_keys.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Array(elems) = &obj.kind {
-                all.extend_from_slice(elems);
-            }
-        }
-        if let Some(ptr) = sym_keys.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Array(elems) = &obj.kind {
-                all.extend_from_slice(elems);
+        let keys = crate::builtins::object::names::get_own_property_keys(vm, target)?;
+        let mut all = Vec::with_capacity(keys.len());
+        for key in keys {
+            match key {
+                PropertyKeyVal::String(s) => all.push(vm.alloc_string(s)),
+                PropertyKeyVal::Symbol(sym) => all.push(sym),
             }
         }
         let out = vm.alloc_array(all);
