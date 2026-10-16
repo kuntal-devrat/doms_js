@@ -1,0 +1,237 @@
+use super::*;
+
+impl<'a> Parser<'a> {
+    pub fn parse_expression(&mut self, min_bp: u8) -> Result<Expression, ParseError> {
+        let mut lhs = self.parse_prefix()?;
+
+        loop {
+            // Postfix / Infix operations
+            if self.check(&TokenKind::LParen) {
+                if matches!(lhs, Expression::Super) && !self.in_derived_constructor {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Super, self.current.line, self.current.col));
+                }
+                // Function call
+                self.advance()?;
+                let mut args = Vec::new();
+                if !self.check(&TokenKind::RParen) {
+                    loop {
+                        args.push(self.parse_expression(1)?);
+                        if !self.match_token(&TokenKind::Comma)? {
+                            break;
+                        }
+                        if self.check(&TokenKind::RParen) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(TokenKind::RParen)?;
+                lhs = Expression::Call { callee: Box::new(lhs), args };
+                continue;
+            }
+
+            if self.check(&TokenKind::Dot) {
+                if matches!(lhs, Expression::Super) && !self.in_method && !self.in_derived_constructor {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Super, self.current.line, self.current.col));
+                }
+                self.advance()?;
+                let prop_tok = self.advance()?;
+                let prop = match prop_tok.kind.as_prop_name() {
+                    Some(id) => id,
+                    None => {
+                        return Err(ParseError::UnexpectedToken(
+                            prop_tok.kind,
+                            prop_tok.line,
+                            prop_tok.col,
+                        ));
+                    }
+                };
+                if prop.starts_with('#') && !self.private_names_stack.iter().any(|set| set.contains(&prop)) {
+                    return Err(ParseError::UnexpectedToken(
+                        prop_tok.kind,
+                        prop_tok.line,
+                        prop_tok.col,
+                    ));
+                }
+                lhs = Expression::Member { object: Box::new(lhs), property: prop };
+                continue;
+            }
+
+            if self.check(&TokenKind::LBracket) {
+                if matches!(lhs, Expression::Super) && !self.in_method && !self.in_derived_constructor {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Super, self.current.line, self.current.col));
+                }
+                // Index access: lhs[expr]
+                self.advance()?;
+                let index = self.parse_expression(0)?;
+                self.expect(TokenKind::RBracket)?;
+                lhs = Expression::Index { object: Box::new(lhs), index: Box::new(index) };
+                continue;
+            }
+
+            if matches!(lhs, Expression::Super) {
+                return Err(ParseError::UnexpectedToken(TokenKind::Super, self.current.line, self.current.col));
+            }
+
+            if self.check(&TokenKind::Question) {
+                if min_bp > 1 {
+                    break;
+                }
+                self.advance()?; // ?
+                let then_expr = self.parse_expression(1)?;
+                self.expect(TokenKind::Colon)?;
+                let else_expr = self.parse_expression(1)?;
+                lhs = Expression::Conditional {
+                    condition: Box::new(lhs),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr),
+                };
+                continue;
+            }
+
+            if self.check(&TokenKind::PlusPlus) && !self.current.has_preceding_line_terminator {
+                self.advance()?;
+                if !matches!(&lhs, Expression::Identifier(_) | Expression::Member { .. } | Expression::Index { .. }) {
+                    return Err(ParseError::UnexpectedToken(TokenKind::PlusPlus, self.current.line, self.current.col));
+                }
+                if let Expression::Identifier(ref name) = lhs {
+                    if self.is_strict && (name == "eval" || name == "arguments") {
+                        return Err(ParseError::UnexpectedToken(TokenKind::Ident(name.clone()), self.current.line, self.current.col));
+                    }
+                }
+                lhs = Expression::Update {
+                    op: UpdateOp::Inc,
+                    is_prefix: false,
+                    expr: Box::new(lhs),
+                };
+                continue;
+            }
+
+            if self.check(&TokenKind::MinusMinus) && !self.current.has_preceding_line_terminator {
+                self.advance()?;
+                if !matches!(&lhs, Expression::Identifier(_) | Expression::Member { .. } | Expression::Index { .. }) {
+                    return Err(ParseError::UnexpectedToken(TokenKind::MinusMinus, self.current.line, self.current.col));
+                }
+                if let Expression::Identifier(ref name) = lhs {
+                    if self.is_strict && (name == "eval" || name == "arguments") {
+                        return Err(ParseError::UnexpectedToken(TokenKind::Ident(name.clone()), self.current.line, self.current.col));
+                    }
+                }
+                lhs = Expression::Update {
+                    op: UpdateOp::Dec,
+                    is_prefix: false,
+                    expr: Box::new(lhs),
+                };
+                continue;
+            }
+
+            let compound_bin_op = match self.current.kind {
+                TokenKind::Eq => Some(None),
+                TokenKind::PlusEq => Some(Some(BinaryOp::Add)),
+                TokenKind::MinusEq => Some(Some(BinaryOp::Sub)),
+                TokenKind::StarEq => Some(Some(BinaryOp::Mul)),
+                TokenKind::SlashEq => Some(Some(BinaryOp::Div)),
+                TokenKind::PercentEq => Some(Some(BinaryOp::Mod)),
+                TokenKind::LtLtEq => Some(Some(BinaryOp::Shl)),
+                TokenKind::GtGtEq => Some(Some(BinaryOp::Shr)),
+                TokenKind::GtGtGtEq => Some(Some(BinaryOp::Ushr)),
+                TokenKind::StarStarEq => Some(Some(BinaryOp::Exp)),
+                TokenKind::AmpEq => Some(Some(BinaryOp::BitwiseAnd)),
+                TokenKind::PipeEq => Some(Some(BinaryOp::BitwiseOr)),
+                TokenKind::CaretEq => Some(Some(BinaryOp::BitwiseXor)),
+                _ => None,
+            };
+
+            if let Some(opt_bin_op) = compound_bin_op {
+                if min_bp > 1 {
+                    break;
+                }
+                self.advance()?; // =, +=, -=, etc.
+                let mut value = self.parse_expression(1)?;
+                if let Some(bin_op) = opt_bin_op {
+                    value = Expression::Binary {
+                        op: bin_op,
+                        left: Box::new(lhs.clone()),
+                        right: Box::new(value),
+                    };
+                }
+                match lhs {
+                    Expression::Identifier(name) => {
+                        if self.is_strict && (name == "eval" || name == "arguments") {
+                            return Err(ParseError::UnexpectedToken(TokenKind::Ident(name), self.current.line, self.current.col));
+                        }
+                        lhs = Expression::Assignment { target: name, value: Box::new(value) };
+                    }
+                    Expression::Member { object, property } => {
+                        lhs = Expression::MemberAssignment { object, property, value: Box::new(value) };
+                    }
+                    Expression::Index { object, index } => {
+                        lhs = Expression::IndexAssignment { object, index, value: Box::new(value) };
+                    }
+                    _ => {
+                        return Err(ParseError::InvalidAssignmentTarget(
+                            self.current.line,
+                            self.current.col,
+                        ));
+                    }
+                }
+                continue;
+            }
+
+            if min_bp == 0 && self.current.kind == TokenKind::Comma {
+                self.advance()?;
+                let next_expr = self.parse_expression(1)?;
+                lhs = match lhs {
+                    Expression::Sequence(mut exprs) => {
+                        exprs.push(next_expr);
+                        Expression::Sequence(exprs)
+                    }
+                    single => Expression::Sequence(vec![single, next_expr]),
+                };
+                continue;
+            }
+
+            let (op, l_bp, r_bp) = match self.current.kind {
+                TokenKind::QuestionQuestion => (BinaryOp::NullishCoalescing, 2, 3),
+                TokenKind::PipePipe => (BinaryOp::LogicalOr, 2, 3),
+                TokenKind::AmpAmp => (BinaryOp::LogicalAnd, 4, 5),
+                TokenKind::Pipe => (BinaryOp::BitwiseOr, 6, 7),
+                TokenKind::Caret => (BinaryOp::BitwiseXor, 8, 9),
+                TokenKind::Amp => (BinaryOp::BitwiseAnd, 10, 11),
+                TokenKind::EqEq => (BinaryOp::Eq, 12, 13),
+                TokenKind::NotEq => (BinaryOp::NotEq, 12, 13),
+                TokenKind::EqEqEq => (BinaryOp::StrictEq, 12, 13),
+                TokenKind::NotEqEq => (BinaryOp::StrictNotEq, 12, 13),
+                TokenKind::Lt => (BinaryOp::Lt, 14, 15),
+                TokenKind::LtEq => (BinaryOp::Lte, 14, 15),
+                TokenKind::Gt => (BinaryOp::Gt, 14, 15),
+                TokenKind::GtEq => (BinaryOp::Gte, 14, 15),
+                TokenKind::Instanceof => (BinaryOp::Instanceof, 14, 15),
+                TokenKind::In if self.allow_in => (BinaryOp::In, 14, 15),
+                TokenKind::LtLt => (BinaryOp::Shl, 15, 16),
+                TokenKind::GtGt => (BinaryOp::Shr, 15, 16),
+                TokenKind::GtGtGt => (BinaryOp::Ushr, 15, 16),
+                TokenKind::Plus => (BinaryOp::Add, 16, 17),
+                TokenKind::Minus => (BinaryOp::Sub, 16, 17),
+                TokenKind::Star => (BinaryOp::Mul, 18, 19),
+                TokenKind::Slash => (BinaryOp::Div, 18, 19),
+                TokenKind::Percent => (BinaryOp::Mod, 18, 19),
+                TokenKind::StarStar => (BinaryOp::Exp, 21, 20),
+                _ => break,
+            };
+
+            if l_bp < min_bp {
+                break;
+            }
+
+            if op == BinaryOp::Exp && matches!(lhs, Expression::Unary { .. }) {
+                return Err(ParseError::UnexpectedToken(TokenKind::StarStar, self.current.line, self.current.col));
+            }
+
+            self.advance()?;
+            let rhs = self.parse_expression(r_bp)?;
+            lhs = Expression::Binary { op, left: Box::new(lhs), right: Box::new(rhs) };
+        }
+
+        Ok(lhs)
+    }
+}

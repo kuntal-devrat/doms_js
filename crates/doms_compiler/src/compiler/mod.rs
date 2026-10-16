@@ -1,0 +1,109 @@
+//! AST to bytecode compiler.
+
+pub mod classes;
+pub mod expressions;
+pub mod functions;
+pub mod modules;
+pub mod program;
+pub mod scope_analysis;
+pub mod statements;
+
+use crate::bytecode::{BytecodeChunk, OpCode};
+use crate::scope::SymbolTable;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum CompileError {
+    #[error("Identifier '{0}' has already been declared")]
+    DuplicateDeclaration(String),
+    #[error("Variable '{0}' already declared in this scope")]
+    DuplicateVariable(String),
+    #[error("Too many constants in chunk")]
+    TooManyConstants,
+    #[error("Too many locals")]
+    TooManyLocals,
+    #[error("{0}")]
+    General(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct TargetScope {
+    pub labels: Vec<String>,
+    pub jumps: Vec<usize>,
+    pub scope_depth: usize,
+}
+
+pub struct Compiler {
+    pub chunk: BytecodeChunk,
+    pub symbols: SymbolTable,
+    pub break_targets: Vec<TargetScope>,
+    pub continue_targets: Vec<TargetScope>,
+    pub current_labels: Vec<String>,
+    pub is_in_function: bool,
+    pub with_depth: usize,
+    pub block_scope_depth: usize,
+    pub is_strict: bool,
+    pub is_eval: bool,
+    pub touched_bindings: std::collections::HashSet<String>,
+}
+
+impl Compiler {
+    pub fn new() -> Self {
+        Self {
+            chunk: BytecodeChunk::new(),
+            symbols: SymbolTable::new(),
+            break_targets: Vec::new(),
+            continue_targets: Vec::new(),
+            current_labels: Vec::new(),
+            is_in_function: false,
+            with_depth: 0,
+            block_scope_depth: 0,
+            is_strict: false,
+            is_eval: false,
+            touched_bindings: std::collections::HashSet::new(),
+        }
+    }
+
+    pub(crate) fn emit_push_scope(&mut self) {
+        self.chunk.emit(OpCode::PushScope, 0);
+        self.block_scope_depth += 1;
+    }
+
+    pub(crate) fn emit_push_catch_scope(&mut self, name_idx: u16) {
+        self.chunk.emit(OpCode::PushCatchScope(name_idx), 0);
+        self.block_scope_depth += 1;
+    }
+
+    pub(crate) fn emit_pop_scope(&mut self) {
+        self.chunk.emit(OpCode::PopScope, 0);
+        self.block_scope_depth = self.block_scope_depth.saturating_sub(1);
+    }
+}
+
+impl Default for Compiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use doms_parser::parse;
+
+    #[test]
+    fn test_compile_arithmetic() {
+        let prog = parse("let x = 1 + 2 * 3;").unwrap();
+        let chunk = Compiler::new().compile(&prog).unwrap();
+        assert!(chunk.instructions.contains(&OpCode::Add));
+        assert!(chunk.instructions.contains(&OpCode::Mul));
+    }
+
+    #[test]
+    fn test_compile_object_and_array() {
+        let prog = parse("let obj = { a: 1 }; let arr = [10, 20];").unwrap();
+        let chunk = Compiler::new().compile(&prog).unwrap();
+        assert!(chunk.instructions.contains(&OpCode::CreateObject));
+        assert!(chunk.instructions.contains(&OpCode::CreateArray(2)));
+    }
+}

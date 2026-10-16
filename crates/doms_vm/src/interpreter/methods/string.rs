@@ -1,0 +1,269 @@
+//! Fast dispatch for `String.prototype` methods.
+
+use super::*;
+
+impl Vm {
+    pub fn get_string_method(&mut self, name: &str) -> Option<JsValue> {
+        match name {
+            "indexOf" => Some(self.alloc_native_function("indexOf", 1, |vm, this, args| {
+                let target = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                let this_str = vm.to_string_value(this);
+                if let Some(idx) = this_str.find(&target) {
+                    Ok(JsValue::from_int32(idx as i32))
+                } else {
+                    Ok(JsValue::from_int32(-1))
+                }
+            })),
+            "includes" => Some(self.alloc_native_function("includes", 1, |vm, this, args| {
+                let target = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                let this_str = vm.to_string_value(this);
+                Ok(JsValue::from_boolean(this_str.contains(&target)))
+            })),
+            "toLowerCase" => Some(self.alloc_native_function("toLowerCase", 0, |vm, this, _args| {
+                let s = vm.to_string_value(this).to_lowercase();
+                Ok(vm.alloc_string(s))
+            })),
+            "toUpperCase" => Some(self.alloc_native_function("toUpperCase", 0, |vm, this, _args| {
+                let s = vm.to_string_value(this).to_uppercase();
+                Ok(vm.alloc_string(s))
+            })),
+            "trim" => Some(self.alloc_native_function("trim", 0, |vm, this, _args| {
+                let s = vm.to_string_value(this).trim().to_string();
+                Ok(vm.alloc_string(s))
+            })),
+            "charAt" => Some(self.alloc_native_function("charAt", 1, |vm, this, args| {
+                let s = vm.to_string_value(this);
+                let idx = match args.first() {
+                    Some(val) => {
+                        let num = vm.to_number_value(*val)?;
+                        if num.is_nan() || num.is_infinite() {
+                            return Ok(vm.alloc_string("".to_string()));
+                        }
+                        let int = num.trunc();
+                        if int < 0.0 || int >= (usize::MAX as f64) {
+                            return Ok(vm.alloc_string("".to_string()));
+                        }
+                        int as usize
+                    }
+                    None => 0,
+                };
+                if let Some(code) = s.encode_utf16().nth(idx) {
+                    let s_char = String::from_utf16_lossy(&[code]);
+                    Ok(vm.alloc_string(s_char))
+                } else {
+                    Ok(vm.alloc_string("".to_string()))
+                }
+            })),
+            "charCodeAt" => Some(self.alloc_native_function("charCodeAt", 1, |vm, this, args| {
+                let s = vm.to_string_value(this);
+                let idx = match args.first() {
+                    Some(val) => {
+                        let num = vm.to_number_value(*val)?;
+                        if num.is_nan() || num.is_infinite() {
+                            return Ok(JsValue::from_double(f64::NAN));
+                        }
+                        let int = num.trunc();
+                        if int < 0.0 || int >= (usize::MAX as f64) {
+                            return Ok(JsValue::from_double(f64::NAN));
+                        }
+                        int as usize
+                    }
+                    None => 0,
+                };
+                if let Some(code) = s.encode_utf16().nth(idx) {
+                    Ok(JsValue::from_int32(code as i32))
+                } else {
+                    Ok(JsValue::from_double(f64::NAN))
+                }
+            })),
+            "slice" => Some(self.alloc_native_function("slice", 2, |vm, this, args| {
+                let s = vm.to_string_value(this);
+                let len = s.len() as i32;
+                let start = args.first().and_then(|v| v.to_int32()).unwrap_or(0).clamp(0, len) as usize;
+                let end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len).clamp(0, len) as usize;
+                let sub = if start <= end { &s[start..end] } else { "" };
+                Ok(vm.alloc_string(sub.to_string()))
+            })),
+            "isWellFormed" => Some(self.alloc_native_function("isWellFormed", 0, |vm, this, _args| {
+                let s = vm.to_string_value(this);
+                let mut ok = true;
+                for c in s.chars() {
+                    let u = c as u32;
+                    if (0xD800..=0xDFFF).contains(&u) {
+                        ok = false;
+                        break;
+                    }
+                }
+                Ok(JsValue::from_boolean(ok))
+            })),
+            "toWellFormed" => Some(self.alloc_native_function("toWellFormed", 0, |vm, this, _args| {
+                let s = vm.to_string_value(this);
+                let sanitized: String = s.chars().map(|c| {
+                    let u = c as u32;
+                    if (0xD800..=0xDFFF).contains(&u) {
+                        '\u{FFFD}'
+                    } else {
+                        c
+                    }
+                }).collect();
+                Ok(vm.alloc_string(sanitized))
+            })),
+            "replace" => Some(self.alloc_native_function("replace", 2, |vm, this, args| {
+                if this.is_nullish() {
+                    return Err(VmError::TypeError("String.prototype.replace called on null or undefined".into()));
+                }
+                let this_str = vm.to_string_value(this);
+                let search_arg = args.first().copied().unwrap_or(JsValue::undefined());
+                let replace_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
+
+                let is_regexp = if let Some(ptr) = search_arg.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    matches!(obj.kind, ObjectKind::RegExp { .. })
+                } else {
+                    false
+                };
+
+                let is_replace_fn = vm.is_callable(replace_arg);
+
+                if is_regexp {
+                    let (pattern, flags) = if let Some(ptr) = search_arg.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        if let ObjectKind::RegExp { ref pattern, ref flags } = obj.kind {
+                            (pattern.clone(), flags.clone())
+                        } else {
+                            (String::new(), String::new())
+                        }
+                    } else {
+                        (String::new(), String::new())
+                    };
+
+                    let is_global = flags.contains('g');
+                    let mut result = String::new();
+                    let mut search_from = 0;
+
+                    while search_from <= this_str.len() {
+                        if pattern.is_empty() {
+                            let matched_str = "";
+                            let replacement = if is_replace_fn {
+                                let arg0 = vm.alloc_string(matched_str.to_string());
+                                let arg1 = JsValue::from_int32(search_from as i32);
+                                let arg2 = vm.alloc_string(this_str.clone());
+                                let call_res = vm.call(replace_arg, JsValue::undefined(), &[arg0, arg1, arg2])?;
+                                vm.to_string_value(call_res)
+                            } else {
+                                vm.to_string_value(replace_arg)
+                            };
+                            result.push_str(&replacement);
+                            if search_from < this_str.len() {
+                                if let Some(ch) = this_str[search_from..].chars().next() {
+                                    result.push(ch);
+                                    search_from += ch.len_utf8();
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                            if !is_global {
+                                result.push_str(&this_str[search_from..]);
+                                break;
+                            }
+                        } else if let Some(found_idx) = this_str[search_from..].find(&pattern) {
+                            let match_start = search_from + found_idx;
+                            let match_end = match_start + pattern.len();
+                            result.push_str(&this_str[search_from..match_start]);
+
+                            let replacement = if is_replace_fn {
+                                let arg0 = vm.alloc_string(pattern.clone());
+                                let arg1 = JsValue::from_int32(match_start as i32);
+                                let arg2 = vm.alloc_string(this_str.clone());
+                                let call_res = vm.call(replace_arg, JsValue::undefined(), &[arg0, arg1, arg2])?;
+                                vm.to_string_value(call_res)
+                            } else {
+                                vm.to_string_value(replace_arg)
+                            };
+                            result.push_str(&replacement);
+                            search_from = match_end;
+
+                            if !is_global {
+                                result.push_str(&this_str[search_from..]);
+                                break;
+                            }
+                        } else {
+                            result.push_str(&this_str[search_from..]);
+                            break;
+                        }
+                    }
+                    Ok(vm.alloc_string(result))
+                } else {
+                    let search_str = vm.to_string_value(search_arg);
+                    if let Some(pos) = this_str.find(&search_str) {
+                        let before = &this_str[..pos];
+                        let after = &this_str[pos + search_str.len()..];
+                        let replacement = if is_replace_fn {
+                            let arg0 = vm.alloc_string(search_str.clone());
+                            let arg1 = JsValue::from_int32(pos as i32);
+                            let arg2 = vm.alloc_string(this_str.clone());
+                            let call_res = vm.call(replace_arg, JsValue::undefined(), &[arg0, arg1, arg2])?;
+                            vm.to_string_value(call_res)
+                        } else {
+                            vm.to_string_value(replace_arg)
+                        };
+                        let mut result = String::with_capacity(before.len() + replacement.len() + after.len());
+                        result.push_str(before);
+                        result.push_str(&replacement);
+                        result.push_str(after);
+                        Ok(vm.alloc_string(result))
+                    } else {
+                        Ok(vm.alloc_string(this_str))
+                    }
+                }
+            })),
+            "match" => Some(self.alloc_native_function("match", 1, |vm, this, args| {
+                let this_str = vm.to_string_value(this);
+                let re_arg = args.first().copied().unwrap_or(JsValue::undefined());
+                let re = if let Some(ptr) = re_arg.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if matches!(obj.kind, ObjectKind::RegExp { .. }) {
+                        re_arg
+                    } else {
+                        let s = if re_arg.is_undefined() { "".to_string() } else { vm.to_string_value(re_arg) };
+                        vm.alloc_regexp(s, "".to_string())
+                    }
+                } else {
+                    let s = if re_arg.is_undefined() { "".to_string() } else { vm.to_string_value(re_arg) };
+                    vm.alloc_regexp(s, "".to_string())
+                };
+                let exec_fn = vm.get_property(re, "exec");
+                let this_str_val = vm.alloc_string(this_str);
+                vm.call(exec_fn, re, &[this_str_val])
+            })),
+            "search" => Some(self.alloc_native_function("search", 1, |vm, this, args| {
+                let this_str = vm.to_string_value(this);
+                let re_arg = args.first().copied().unwrap_or(JsValue::undefined());
+                let re = if let Some(ptr) = re_arg.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    if matches!(obj.kind, ObjectKind::RegExp { .. }) {
+                        re_arg
+                    } else {
+                        let s = if re_arg.is_undefined() { "".to_string() } else { vm.to_string_value(re_arg) };
+                        vm.alloc_regexp(s, "".to_string())
+                    }
+                } else {
+                    let s = if re_arg.is_undefined() { "".to_string() } else { vm.to_string_value(re_arg) };
+                    vm.alloc_regexp(s, "".to_string())
+                };
+                let exec_fn = vm.get_property(re, "exec");
+                let this_str_val = vm.alloc_string(this_str);
+                let res = vm.call(exec_fn, re, &[this_str_val])?;
+                if res.is_nullish() || res.is_null() {
+                    Ok(JsValue::from_int32(-1))
+                } else {
+                    let idx = vm.get_property(res, "index");
+                    Ok(idx)
+                }
+            })),
+            _ => None,
+        }
+    }
+}

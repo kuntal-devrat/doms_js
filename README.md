@@ -13,7 +13,7 @@
 [![Chrome DevTools](https://img.shields.io/badge/DevTools-CDP%20Ready-green?logo=googlechrome)](crates/doms_vm/src/inspector_server.rs)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE-MIT)
 
-[Architecture Guide](docs/src/SUMMARY.md) • [C ABI Reference](doms_ffi/include/doms.h) • [Test262 Conformance](tests/test262/README.md) • [Web Platform Tests](tests/wpt/README.md) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
+[Architecture Guide](docs/src/SUMMARY.md) • [C ABI Reference](crates/doms_ffi/include/doms.h) • [Test262 Conformance](tests/test262/README.md) • [Web Platform Tests](tests/wpt/README.md) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
 </div>
 
@@ -66,7 +66,7 @@ Existing engines either carry decades of C++ baggage or made architectural trade
 - **🛠️ Chrome DevTools Protocol (CDP)**: Built-in WebSocket inspector server for live debugging in Chrome DevTools (`chrome://inspect`) with breakpoints, call stacks, and source maps.
 - **🔌 Multi-Language Embedding**:
   - **Rust**: Safe, ergonomic API through [`doms_core`](crates/doms_core).
-  - **C / C++**: Stable, zero-overhead C ABI header [`doms.h`](doms_ffi/include/doms.h).
+  - **C / C++**: Stable, zero-overhead C ABI header [`doms.h`](crates/doms_ffi/include/doms.h).
   - **WebAssembly**: Freestanding sandboxed module via [`doms_wasm`](crates/doms_wasm).
 
 ---
@@ -255,10 +255,10 @@ doms/
 │   ├── doms_vm/              # Bytecode VM, NaN-boxing, shapes, inline caches, CDP
 │   ├── doms_runtime/         # Built-in globals and standard library definitions
 │   ├── doms_parallel/        # Multi-isolate coordination, SharedArrayBuffer, Atomics
-│   └── doms_wasm/            # Freestanding sandboxed WebAssembly target
-├── doms_core/                # Ergonomic high-level Rust embedding engine API
-├── doms_ffi/                 # Stable C ABI bindings and C headers (libdoms)
-├── doms_cli/                 # Command-line interface, REPL, and Test262 runner
+│   ├── doms_wasm/            # Freestanding sandboxed WebAssembly target
+│   ├── doms_core/            # Ergonomic high-level Rust embedding engine API
+│   ├── doms_ffi/             # Stable C ABI bindings and C headers (libdoms)
+│   └── doms_cli/             # Command-line interface, REPL, and Test262 runner
 ├── docs/                     # mdBook architecture book (16 chapters)
 ├── fuzz/                     # libFuzzer / cargo-fuzz targets for parser, compiler, VM
 ├── tests/

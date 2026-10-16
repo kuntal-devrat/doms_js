@@ -15,10 +15,10 @@ doms/
 │   ├── doms_compiler/          # AST -> Bytecode compiler & symbol resolution
 │   ├── doms_vm/                # Stack virtual machine & inline caching
 │   ├── doms_runtime/           # ECMAScript built-ins & global environments
-│   └── doms_parallel/          # Isolates, messaging, SharedArrayBuffer & Atomics
-├── doms_core/                  # High-level Rust API (Engine, Isolate, Context, JsValue)
-├── doms_ffi/                   # C ABI export (libdoms.so / libdoms.a / doms.h)
-├── doms_cli/                   # Command-line driver, runner, and interactive REPL
+│   ├── doms_parallel/          # Isolates, messaging, SharedArrayBuffer & Atomics
+│   ├── doms_core/              # High-level Rust API (Engine, Isolate, Context, JsValue)
+│   ├── doms_ffi/               # C ABI export (libdoms.so / libdoms.a / doms.h)
+│   └── doms_cli/               # Command-line driver, runner, and interactive REPL
 └── tests/
     └── test262/                # ECMAScript conformance test suite
 ```

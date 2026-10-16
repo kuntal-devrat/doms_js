@@ -7,9 +7,9 @@ members = [
     "crates/doms_vm",
     "crates/doms_runtime",
     "crates/doms_parallel",
-    "doms_core",
-    "doms_ffi",
-    "doms_cli",
+    "crates/doms_core",
+    "crates/doms_ffi",
+    "crates/doms_cli",
     "fuzz",
     "crates/doms_wasm",
 ]
@@ -32,7 +32,9 @@ doms_compiler = { path = "crates/doms_compiler" }
 doms_vm = { path = "crates/doms_vm" }
 doms_runtime = { path = "crates/doms_runtime" }
 doms_parallel = { path = "crates/doms_parallel" }
-doms_core = { path = "doms_core" }
+doms_core = { path = "crates/doms_core" }
+doms_ffi = { path = "crates/doms_ffi" }
+doms_cli = { path = "crates/doms_cli" }
 doms_wasm = { path = "crates/doms_wasm" }
 
 # External dependencies

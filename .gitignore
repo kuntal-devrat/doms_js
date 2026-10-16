@@ -28,3 +28,4 @@ coverage/
 
 # Benchmarks output
 bench_results/
+scratch/

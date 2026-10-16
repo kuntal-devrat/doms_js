@@ -36,6 +36,7 @@ pub enum OpCode {
     LoadFalse,
     This,
     LoadSuper,
+    SetThis,
 
     // Objects & Arrays
     CreateObject,
@@ -167,8 +168,11 @@ enum ConstantKey {
     BigInt(BigInt),
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+static CHUNK_ID_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+#[derive(Debug, Clone)]
 pub struct BytecodeChunk {
+    pub id: u64,
     pub instructions: Vec<OpCode>,
     pub constants: Vec<Constant>,
     pub lines: Vec<usize>,
@@ -177,7 +181,40 @@ pub struct BytecodeChunk {
     pub top_func_names: Vec<String>,
     pub imported_bindings: std::collections::HashSet<String>,
     pub export_names: Vec<String>,
+    pub export_aliases: HashMap<String, Vec<String>>,
     constant_indices: HashMap<ConstantKey, u16>,
+}
+
+impl PartialEq for BytecodeChunk {
+    fn eq(&self, other: &Self) -> bool {
+        self.instructions == other.instructions
+            && self.constants == other.constants
+            && self.lines == other.lines
+            && self.top_lex_names == other.top_lex_names
+            && self.top_var_names == other.top_var_names
+            && self.top_func_names == other.top_func_names
+            && self.imported_bindings == other.imported_bindings
+            && self.export_names == other.export_names
+            && self.export_aliases == other.export_aliases
+    }
+}
+
+impl Default for BytecodeChunk {
+    fn default() -> Self {
+        Self {
+            id: CHUNK_ID_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            instructions: Vec::new(),
+            constants: Vec::new(),
+            lines: Vec::new(),
+            top_lex_names: Vec::new(),
+            top_var_names: Vec::new(),
+            top_func_names: Vec::new(),
+            imported_bindings: std::collections::HashSet::new(),
+            export_names: Vec::new(),
+            export_aliases: HashMap::new(),
+            constant_indices: HashMap::new(),
+        }
+    }
 }
 
 impl BytecodeChunk {

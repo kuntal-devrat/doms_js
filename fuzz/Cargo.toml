@@ -8,7 +8,7 @@ publish = false
 doms_parser = { path = "../crates/doms_parser" }
 doms_compiler = { path = "../crates/doms_compiler" }
 doms_vm = { path = "../crates/doms_vm" }
-doms_core = { path = "../doms_core" }
+doms_core = { path = "../crates/doms_core" }
 
 [[bin]]
 name = "fuzz_parser"
