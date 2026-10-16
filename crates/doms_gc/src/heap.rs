@@ -151,7 +151,30 @@ impl Heap {
         self.collect_nursery();
 
         // Retry allocation after scavenge.
-        self.nursery.allocate(payload_size, type_tag)
+        if let Some(ptr) = self.nursery.allocate(payload_size, type_tag) {
+            return Some(ptr);
+        }
+
+        // If nursery is still full, try old generation.
+        if let Some(ptr) = self.old_gen.allocate(payload_size, type_tag) {
+            return Some(ptr);
+        }
+
+        // Fallback to large object space.
+        self.large_objects.allocate(payload_size, type_tag)
+    }
+
+    /// Allocate and write a value of type `T` into the GC heap.
+    ///
+    /// # Safety
+    /// - `T` must be safe to store on the GC heap.
+    pub unsafe fn allocate_value<T>(&mut self, value: T, type_tag: TypeTag) -> Option<*mut T> {
+        let payload_size = std::mem::size_of::<T>();
+        let payload_ptr = self.allocate(payload_size, type_tag)?;
+        unsafe {
+            std::ptr::write(payload_ptr as *mut T, value);
+        }
+        Some(payload_ptr as *mut T)
     }
 
     /// Register a root pointer. The GC will trace from this pointer

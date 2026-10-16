@@ -34,6 +34,24 @@ impl Nursery {
         self.space_size - self.used_bytes()
     }
 
+    /// Returns the start pointer of from-space.
+    #[inline]
+    pub fn from_start(&self) -> *mut u8 {
+        self.from_start
+    }
+
+    /// Returns the start pointer of to-space.
+    #[inline]
+    pub fn to_start(&self) -> *mut u8 {
+        self.to_start
+    }
+
+    /// Returns the limit pointer of to-space.
+    #[inline]
+    pub fn to_limit(&self) -> *mut u8 {
+        unsafe { self.to_start.add(self.space_size) }
+    }
+
     /// Returns the semi-space size.
     #[inline]
     pub fn space_size(&self) -> usize {

@@ -38,6 +38,57 @@ impl OldGen {
         Self::new(DEFAULT_OLD_GEN_SIZE)
     }
 
+    /// Allocate memory for an object directly in the old generation.
+    pub fn allocate(&mut self, payload_size: usize, type_tag: TypeTag) -> Option<*mut u8> {
+        let total_size = (HEADER_SIZE + payload_size + GC_ALIGN - 1) & !(GC_ALIGN - 1);
+
+        // Try to allocate from the free list first.
+        for i in 0..self.free_chunks.len() {
+            if self.free_chunks[i].size >= total_size {
+                let chunk = self.free_chunks.remove(i);
+                let dest = unsafe { self.start.add(chunk.offset) };
+                unsafe {
+                    let header = dest as *mut GcHeader;
+                    ptr::write(header, GcHeader::new(total_size as u32, type_tag));
+                    (*header).set_tenured();
+                }
+                let remaining_sz = chunk.size - total_size;
+                if remaining_sz >= HEADER_SIZE + GC_ALIGN {
+                    self.free_chunks.push(FreeChunk {
+                        offset: chunk.offset + total_size,
+                        size: remaining_sz,
+                    });
+                }
+                self.object_count += 1;
+                self.bytes_used += total_size;
+                let payload = unsafe { dest.add(HEADER_SIZE) };
+                unsafe { ptr::write_bytes(payload, 0, payload_size); }
+                return Some(payload);
+            }
+        }
+
+        // Check bump pointer space.
+        let remaining = unsafe { self.limit.offset_from(self.cursor) } as usize;
+        if total_size > remaining {
+            return None;
+        }
+
+        let dest = self.cursor;
+        unsafe {
+            let header = dest as *mut GcHeader;
+            ptr::write(header, GcHeader::new(total_size as u32, type_tag));
+            (*header).set_tenured();
+        }
+
+        let payload = unsafe { dest.add(HEADER_SIZE) };
+        unsafe { ptr::write_bytes(payload, 0, payload_size); }
+        self.cursor = unsafe { self.cursor.add(total_size) };
+        self.object_count += 1;
+        self.bytes_used += total_size;
+
+        Some(payload)
+    }
+
     /// Promote an object from the nursery to the old generation.
     ///
     /// Copies the object (header + payload) into old gen space.

@@ -29,9 +29,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
 
     // Create Function.prototype early so all native functions get Function.prototype
     let native = crate::object::NativeFunction::new_fn("".to_string(), 0, |_vm, _this, _args| Ok(JsValue::undefined()));
-    let fn_proto_obj = Box::new(JsObject::new_native_function(crate::shape::ShapeRegistry::ROOT_SHAPE_ID, Some(object_proto), native));
-    let fn_proto_ptr = Box::into_raw(fn_proto_obj);
-    vm.track_ptr(fn_proto_ptr);
+    let fn_proto_obj = JsObject::new_native_function(crate::shape::ShapeRegistry::ROOT_SHAPE_ID, Some(object_proto), native);
+    let fn_proto_ptr = vm.allocate_js_object(fn_proto_obj);
     let function_proto = unsafe { JsValue::from_object_ptr(fn_proto_ptr as *mut u8) };
     vm.function_proto = Some(function_proto);
     let to_string_fn = vm.alloc_native_function("toString", 0, |vm, this, _args| {

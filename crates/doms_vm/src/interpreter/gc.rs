@@ -256,7 +256,10 @@ impl Vm {
             let ptr = self.objects[i];
             if !live.contains(&ptr) {
                 unsafe {
-                    drop(Box::from_raw(ptr));
+                    std::ptr::drop_in_place(ptr);
+                    if !self.heap.contains(ptr as *const u8) {
+                        drop(Box::from_raw(ptr));
+                    }
                 }
                 self.objects.swap_remove(i);
             } else {
@@ -266,4 +269,227 @@ impl Vm {
 
         before_count - self.objects.len()
     }
+
+    /// Perform a generational minor GC (nursery scavenge) using Cheney's copying algorithm.
+    pub fn scavenge_nursery(&mut self) {
+        let mut to_cursor = self.heap.nursery.to_start();
+        let to_limit = self.heap.nursery.to_limit();
+        let to_start = to_cursor;
+
+        // Helper: copy an object if it is in nursery from-space, and update JsValue in-place
+        let copy_val = |val: &mut JsValue, to_cursor: &mut *mut u8| {
+            if let Some(ptr) = val.as_heap_ptr() {
+                if self.heap.nursery.contains(ptr) {
+                    let new_ptr = self.heap.nursery.copy_object(ptr, to_cursor, to_limit);
+                    unsafe {
+                        val.update_heap_ptr(new_ptr);
+                    }
+                }
+            }
+        };
+
+        // ── Phase 1: Evacuate root-reachable objects to to-space ──
+        if let Some(pending) = self.pending_alloc {
+            let ptr = pending as *mut u8;
+            if self.heap.nursery.contains(ptr) {
+                let new_ptr = self.heap.nursery.copy_object(ptr, &mut to_cursor, to_limit);
+                self.pending_alloc = Some(new_ptr as *mut JsObject);
+            }
+        }
+        if let Some(mut proto) = self.object_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.object_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.array_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.array_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.function_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.function_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.regexp_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.regexp_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.string_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.string_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.number_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.number_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.boolean_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.boolean_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.symbol_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.symbol_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.promise_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.promise_proto = Some(proto);
+        }
+        if let Some(mut s) = self.symbol_species {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_species = Some(s);
+        }
+        for val in self.global_lexicals.values_mut() {
+            copy_val(val, &mut to_cursor);
+        }
+        for val in &mut self.temp_roots {
+            copy_val(val, &mut to_cursor);
+        }
+        for val in &mut self.stack {
+            copy_val(val, &mut to_cursor);
+        }
+        copy_val(&mut self.global_object, &mut to_cursor);
+        for frame in &mut self.frames {
+            copy_val(&mut frame.this_val, &mut to_cursor);
+            for local in &mut frame.locals {
+                copy_val(local, &mut to_cursor);
+            }
+            for scope in &mut frame.scopes {
+                copy_val(scope, &mut to_cursor);
+            }
+            if let Some(mut env) = frame.env_obj {
+                copy_val(&mut env, &mut to_cursor);
+                frame.env_obj = Some(env);
+            }
+            if let Some(mut args_val) = frame.arguments {
+                copy_val(&mut args_val, &mut to_cursor);
+                frame.arguments = Some(args_val);
+            }
+            if let Some(mut nt) = frame.new_target {
+                copy_val(&mut nt, &mut to_cursor);
+                frame.new_target = Some(nt);
+            }
+        }
+        for val in self.globals.values_mut() {
+            copy_val(val, &mut to_cursor);
+        }
+        for val in self.modules.values_mut() {
+            copy_val(val, &mut to_cursor);
+        }
+        for val in self.current_exports.values_mut() {
+            copy_val(val, &mut to_cursor);
+        }
+        for timer in self.timers.values_mut() {
+            copy_val(&mut timer.callback, &mut to_cursor);
+            for arg in &mut timer.args {
+                copy_val(arg, &mut to_cursor);
+            }
+        }
+        for (callee, args) in &mut self.microtasks {
+            copy_val(callee, &mut to_cursor);
+            for arg in args {
+                copy_val(arg, &mut to_cursor);
+            }
+        }
+        if let Some(mut s) = self.symbol_iterator {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_iterator = Some(s);
+        }
+        if let Some(mut s) = self.symbol_to_string_tag {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_to_string_tag = Some(s);
+        }
+        if let Some(mut s) = self.symbol_is_concat_spreadable {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_is_concat_spreadable = Some(s);
+        }
+        if let Some(mut s) = self.symbol_to_primitive {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_to_primitive = Some(s);
+        }
+        for s in self.symbol_registry.values_mut() {
+            copy_val(s, &mut to_cursor);
+        }
+
+        // Rehash sets/maps keyed by JsValue
+        let mut update_set = |set: &mut HashSet<(JsValue, String)>| {
+            let mut updated = HashSet::with_capacity(set.len());
+            for (mut target, key) in set.drain() {
+                copy_val(&mut target, &mut to_cursor);
+                updated.insert((target, key));
+            }
+            *set = updated;
+        };
+        update_set(&mut self.non_configurable_props);
+        update_set(&mut self.non_writable_props);
+        update_set(&mut self.non_enumerable_props);
+        update_set(&mut self.deleted_props);
+
+        let mut updated_non_ext = HashSet::with_capacity(self.non_extensible_objects.len());
+        for mut target in self.non_extensible_objects.drain() {
+            copy_val(&mut target, &mut to_cursor);
+            updated_non_ext.insert(target);
+        }
+        self.non_extensible_objects = updated_non_ext;
+
+        let mut updated_ns = HashSet::with_capacity(self.module_namespace_objects.len());
+        for mut target in self.module_namespace_objects.drain() {
+            copy_val(&mut target, &mut to_cursor);
+            updated_ns.insert(target);
+        }
+        self.module_namespace_objects = updated_ns;
+
+        if let Some(mut cmo) = self.current_module_obj {
+            copy_val(&mut cmo, &mut to_cursor);
+            self.current_module_obj = Some(cmo);
+        }
+
+        for (target, _) in self.imported_bindings.values_mut() {
+            copy_val(target, &mut to_cursor);
+        }
+        for target in self.star_exports.values_mut() {
+            copy_val(target, &mut to_cursor);
+        }
+        let mut updated_reexports = HashMap::with_capacity(self.module_reexports.len());
+        for ((mut k_tgt, k_str), (mut v_tgt, v_str)) in self.module_reexports.drain() {
+            copy_val(&mut k_tgt, &mut to_cursor);
+            copy_val(&mut v_tgt, &mut to_cursor);
+            updated_reexports.insert((k_tgt, k_str), (v_tgt, v_str));
+        }
+        self.module_reexports = updated_reexports;
+
+        // ── Phase 2: Cheney scan of to-space (transitive closure) ──
+        let mut scan = to_start;
+        while (scan as usize) < (to_cursor as usize) {
+            let header = unsafe { &*(scan as *const doms_gc::GcHeader) };
+            let total_size = header.total_size();
+            let payload = unsafe { scan.add(doms_gc::header::HEADER_SIZE) as *mut JsObject };
+            let obj = unsafe { &mut *payload };
+
+            obj.visit_values_mut(|val| copy_val(val, &mut to_cursor));
+
+            scan = unsafe { scan.add(total_size) };
+        }
+
+        // ── Phase 3: Walk self.objects: drop dead objects in from-space, update live pointers ──
+        let mut i = 0;
+        while i < self.objects.len() {
+            let ptr = self.objects[i];
+            if self.heap.nursery.contains(ptr as *const u8) {
+                let header = unsafe { &*((ptr as *mut doms_gc::GcHeader).sub(1)) };
+                if header.is_forwarded() {
+                    self.objects[i] = unsafe { header.forwarding_address() as *mut JsObject };
+                    i += 1;
+                } else {
+                    unsafe {
+                        std::ptr::drop_in_place(ptr);
+                    }
+                    self.objects.swap_remove(i);
+                }
+            } else {
+                i += 1;
+            }
+        }
+
+        // ── Phase 4: Finish scavenge (swaps spaces, resets cursor, clears old from-space) ──
+        self.heap.nursery.finish_scavenge(to_cursor);
+    }
 }
+

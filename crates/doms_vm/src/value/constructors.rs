@@ -84,4 +84,14 @@ impl JsValue {
         debug_assert!((ptr as u64) <= PAYLOAD_MASK, "Symbol pointer exceeds 48-bit address space");
         Self(TAG_SYMBOL | (ptr as u64 & PAYLOAD_MASK))
     }
+
+    /// Update the heap pointer payload in this `JsValue`, preserving the tag.
+    ///
+    /// # Safety
+    /// `new_ptr` must be a valid, aligned GC-managed pointer fitting within 48 bits.
+    #[inline]
+    pub unsafe fn update_heap_ptr(&mut self, new_ptr: *mut u8) {
+        let tag = self.0 & TAG_MASK;
+        self.0 = tag | (new_ptr as u64 & PAYLOAD_MASK);
+    }
 }

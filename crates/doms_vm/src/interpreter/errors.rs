@@ -12,16 +12,22 @@ impl Vm {
             None
         };
         let msg_str = message.clone().unwrap_or_default();
-        let obj = Box::new(JsObject::new_error(ShapeRegistry::ROOT_SHAPE_ID, proto, name.clone(), msg_str));
-        let ptr = Box::into_raw(obj);
-        self.track_ptr(ptr);
+        let obj = JsObject::new_error(ShapeRegistry::ROOT_SHAPE_ID, proto, name.clone(), msg_str);
+        let ptr = self.allocate_js_object(obj);
         let val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
         if let Some(msg) = message {
+            let prev_temp = self.temp_roots.len();
+            self.temp_roots.push(val);
             let msg_val = self.alloc_string(msg);
-            self.set_property(val, "message", msg_val);
-            self.non_enumerable_props.insert((val, "message".to_string()));
+            let cur_val = self.temp_roots[prev_temp];
+            self.set_property(cur_val, "message", msg_val);
+            self.non_enumerable_props.insert((cur_val, "message".to_string()));
+            self.temp_roots.pop();
+            self.temp_roots.truncate(prev_temp);
+            cur_val
+        } else {
+            val
         }
-        val
     }
 
     pub fn alloc_error(&mut self, name: String, message: String) -> JsValue {

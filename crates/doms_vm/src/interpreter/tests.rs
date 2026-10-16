@@ -310,3 +310,49 @@ fn test_polymorphic_inline_cache_execution() {
     "#).unwrap();
     assert_eq!(res.as_boolean(), Some(true));
 }
+
+#[test]
+fn test_generational_gc_nursery_scavenge() {
+    let mut vm = Vm::new();
+    let res = vm.eval(r#"
+        let root = {
+            a: 42,
+            b: "hello GC",
+            nested: { c: [1, 2, 3] },
+            fn: function(x) { return x * 2; }
+        };
+        root
+    "#).unwrap();
+
+    let root_ptr = res.as_object_ptr().expect("Expected object pointer");
+    assert!(vm.heap.nursery.contains(root_ptr));
+
+    // Perform an explicit nursery scavenge pass
+    let prev_scavenges = vm.heap.nursery.scavenge_count;
+    vm.scavenge_nursery();
+    assert_eq!(vm.heap.nursery.scavenge_count, prev_scavenges + 1);
+
+    // Verify object survived and pointers were updated
+    let updated_root = vm.eval("root.a === 42 && root.b === 'hello GC' && root.nested.c[1] === 2 && root.fn(21) === 42").unwrap();
+    assert_eq!(updated_root.as_boolean(), Some(true));
+}
+
+#[test]
+fn test_generational_gc_auto_scavenge_under_allocation_pressure() {
+    let mut vm = Vm::new();
+    // Allocate 30,000 objects to exceed the 4MB nursery and trigger automatic minor GC
+    let res = vm.eval(r#"
+        let live_list = [];
+        for (let i = 0; i < 30000; i++) {
+            let temp = { id: i, payload: "temp_" + i };
+            if (i % 1000 === 0) {
+                live_list.push(temp);
+            }
+        }
+        live_list.length === 30 && live_list[0].id === 0 && live_list[29].id === 29000
+    "#).unwrap();
+
+    assert_eq!(res.as_boolean(), Some(true));
+    assert!(vm.heap.nursery.scavenge_count >= 1, "Expected at least 1 automatic nursery scavenge, got {}", vm.heap.nursery.scavenge_count);
+}
+

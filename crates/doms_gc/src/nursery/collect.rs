@@ -86,6 +86,20 @@ impl Nursery {
         survived
     }
 
+    /// Complete a custom scavenge pass, swapping from/to spaces and updating cursors.
+    pub fn finish_scavenge(&mut self, to_cursor: *mut u8) -> usize {
+        std::mem::swap(&mut self.from_start, &mut self.to_start);
+        self.cursor = to_cursor;
+        self.limit = unsafe { self.from_start.add(self.space_size) };
+        self.scavenge_count += 1;
+        let survived = unsafe { to_cursor.offset_from(self.from_start) } as usize;
+        self.bytes_allocated = survived;
+        unsafe {
+            ptr::write_bytes(self.to_start, 0xDD, self.space_size);
+        }
+        survived
+    }
+
     /// Copy a single object from from-space to to-space.
     ///
     /// If the object has already been forwarded, returns the forwarding address.
@@ -98,7 +112,7 @@ impl Nursery {
     ///
     /// # Returns
     /// Pointer to the object's payload in to-space.
-    fn copy_object(
+    pub fn copy_object(
         &self,
         payload_ptr: *mut u8,
         to_cursor: &mut *mut u8,

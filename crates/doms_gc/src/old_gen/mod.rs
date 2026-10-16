@@ -13,7 +13,7 @@
 //! will arrive in Phase 1. For now, promoted objects are allocated in a
 //! simple Vec-backed region with no collection.
 
-use crate::header::{GC_ALIGN, GcHeader, HEADER_SIZE};
+use crate::header::{GC_ALIGN, GcHeader, HEADER_SIZE, TypeTag};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 

@@ -44,9 +44,8 @@ impl Vm {
                 None
             };
             let proto = self.symbol_proto.or(self.object_proto);
-            let obj = Box::new(JsObject::new_symbol(ShapeRegistry::ROOT_SHAPE_ID, proto, desc));
-            let ptr = Box::into_raw(obj);
-            self.track_ptr(ptr);
+            let obj = JsObject::new_symbol(ShapeRegistry::ROOT_SHAPE_ID, proto, desc);
+            let ptr = self.allocate_js_object(obj);
             return Ok(unsafe { JsValue::from_object_ptr(ptr as *mut u8) });
         }
         Ok(val)

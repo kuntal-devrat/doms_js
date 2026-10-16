@@ -157,7 +157,10 @@ impl Drop for Vm {
         for &ptr in &self.objects {
             if !ptr.is_null() {
                 unsafe {
-                    drop(Box::from_raw(ptr));
+                    std::ptr::drop_in_place(ptr);
+                    if !self.heap.contains(ptr as *const u8) {
+                        drop(Box::from_raw(ptr));
+                    }
                 }
             }
         }

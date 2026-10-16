@@ -160,3 +160,131 @@ impl Trace for JsObject {
         }
     }
 }
+
+impl JsObject {
+    /// Mutably visit all internal `JsValue` references in this object.
+    ///
+    /// Used during GC scavenging and root preservation.
+    pub fn visit_values_mut<F>(&mut self, mut visitor: F)
+    where
+        F: FnMut(&mut JsValue),
+    {
+        if let Some(proto) = &mut self.prototype {
+            visitor(proto);
+        }
+        for slot in &mut self.slots {
+            visitor(slot);
+        }
+        if let Some(accs) = &mut self.accessors {
+            for acc in accs.values_mut() {
+                if let Some(g) = &mut acc.getter {
+                    visitor(g);
+                }
+                if let Some(s) = &mut acc.setter {
+                    visitor(s);
+                }
+            }
+        }
+        if let Some(syms) = &mut self.symbol_properties {
+            let mut updated = std::collections::HashMap::with_capacity(syms.len());
+            for (mut k, mut v) in syms.drain() {
+                visitor(&mut k);
+                visitor(&mut v);
+                updated.insert(k, v);
+            }
+            **syms = updated;
+        }
+        if let Some(sym_accs) = &mut self.symbol_accessors {
+            let mut updated = std::collections::HashMap::with_capacity(sym_accs.len());
+            for (mut k, mut acc) in sym_accs.drain() {
+                visitor(&mut k);
+                if let Some(g) = &mut acc.getter {
+                    visitor(g);
+                }
+                if let Some(s) = &mut acc.setter {
+                    visitor(s);
+                }
+                updated.insert(k, acc);
+            }
+            **sym_accs = updated;
+        }
+        if let Some(order) = &mut self.symbol_order {
+            for k in order.iter_mut() {
+                visitor(k);
+            }
+        }
+        match &mut self.kind {
+            ObjectKind::Array(elements) => {
+                for el in elements {
+                    visitor(el);
+                }
+            }
+            ObjectKind::Proxy { target, handler } => {
+                visitor(target);
+                visitor(handler);
+            }
+            ObjectKind::WeakRef(target) => {
+                visitor(target);
+            }
+            ObjectKind::Function(f) => {
+                for uv in &mut f.upvalues {
+                    visitor(uv);
+                }
+            }
+            ObjectKind::Promise(p) => {
+                visitor(&mut p.result);
+                for r in &mut p.fulfill_reactions {
+                    visitor(r);
+                }
+                for r in &mut p.reject_reactions {
+                    visitor(r);
+                }
+            }
+            ObjectKind::Generator(g) => {
+                for v in &mut g.stack {
+                    visitor(v);
+                }
+                for uv in &mut g.function.upvalues {
+                    visitor(uv);
+                }
+                visitor(&mut g.this_val);
+                if let Some(args) = &mut g.arguments {
+                    visitor(args);
+                }
+            }
+            ObjectKind::Map(entries) => {
+                for (k, v) in entries {
+                    visitor(k);
+                    visitor(v);
+                }
+            }
+            ObjectKind::Set(elements) => {
+                for el in elements {
+                    visitor(el);
+                }
+            }
+            ObjectKind::WeakMap(entries) => {
+                for (k, v) in entries {
+                    visitor(k);
+                    visitor(v);
+                }
+            }
+            ObjectKind::WeakSet(elements) => {
+                for el in elements {
+                    visitor(el);
+                }
+            }
+            ObjectKind::FinalizationRegistry { callback, entries } => {
+                visitor(callback);
+                for (t, h, unreg) in entries {
+                    visitor(t);
+                    visitor(h);
+                    if let Some(u) = unreg {
+                        visitor(u);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}

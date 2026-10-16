@@ -8,9 +8,8 @@ impl Vm {
             let p = self.get_property(c, "prototype");
             if p.is_object() { Some(p) } else { None }
         }).or(self.object_proto);
-        let obj = Box::new(JsObject::new_bigint(ShapeRegistry::ROOT_SHAPE_ID, proto, val));
-        let ptr = Box::into_raw(obj);
-        self.track_ptr(ptr);
+        let obj = JsObject::new_bigint(ShapeRegistry::ROOT_SHAPE_ID, proto, val);
+        let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
 
@@ -19,16 +18,14 @@ impl Vm {
             let p = self.get_property(c, "prototype");
             if p.is_object() { Some(p) } else { None }
         }).or(self.object_proto);
-        let obj = Box::new(JsObject::new_with_kind(ShapeRegistry::ROOT_SHAPE_ID, proto, ObjectKind::BigIntObject(val)));
-        let ptr = Box::into_raw(obj);
-        self.track_ptr(ptr);
+        let obj = JsObject::new_with_kind(ShapeRegistry::ROOT_SHAPE_ID, proto, ObjectKind::BigIntObject(val));
+        let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
     pub fn alloc_regexp(&mut self, pattern: String, flags: String) -> JsValue {
         let proto = self.regexp_proto.or(self.object_proto);
-        let obj = Box::new(JsObject::new_regexp(ShapeRegistry::ROOT_SHAPE_ID, proto, pattern, flags));
-        let ptr = Box::into_raw(obj);
-        self.track_ptr(ptr);
+        let obj = JsObject::new_regexp(ShapeRegistry::ROOT_SHAPE_ID, proto, pattern, flags);
+        let ptr = self.allocate_js_object(obj);
         let val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
         self.set_property(val, "lastIndex", JsValue::from_int32(0));
         self.non_enumerable_props.insert((val, "lastIndex".to_string()));
@@ -36,15 +33,13 @@ impl Vm {
         val
     }
     pub fn alloc_date(&mut self, proto: Option<JsValue>, time_ms: f64) -> JsValue {
-        let obj = Box::new(JsObject::new_date(ShapeRegistry::ROOT_SHAPE_ID, proto, time_ms));
-        let ptr = Box::into_raw(obj);
-        self.track_ptr(ptr);
+        let obj = JsObject::new_date(ShapeRegistry::ROOT_SHAPE_ID, proto, time_ms);
+        let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
     pub fn alloc_symbol(&mut self, desc: Option<String>) -> JsValue {
-        let obj = Box::new(JsObject::new_symbol(ShapeRegistry::ROOT_SHAPE_ID, self.symbol_proto, desc));
-        let ptr = Box::into_raw(obj);
-        self.track_ptr(ptr);
+        let obj = JsObject::new_symbol(ShapeRegistry::ROOT_SHAPE_ID, self.symbol_proto, desc);
+        let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_symbol_ptr(ptr as *mut u8) }
     }
 }
