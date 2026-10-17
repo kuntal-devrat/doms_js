@@ -6,12 +6,36 @@ impl<'a> Parser<'a> {
         self.is_top_level = false;
         match self.current.kind {
             TokenKind::Class => self.parse_class_decl(),
-            TokenKind::Let => self.parse_var_decl(VarKind::Let),
+            TokenKind::Let => {
+                if !self.is_strict {
+                    if self.in_single_statement_context {
+                        if self.peeked.kind == TokenKind::LBracket {
+                            self.parse_var_decl(VarKind::Let)
+                        } else {
+                            let expr = self.parse_expression(0)?;
+                            self.consume_semicolon()?;
+                            Ok(Statement::Expression(expr))
+                        }
+                    } else if matches!(self.peeked.kind, TokenKind::Ident(_) | TokenKind::LBracket | TokenKind::LBrace | TokenKind::Async | TokenKind::Await | TokenKind::Yield) {
+                        self.parse_var_decl(VarKind::Let)
+                    } else {
+                        let expr = self.parse_expression(0)?;
+                        self.consume_semicolon()?;
+                        Ok(Statement::Expression(expr))
+                    }
+                } else {
+                    self.parse_var_decl(VarKind::Let)
+                }
+            }
             TokenKind::Const => self.parse_var_decl(VarKind::Const),
             TokenKind::Var => self.parse_var_decl(VarKind::Var),
+            TokenKind::Ident(ref id) if id == "using" && !self.peeked.has_preceding_line_terminator && matches!(self.peeked.kind, TokenKind::Ident(_) | TokenKind::Await) => {
+                self.advance()?; // 'using'
+                self.parse_using_decl()
+            }
             TokenKind::Async => {
-                self.advance()?;
-                if self.check(&TokenKind::Function) {
+                if self.peeked.kind == TokenKind::Function && !self.peeked.has_preceding_line_terminator {
+                    self.advance()?; // async
                     self.parse_async_function_decl()
                 } else {
                     let expr = self.parse_expression(0)?;
@@ -120,13 +144,12 @@ impl<'a> Parser<'a> {
                 if self.is_strict && is_strict_reserved_word(&lbl) {
                     return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
                 }
-                if (self.is_strict || self.is_module) && lbl == "await" {
+                if (self.in_async || self.is_module || self.in_static_block) && lbl == "await" {
                     return Err(ParseError::UnexpectedToken(TokenKind::Await, self.current.line, self.current.col));
                 }
                 self.advance()?; // ident/keyword
                 self.advance()?; // colon
-                let stmt = self.parse_statement()?;
-                self.check_sub_statement(&stmt, true)?;
+                let stmt = self.parse_sub_statement(true)?;
                 Ok(Statement::Labeled { label: lbl, body: Box::new(stmt) })
             }
             _ => {

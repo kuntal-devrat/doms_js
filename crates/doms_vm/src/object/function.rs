@@ -18,4 +18,5 @@ pub struct JsFunction {
     pub has_param_exprs: bool,
     pub is_method: bool,
     pub is_arrow: bool,
+    pub home_object: Option<JsValue>,
 }

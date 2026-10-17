@@ -369,7 +369,7 @@ impl Vm {
     pub(crate) fn op_in(&mut self) -> Result<(), VmError> {
         let rhs = self.pop()?;
         let lhs = self.pop()?;
-        if !rhs.is_object() {
+        if !rhs.is_js_object() {
             return Err(VmError::TypeError("Cannot use 'in' operator to search for property in non-object".into()));
         }
         let has = if lhs.is_symbol() {

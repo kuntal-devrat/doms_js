@@ -3,6 +3,52 @@
 
 use super::*;
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum EnumerableKind {
+    Key,
+    Value,
+    KeyValue,
+}
+
+pub fn enumerable_own_property_names(
+    vm: &mut Vm,
+    obj: JsValue,
+    kind: EnumerableKind,
+) -> Result<Vec<JsValue>, VmError> {
+    let own_keys = super::names::get_own_property_keys(vm, obj)?;
+    let mut properties = Vec::new();
+    for key in own_keys {
+        if let PropertyKeyVal::String(k_str) = key {
+            let desc = super::descriptor::get_own_property_descriptor_internal(
+                vm,
+                obj,
+                &PropertyKeyVal::String(k_str.clone()),
+            )?;
+            if desc.is_object() {
+                let enum_val = vm.get_property(desc, "enumerable");
+                if enum_val.is_truthy() {
+                    match kind {
+                        EnumerableKind::Key => {
+                            properties.push(vm.alloc_string(k_str));
+                        }
+                        EnumerableKind::Value => {
+                            let val = vm.get_property_result(obj, &k_str)?;
+                            properties.push(val);
+                        }
+                        EnumerableKind::KeyValue => {
+                            let val = vm.get_property_result(obj, &k_str)?;
+                            let k_val = vm.alloc_string(k_str);
+                            let entry = vm.alloc_array(vec![k_val, val]);
+                            properties.push(entry);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(properties)
+}
+
 pub(super) fn register_constructor(
     vm: &mut Vm,
 ) -> (JsValue, JsValue, JsValue, JsValue, JsValue, JsValue) {
@@ -16,86 +62,66 @@ pub(super) fn register_constructor(
     });
 
     let keys_fn = vm.alloc_native_function("keys", 1, |vm, _this, args| {
-        let arg = match args.first() {
-            Some(a) if a.is_object() => *a,
-            _ => return Err(VmError::TypeError("Object.keys called on non-object".into())),
-        };
-        let keys_to_alloc = get_enumerable_keys(vm, arg);
-        if vm.module_namespace_objects.contains(&arg) {
-            for k in &keys_to_alloc {
-                if vm.get_property(arg, k) == JsValue::uninitialized() {
-                    return Err(VmError::ReferenceError(format!("Cannot access uninitialized export '{}'", k)));
-                }
-            }
-        }
-        let keys_vec: Vec<JsValue> = keys_to_alloc.into_iter().map(|k| vm.alloc_string(k)).collect();
-        Ok(vm.alloc_array(keys_vec))
+        let val = args.first().copied().unwrap_or(JsValue::undefined());
+        let arg = vm.to_object_value(val)?;
+        let items = enumerable_own_property_names(vm, arg, EnumerableKind::Key)?;
+        Ok(vm.alloc_array(items))
     });
 
     let values_fn = vm.alloc_native_function("values", 1, |vm, _this, args| {
-        let arg = match args.first() {
-            Some(a) if a.is_object() => *a,
-            _ => return Err(VmError::TypeError("Object.values called on non-object".into())),
-        };
-        let keys_to_alloc = get_enumerable_keys(vm, arg);
-        if vm.module_namespace_objects.contains(&arg) {
-            for k in &keys_to_alloc {
-                if vm.get_property(arg, k) == JsValue::uninitialized() {
-                    return Err(VmError::ReferenceError(format!("Cannot access uninitialized export '{}'", k)));
-                }
-            }
-        }
-        let vals_vec: Vec<JsValue> = keys_to_alloc.into_iter().map(|k| vm.get_property(arg, &k)).collect();
-        Ok(vm.alloc_array(vals_vec))
+        let val = args.first().copied().unwrap_or(JsValue::undefined());
+        let arg = vm.to_object_value(val)?;
+        let items = enumerable_own_property_names(vm, arg, EnumerableKind::Value)?;
+        Ok(vm.alloc_array(items))
     });
 
     let entries_fn = vm.alloc_native_function("entries", 1, |vm, _this, args| {
-        let arg = match args.first() {
-            Some(a) if a.is_object() => *a,
-            _ => return Err(VmError::TypeError("Object.entries called on non-object".into())),
-        };
-        let keys_to_alloc = get_enumerable_keys(vm, arg);
-        if vm.module_namespace_objects.contains(&arg) {
-            for k in &keys_to_alloc {
-                if vm.get_property(arg, k) == JsValue::uninitialized() {
-                    return Err(VmError::ReferenceError(format!("Cannot access uninitialized export '{}'", k)));
-                }
-            }
-        }
-        let entries_vec: Vec<JsValue> = keys_to_alloc
-            .into_iter()
-            .map(|k| {
-                let v = vm.get_property(arg, &k);
-                let k_val = vm.alloc_string(k);
-                vm.alloc_array(vec![k_val, v])
-            })
-            .collect();
-        Ok(vm.alloc_array(entries_vec))
+        let val = args.first().copied().unwrap_or(JsValue::undefined());
+        let arg = vm.to_object_value(val)?;
+        let items = enumerable_own_property_names(vm, arg, EnumerableKind::KeyValue)?;
+        Ok(vm.alloc_array(items))
     });
 
     let assign_fn = vm.alloc_native_function("assign", 2, |vm, _this, args| {
-        let target = if let Some(t) = args.first() {
-            *t
-        } else {
-            return Err(VmError::TypeError("Cannot convert undefined or null to object".into()));
-        };
+        let target_raw = args.first().copied().unwrap_or(JsValue::undefined());
+        let to = vm.to_object_value(target_raw)?;
+        if args.len() <= 1 {
+            return Ok(to);
+        }
 
-        for source in args.iter().skip(1) {
-            if let Some(src_ptr) = source.as_object_ptr() {
-                let src_obj = unsafe { &*(src_ptr as *mut JsObject) };
-                let props: Vec<(String, JsValue)> = vm
-                    .shapes
-                    .all_property_entries(src_obj.shape_id)
-                    .into_iter()
-                    .filter_map(|(k, offset)| src_obj.get_slot(offset).map(|v| (k, v)))
-                    .collect();
+        let saved_strict = vm.is_strict;
+        vm.is_strict = true;
 
-                for (k, v) in props {
-                    vm.set_property(target, &k, v);
+        let res = (|| -> Result<(), VmError> {
+            for source in args.iter().skip(1) {
+                if source.is_nullish() {
+                    continue;
+                }
+                let from = vm.to_object_value(*source)?;
+                let keys = super::names::get_own_property_keys(vm, from)?;
+                for key in keys {
+                    let desc = super::descriptor::get_own_property_descriptor_internal(vm, from, &key)?;
+                    if desc.is_object() {
+                        let enum_val = vm.get_property(desc, "enumerable");
+                        if enum_val.is_truthy() {
+                            let val = match &key {
+                                PropertyKeyVal::String(s) => vm.get_property_result(from, s)?,
+                                PropertyKeyVal::Symbol(sym) => vm.get_symbol_property_result(from, *sym)?,
+                            };
+                            match &key {
+                                PropertyKeyVal::String(s) => vm.set_property_result(to, s, val)?,
+                                PropertyKeyVal::Symbol(sym) => vm.set_symbol_property_result(to, *sym, val)?,
+                            }
+                        }
+                    }
                 }
             }
-        }
-        Ok(target)
+            Ok(())
+        })();
+
+        vm.is_strict = saved_strict;
+        res?;
+        Ok(to)
     });
 
     let object_proto = vm.alloc_object();

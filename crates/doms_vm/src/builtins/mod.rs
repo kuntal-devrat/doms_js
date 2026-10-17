@@ -43,7 +43,7 @@ mod globals;
 mod helpers;
 mod json;
 mod math;
-mod object;
+pub(crate) mod object;
 mod parallel;
 mod phase3;
 mod promise;

@@ -149,10 +149,151 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub(crate) fn parse_sub_statement(&mut self, allow_sloppy_func: bool) -> Result<Statement, ParseError> {
+        let prev = self.in_single_statement_context;
+        self.in_single_statement_context = true;
+        let res = self.parse_statement();
+        self.in_single_statement_context = prev;
+        let stmt = res?;
+        self.check_sub_statement(&stmt, allow_sloppy_func)?;
+        Ok(stmt)
+    }
+
+    pub(crate) fn is_iteration_statement(stmt: &Statement) -> bool {
+        match stmt {
+            Statement::While { .. }
+            | Statement::DoWhile { .. }
+            | Statement::For { .. }
+            | Statement::ForIn { .. }
+            | Statement::ForOf { .. } => true,
+            Statement::Labeled { body, .. } => Self::is_iteration_statement(body),
+            _ => false,
+        }
+    }
+
     pub(crate) fn validate_labels_and_jumps(stmts: &[Statement]) -> Result<(), ParseError> {
         let mut active_labels = Vec::new();
+        let mut iteration_labels = Vec::new();
         for stmt in stmts {
-            Self::check_labels_and_jumps_stmt(stmt, &mut active_labels, false, false)?;
+            Self::check_labels_and_jumps_stmt(stmt, &mut active_labels, &mut iteration_labels, false, false)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_expr_functions(expr: &Expression) -> Result<(), ParseError> {
+        match expr {
+            Expression::FunctionExpr { body, .. }
+            | Expression::ArrowExpr { body, .. }
+            | Expression::MethodExpr { body, .. }
+            | Expression::AsyncFunctionExpr { body, .. }
+            | Expression::GeneratorExpr { body, .. }
+            | Expression::AsyncGeneratorExpr { body, .. } => {
+                Self::validate_labels_and_jumps(body)?;
+            }
+            Expression::Binary { left, right, .. } => {
+                Self::validate_expr_functions(left)?;
+                Self::validate_expr_functions(right)?;
+            }
+            Expression::Assignment { value, .. } => {
+                Self::validate_expr_functions(value)?;
+            }
+            Expression::MemberAssignment { object, value, .. } => {
+                Self::validate_expr_functions(object)?;
+                Self::validate_expr_functions(value)?;
+            }
+            Expression::IndexAssignment { object, index, value } => {
+                Self::validate_expr_functions(object)?;
+                Self::validate_expr_functions(index)?;
+                Self::validate_expr_functions(value)?;
+            }
+            Expression::ClassExpr(class_def) => {
+                Self::validate_labels_and_jumps(&class_def.ctor_body)?;
+                for el in &class_def.elements {
+                    match &el.kind {
+                        ClassElementKind::Method(e)
+                        | ClassElementKind::Getter(e)
+                        | ClassElementKind::Setter(e) => {
+                            Self::validate_expr_functions(e)?;
+                        }
+                        ClassElementKind::Field(opt_e) => {
+                            if let Some(e) = opt_e {
+                                Self::validate_expr_functions(e)?;
+                            }
+                        }
+                        ClassElementKind::StaticBlock(stmts) => {
+                            Self::validate_labels_and_jumps(stmts)?;
+                        }
+                    }
+                }
+            }
+            Expression::Unary { expr, .. }
+            | Expression::Update { expr, .. }
+            | Expression::Grouping(expr)
+            | Expression::Spread(expr)
+            | Expression::Await(expr)
+            | Expression::DynamicImport(expr) => {
+                Self::validate_expr_functions(expr)?;
+            }
+            Expression::Yield(opt_expr) => {
+                if let Some(e) = opt_expr {
+                    Self::validate_expr_functions(e)?;
+                }
+            }
+            Expression::YieldStar(expr) => {
+                Self::validate_expr_functions(expr)?;
+            }
+            Expression::Call { callee, args } | Expression::New { callee, args } => {
+                Self::validate_expr_functions(callee)?;
+                for arg in args {
+                    Self::validate_expr_functions(arg)?;
+                }
+            }
+            Expression::Member { object, .. } => {
+                Self::validate_expr_functions(object)?;
+            }
+            Expression::Index { object, index } => {
+                Self::validate_expr_functions(object)?;
+                Self::validate_expr_functions(index)?;
+            }
+            Expression::Conditional { condition, then_expr, else_expr } => {
+                Self::validate_expr_functions(condition)?;
+                Self::validate_expr_functions(then_expr)?;
+                Self::validate_expr_functions(else_expr)?;
+            }
+            Expression::Sequence(exprs) | Expression::Array(exprs) => {
+                for e in exprs {
+                    Self::validate_expr_functions(e)?;
+                }
+            }
+            Expression::Object(props) => {
+                for p in props {
+                    match p {
+                        ObjectProperty::KeyValue(key, val)
+                        | ObjectProperty::Getter(key, val)
+                        | ObjectProperty::Setter(key, val) => {
+                            if let PropertyKey::Computed(k_expr) = key {
+                                Self::validate_expr_functions(k_expr)?;
+                            }
+                            Self::validate_expr_functions(val)?;
+                        }
+                        ObjectProperty::Spread(expr) => {
+                            Self::validate_expr_functions(expr)?;
+                        }
+                    }
+                }
+            }
+            Expression::ObjectRest { target, excluded_keys } => {
+                Self::validate_expr_functions(target)?;
+                for k in excluded_keys {
+                    Self::validate_expr_functions(k)?;
+                }
+            }
+            Expression::DestructuringAssignment { pattern, value } => {
+                Self::validate_expr_functions(pattern)?;
+                Self::validate_expr_functions(value)?;
+            }
+            Expression::PrivateIdentifier(_) => {}
+            _ => {}
         }
         Ok(())
     }
@@ -160,6 +301,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn check_labels_and_jumps_stmt(
         stmt: &Statement,
         active_labels: &mut Vec<String>,
+        iteration_labels: &mut Vec<String>,
         in_loop: bool,
         in_switch: bool,
     ) -> Result<(), ParseError> {
@@ -169,8 +311,15 @@ impl<'a> Parser<'a> {
                     return Err(ParseError::General(format!("Duplicate label '{}'", label)));
                 }
                 active_labels.push(label.clone());
-                let res = Self::check_labels_and_jumps_stmt(body, active_labels, in_loop, in_switch);
+                let is_iter = Self::is_iteration_statement(body);
+                if is_iter {
+                    iteration_labels.push(label.clone());
+                }
+                let res = Self::check_labels_and_jumps_stmt(body, active_labels, iteration_labels, in_loop, in_switch);
                 active_labels.pop();
+                if is_iter {
+                    iteration_labels.pop();
+                }
                 res?;
             }
             Statement::Break(Some(label)) => {
@@ -184,11 +333,8 @@ impl<'a> Parser<'a> {
                 }
             }
             Statement::Continue(Some(label)) => {
-                if !active_labels.contains(label) {
+                if !iteration_labels.contains(label) {
                     return Err(ParseError::General(format!("Undefined continue label '{}'", label)));
-                }
-                if !in_loop {
-                    return Err(ParseError::General("Illegal continue statement".into()));
                 }
             }
             Statement::Continue(None) => {
@@ -197,45 +343,145 @@ impl<'a> Parser<'a> {
                 }
             }
             Statement::While { body, .. } | Statement::DoWhile { body, .. } => {
-                Self::check_labels_and_jumps_stmt(body, active_labels, true, in_switch)?;
+                Self::check_labels_and_jumps_stmt(body, active_labels, iteration_labels, true, in_switch)?;
             }
             Statement::For { body, .. }
             | Statement::ForIn { body, .. }
             | Statement::ForOf { body, .. } => {
-                Self::check_labels_and_jumps_stmt(body, active_labels, true, in_switch)?;
+                Self::check_labels_and_jumps_stmt(body, active_labels, iteration_labels, true, in_switch)?;
             }
             Statement::Block(inner) => {
                 for s in inner {
-                    Self::check_labels_and_jumps_stmt(s, active_labels, in_loop, in_switch)?;
+                    Self::check_labels_and_jumps_stmt(s, active_labels, iteration_labels, in_loop, in_switch)?;
                 }
             }
             Statement::If { then_branch, else_branch, .. } => {
-                Self::check_labels_and_jumps_stmt(then_branch, active_labels, in_loop, in_switch)?;
+                Self::check_labels_and_jumps_stmt(then_branch, active_labels, iteration_labels, in_loop, in_switch)?;
                 if let Some(eb) = else_branch {
-                    Self::check_labels_and_jumps_stmt(eb, active_labels, in_loop, in_switch)?;
+                    Self::check_labels_and_jumps_stmt(eb, active_labels, iteration_labels, in_loop, in_switch)?;
                 }
             }
             Statement::Switch { cases, .. } => {
                 for c in cases {
                     for s in &c.consequent {
-                        Self::check_labels_and_jumps_stmt(s, active_labels, in_loop, true)?;
+                        Self::check_labels_and_jumps_stmt(s, active_labels, iteration_labels, in_loop, true)?;
                     }
                 }
             }
             Statement::TryCatch { try_block, catch_block, finally_block, .. } => {
-                Self::check_labels_and_jumps_stmt(try_block, active_labels, in_loop, in_switch)?;
+                Self::check_labels_and_jumps_stmt(try_block, active_labels, iteration_labels, in_loop, in_switch)?;
                 if let Some(cb) = catch_block {
-                    Self::check_labels_and_jumps_stmt(cb, active_labels, in_loop, in_switch)?;
+                    Self::check_labels_and_jumps_stmt(cb, active_labels, iteration_labels, in_loop, in_switch)?;
                 }
                 if let Some(fb) = finally_block {
-                    Self::check_labels_and_jumps_stmt(fb, active_labels, in_loop, in_switch)?;
+                    Self::check_labels_and_jumps_stmt(fb, active_labels, iteration_labels, in_loop, in_switch)?;
                 }
             }
             Statement::With { body, .. } => {
-                Self::check_labels_and_jumps_stmt(body, active_labels, in_loop, in_switch)?;
+                Self::check_labels_and_jumps_stmt(body, active_labels, iteration_labels, in_loop, in_switch)?;
+            }
+            Statement::FunctionDecl { body, .. }
+            | Statement::AsyncFunctionDecl { body, .. }
+            | Statement::GeneratorDecl { body, .. }
+            | Statement::AsyncGeneratorDecl { body, .. } => {
+                Self::validate_labels_and_jumps(body)?;
+            }
+            Statement::Expression(expr) => {
+                Self::validate_expr_functions(expr)?;
+            }
+            Statement::Return(Some(expr)) => {
+                Self::validate_expr_functions(expr)?;
+            }
+            Statement::VarDecl { declarations, .. } => {
+                for decl in declarations {
+                    if let Some(ref init) = decl.init {
+                        Self::validate_expr_functions(init)?;
+                    }
+                }
+            }
+            Statement::ClassDecl(class_def) => {
+                Self::validate_labels_and_jumps(&class_def.ctor_body)?;
+                for el in &class_def.elements {
+                    match &el.kind {
+                        ClassElementKind::Method(e)
+                        | ClassElementKind::Getter(e)
+                        | ClassElementKind::Setter(e) => {
+                            Self::validate_expr_functions(e)?;
+                        }
+                        ClassElementKind::Field(opt_e) => {
+                            if let Some(e) = opt_e {
+                                Self::validate_expr_functions(e)?;
+                            }
+                        }
+                        ClassElementKind::StaticBlock(stmts) => {
+                            Self::validate_labels_and_jumps(stmts)?;
+                        }
+                    }
+                }
             }
             _ => {}
         }
         Ok(())
+    }
+
+    pub(crate) fn validate_assignment_pattern(&self, expr: &Expression) -> Result<(), ParseError> {
+        if self.trailing_comma_after_rest {
+            return Err(ParseError::General("Rest element cannot have a trailing comma in assignment pattern".into()));
+        }
+        self.validate_assignment_pattern_inner(expr)
+    }
+
+    fn validate_assignment_pattern_inner(&self, expr: &Expression) -> Result<(), ParseError> {
+        match expr {
+            Expression::Identifier(_) | Expression::Member { .. } | Expression::Index { .. } => Ok(()),
+            Expression::Grouping(inner) => self.validate_assignment_pattern_inner(inner),
+            Expression::Array(elements) => {
+                let mut has_rest = false;
+                for elem in elements {
+                    if has_rest {
+                        return Err(ParseError::General("Elements cannot follow rest element".into()));
+                    }
+                    match elem {
+                        Expression::Literal(Literal::Hole) => {}
+                        Expression::Spread(inner) => {
+                            has_rest = true;
+                            if matches!(&**inner, Expression::Assignment { .. }) {
+                                return Err(ParseError::General("Rest element cannot have an initializer".into()));
+                            }
+                            self.validate_assignment_pattern_inner(inner)?;
+                        }
+                        Expression::Assignment { .. } => {}
+                        other => {
+                            self.validate_assignment_pattern_inner(other)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Expression::Object(props) => {
+                for prop in props {
+                    match prop {
+                        ObjectProperty::KeyValue(_key, val) => {
+                            if matches!(val, Expression::MethodExpr { .. }) {
+                                return Err(ParseError::General("Object pattern cannot contain methods".into()));
+                            }
+                            if let Expression::Assignment { .. } = val {
+                                // Default initializer allowed in object pattern
+                            } else {
+                                self.validate_assignment_pattern_inner(val)?;
+                            }
+                        }
+                        ObjectProperty::Getter(..) | ObjectProperty::Setter(..) => {
+                            return Err(ParseError::General("Object pattern cannot contain getters or setters".into()));
+                        }
+                        ObjectProperty::Spread(expr) => {
+                            self.validate_assignment_pattern_inner(expr)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(ParseError::InvalidAssignmentTarget(self.current.line, self.current.col)),
+        }
     }
 }

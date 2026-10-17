@@ -42,7 +42,7 @@ impl Compiler {
         self.chunk.emit(OpCode::SetLocal(disc_slot), 0);
         self.chunk.emit(OpCode::Pop, 0);
 
-        self.break_targets.push(TargetScope { labels: Vec::new(), jumps: Vec::new(), scope_depth: self.block_scope_depth });
+        self.break_targets.push(TargetScope { labels: Vec::new(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len() });
 
         let mut body_jumps = Vec::new();
         let mut default_idx = None;
@@ -113,7 +113,8 @@ impl Compiler {
             self.compile_statement(body, is_last)?;
         } else {
             let labels = std::mem::take(&mut self.current_labels);
-            self.break_targets.push(TargetScope { labels, jumps: Vec::new(), scope_depth: self.block_scope_depth });
+            let bd = self.break_targets.len();
+            self.break_targets.push(TargetScope { labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd });
             self.compile_statement(body, is_last)?;
             let exit_target = self.chunk.instructions.len() as i32;
             let breaks = self.break_targets.pop().unwrap();
@@ -129,17 +130,37 @@ impl Compiler {
         opt_label: &Option<String>,
     ) -> Result<(), CompileError> {
         if let Some(label) = opt_label {
-            if let Some(target) = self.break_targets.iter_mut().rev().find(|t| t.labels.iter().any(|l| l == label)) {
-                let target_scope = target.scope_depth;
+            if let Some(target_idx) = self.break_targets.iter().rposition(|t| t.labels.iter().any(|l| l == label)) {
+                let target_scope = self.break_targets[target_idx].scope_depth;
+                for t in self.break_targets[target_idx..].iter().rev() {
+                    if let Some(slot) = t.iter_slot {
+                        self.chunk.emit(OpCode::PopCatch, 0);
+                        self.chunk.emit(OpCode::GetLocal(slot), 0);
+                        if t.is_async_iter {
+                            self.chunk.emit(OpCode::AsyncIteratorClose(false), 0);
+                        } else {
+                            self.chunk.emit(OpCode::IteratorClose(false), 0);
+                        }
+                    }
+                }
                 for _ in 0..self.block_scope_depth.saturating_sub(target_scope) {
                     self.chunk.emit(OpCode::PopScope, 0);
                 }
                 let jmp = self.chunk.emit(OpCode::Jump(0), 0);
-                target.jumps.push(jmp);
+                self.break_targets[target_idx].jumps.push(jmp);
             } else {
                 return Err(CompileError::General(format!("Undefined label '{}'", label)));
             }
         } else if let Some(target) = self.break_targets.last_mut() {
+            if let Some(slot) = target.iter_slot {
+                self.chunk.emit(OpCode::PopCatch, 0);
+                self.chunk.emit(OpCode::GetLocal(slot), 0);
+                if target.is_async_iter {
+                    self.chunk.emit(OpCode::AsyncIteratorClose(false), 0);
+                } else {
+                    self.chunk.emit(OpCode::IteratorClose(false), 0);
+                }
+            }
             let target_scope = target.scope_depth;
             for _ in 0..self.block_scope_depth.saturating_sub(target_scope) {
                 self.chunk.emit(OpCode::PopScope, 0);
@@ -157,13 +178,25 @@ impl Compiler {
         opt_label: &Option<String>,
     ) -> Result<(), CompileError> {
         if let Some(label) = opt_label {
-            if let Some(target) = self.continue_targets.iter_mut().rev().find(|t| t.labels.iter().any(|l| l == label)) {
-                let target_scope = target.scope_depth;
+            if let Some(target_idx) = self.continue_targets.iter().rposition(|t| t.labels.iter().any(|l| l == label)) {
+                let target_scope = self.continue_targets[target_idx].scope_depth;
+                let break_depth = self.continue_targets[target_idx].break_depth;
+                for t in self.break_targets[break_depth..].iter().rev() {
+                    if let Some(slot) = t.iter_slot {
+                        self.chunk.emit(OpCode::PopCatch, 0);
+                        self.chunk.emit(OpCode::GetLocal(slot), 0);
+                        if t.is_async_iter {
+                            self.chunk.emit(OpCode::AsyncIteratorClose(false), 0);
+                        } else {
+                            self.chunk.emit(OpCode::IteratorClose(false), 0);
+                        }
+                    }
+                }
                 for _ in 0..self.block_scope_depth.saturating_sub(target_scope) {
                     self.chunk.emit(OpCode::PopScope, 0);
                 }
                 let jmp = self.chunk.emit(OpCode::Jump(0), 0);
-                target.jumps.push(jmp);
+                self.continue_targets[target_idx].jumps.push(jmp);
             } else {
                 return Err(CompileError::General(format!("Undefined label '{}'", label)));
             }

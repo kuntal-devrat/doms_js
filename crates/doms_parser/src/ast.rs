@@ -7,7 +7,7 @@ pub struct Program {
     pub body: Vec<Statement>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarKind {
     Var,
     Let,
@@ -92,10 +92,31 @@ pub enum Expression {
     Sequence(Vec<Expression>),
     Await(Box<Expression>),
     Yield(Option<Box<Expression>>),
+    YieldStar(Box<Expression>),
     DynamicImport(Box<Expression>),
     Update { op: UpdateOp, is_prefix: bool, expr: Box<Expression> },
     Grouping(Box<Expression>),
     Spread(Box<Expression>),
+    PrivateIdentifier(String),
+    ObjectRest {
+        target: Box<Expression>,
+        excluded_keys: Vec<Expression>,
+    },
+    DestructuringAssignment {
+        pattern: Box<Expression>,
+        value: Box<Expression>,
+    },
+    DefineField {
+        target: Box<Expression>,
+        property: String,
+        value: Box<Expression>,
+    },
+    DefinePrivateAccessor {
+        target: Box<Expression>,
+        property: String,
+        is_getter: bool,
+        accessor: Box<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +188,7 @@ pub enum ObjectProperty {
     KeyValue(PropertyKey, Expression),
     Getter(PropertyKey, Expression),
     Setter(PropertyKey, Expression),
+    Spread(Expression),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,6 +203,8 @@ pub enum ClassElementKind {
     Method(Expression),
     Getter(Expression),
     Setter(Expression),
+    Field(Option<Expression>),
+    StaticBlock(Vec<Statement>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -47,13 +47,13 @@ pub struct FreeChunk {
 /// The old generation — tenured object space.
 pub struct OldGen {
     /// Start of the old generation memory region.
-    start: *mut u8,
+    pub start: *mut u8,
     /// Size of the region in bytes.
-    size: usize,
+    pub size: usize,
     /// Bump pointer: next free byte.
-    cursor: *mut u8,
+    pub cursor: *mut u8,
     /// End of the region.
-    limit: *mut u8,
+    pub limit: *mut u8,
     /// Number of objects stored.
     pub object_count: usize,
     /// Bytes used.

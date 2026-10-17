@@ -77,13 +77,14 @@ impl<'a> Parser<'a> {
             | TokenKind::Private
             | TokenKind::Protected
             | TokenKind::Public
-            | TokenKind::Static => self.parse_reserved_word_expr(tok.kind.clone(), tok.line, tok.col),
+            | TokenKind::Static
+            | TokenKind::Let => self.parse_reserved_word_expr(tok.kind.clone(), tok.line, tok.col),
             TokenKind::Await => {
                 let can_await = (self.in_async || (self.is_module && !self.in_function)) && !self.in_param;
                 if can_await {
                     let expr = self.parse_expression(20)?;
                     Ok(Expression::Await(Box::new(expr)))
-                } else if self.is_module || self.is_strict {
+                } else if self.is_module || self.in_async || self.in_static_block {
                     Err(ParseError::UnexpectedToken(TokenKind::Await, tok.line, tok.col))
                 } else {
                     Ok(Expression::Identifier("await".to_string()))
@@ -105,9 +106,15 @@ impl<'a> Parser<'a> {
                         return Ok(Expression::Identifier("yield".to_string()));
                     }
                 }
-                if self.check(&TokenKind::Semicolon)
+                if self.match_token(&TokenKind::Star)? {
+                    let expr = self.parse_expression(0)?;
+                    Ok(Expression::YieldStar(Box::new(expr)))
+                } else if self.check(&TokenKind::Semicolon)
                     || self.check(&TokenKind::RParen)
+                    || self.check(&TokenKind::RBracket)
                     || self.check(&TokenKind::RBrace)
+                    || self.check(&TokenKind::Comma)
+                    || self.check(&TokenKind::Colon)
                     || self.check(&TokenKind::Eof)
                 {
                     Ok(Expression::Yield(None))
@@ -125,6 +132,17 @@ impl<'a> Parser<'a> {
             TokenKind::DotDotDot => {
                 let expr = self.parse_expression(1)?;
                 Ok(Expression::Spread(Box::new(expr)))
+            }
+            TokenKind::PrivateIdent(s) => {
+                let prop = format!("#{}", s);
+                let scoped = match self.resolve_private_name(&prop) {
+                    Some(n) => n,
+                    None => return Err(ParseError::UnexpectedToken(TokenKind::PrivateIdent(s), tok.line, tok.col)),
+                };
+                if !self.allow_in || !self.check(&TokenKind::In) {
+                    return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+                }
+                Ok(Expression::PrivateIdentifier(scoped))
             }
             other => Err(ParseError::UnexpectedToken(other, tok.line, tok.col)),
         }

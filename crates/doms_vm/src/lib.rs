@@ -19,7 +19,7 @@ pub use inline_cache::{IcState, InlineCacheSlot};
 pub use inspector_server::InspectorServer;
 pub use interpreter::{CallFrame, Vm, VmError, VmValue};
 pub use jit::{JIT_HOT_THRESHOLD, JitCompiler, JitFunction};
-pub use object::{js_values_equal, JsFunction, JsObject, NativeFn, NativeFunction, ObjectKind};
+pub use object::{js_strict_equal, js_values_equal, JsFunction, JsObject, NativeFn, NativeFunction, ObjectKind};
 pub use shape::{PropertyAttributes, PropertyInfo, Shape, ShapeId, ShapeRegistry};
 pub use value::JsValue;
 pub use web_apis::register_web_apis;

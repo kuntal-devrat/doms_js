@@ -16,10 +16,12 @@ impl Vm {
                 break;
             }
         }
-        if let Some(g_ptr) = finished.gen_ptr {
-            let g_obj = unsafe { &mut *(g_ptr) };
-            if let ObjectKind::Generator(ref mut g) = g_obj.kind {
-                g.state = crate::object::GeneratorState::Completed;
+        if let Some(g_val) = finished.gen_val {
+            if let Some(g_ptr) = g_val.as_object_ptr() {
+                let g_obj = unsafe { &mut *(g_ptr as *mut JsObject) };
+                if let ObjectKind::Generator(ref mut g) = g_obj.kind {
+                    g.state = crate::object::GeneratorState::Completed;
+                }
             }
             let iter_res = self.make_iter_result(ret_val, true);
             self.stack.truncate(finished.base_sp);
@@ -37,11 +39,10 @@ impl Vm {
         Ok(None)
     }
 
-    pub(crate) fn op_await(
+    pub(crate) fn await_value(
         &mut self,
-        target_depth: usize,
-    ) -> Result<(), VmError> {
-        let val = self.pop()?;
+        val: JsValue,
+    ) -> Result<JsValue, VmError> {
         let resolved = if let Some(ptr) = val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Promise(_) = &obj.kind {
@@ -68,8 +69,7 @@ impl Vm {
                     match p.state {
                         PromiseState::Fulfilled => p.result,
                         PromiseState::Rejected => {
-                            self.handle_exception_at_depth(VmError::Thrown(p.result), target_depth)?;
-                            return Ok(());
+                            return Err(VmError::Thrown(p.result));
                         }
                         PromiseState::Pending => val,
                     }
@@ -99,15 +99,13 @@ impl Vm {
                         Ok(_) => {
                             self.drain_microtasks()?;
                             if let Some(e) = error_val.lock().unwrap().take() {
-                                self.handle_exception_at_depth(VmError::Thrown(e), target_depth)?;
-                                return Ok(());
+                                return Err(VmError::Thrown(e));
                             }
                             let final_res = result_val.lock().unwrap().take();
                             final_res.unwrap_or(val)
                         }
                         Err(err) => {
-                            self.handle_exception_at_depth(err, target_depth)?;
-                            return Ok(());
+                            return Err(err);
                         }
                     }
                 } else {
@@ -117,8 +115,24 @@ impl Vm {
         } else {
             val
         };
-        self.push(resolved);
-        Ok(())
+        Ok(resolved)
+    }
+
+    pub(crate) fn op_await(
+        &mut self,
+        target_depth: usize,
+    ) -> Result<(), VmError> {
+        let val = self.pop()?;
+        match self.await_value(val) {
+            Ok(resolved) => {
+                self.push(resolved);
+                Ok(())
+            }
+            Err(err) => {
+                self.handle_exception_at_depth(err, target_depth)?;
+                Ok(())
+            }
+        }
     }
 
     pub(crate) fn op_generator_start(&mut self) -> Result<JsValue, VmError> {
@@ -127,7 +141,11 @@ impl Vm {
         let generator_instance = JsGenerator {
             function: gen_func,
             ip: frame.ip,
-            stack: frame.locals,
+            stack: Vec::new(),
+            locals: frame.locals,
+            scopes: frame.scopes,
+            env_obj: frame.env_obj,
+            catch_handlers: Vec::new(),
             state: crate::object::GeneratorState::SuspendedStart,
             this_val: frame.this_val,
             arguments: frame.arguments,
@@ -140,13 +158,40 @@ impl Vm {
 
     pub(crate) fn op_yield(&mut self, target_depth: usize) -> Result<Option<JsValue>, VmError> {
         let yielded_val = self.pop().unwrap_or_default();
+        let gen_frame_idx = self.frames.len() - 1;
         let frame = self.frames.last_mut().unwrap();
-        if let Some(g_ptr) = frame.gen_ptr {
-            let g_obj = unsafe { &mut *(g_ptr) };
-            if let ObjectKind::Generator(ref mut g) = g_obj.kind {
-                g.ip = frame.ip;
-                g.stack = self.stack[frame.base_sp..].to_vec();
-                g.state = crate::object::GeneratorState::SuspendedYield;
+        let base_sp = frame.base_sp;
+        if let Some(g_val) = frame.gen_val {
+            if let Some(g_ptr) = g_val.as_object_ptr() {
+                let g_obj = unsafe { &mut *(g_ptr as *mut JsObject) };
+                if let ObjectKind::Generator(ref mut g) = g_obj.kind {
+                    g.ip = frame.ip;
+                    g.stack = self.stack[base_sp..].to_vec();
+                    g.locals = frame.locals.clone();
+                    g.scopes = frame.scopes.clone();
+                    g.env_obj = frame.env_obj;
+                    g.state = crate::object::GeneratorState::SuspendedYield;
+
+                    let mut saved_handlers = Vec::new();
+                    while let Some(top) = self.catch_stack.last() {
+                        if top.frame_idx >= gen_frame_idx {
+                            let h = self.catch_stack.pop().unwrap();
+                            saved_handlers.push(SavedCatchHandler {
+                                frame_offset: h.frame_idx - gen_frame_idx,
+                                target_ip: h.target_ip,
+                                stack_len_offset: h.stack_len.saturating_sub(base_sp),
+                                scopes_len: h.scopes_len,
+                                is_finally: h.is_finally,
+                                finally_start: h.finally_start,
+                                kind_slot: h.kind_slot,
+                            });
+                        } else {
+                            break;
+                        }
+                    }
+                    saved_handlers.reverse();
+                    g.catch_handlers = saved_handlers;
+                }
             }
         }
         let finished = self.frames.pop().unwrap();
@@ -184,7 +229,41 @@ impl Vm {
             target_ip: target as usize,
             stack_len: self.stack.len(),
             scopes_len,
+            is_finally: false,
+            finally_start: 0,
+            kind_slot: 0,
         });
+    }
+
+    pub(crate) fn op_push_finally(&mut self, target: i32, finally_start: i32, kind_slot: u16) {
+        let scopes_len = self.frames.last().map(|f| f.scopes.len()).unwrap_or(0);
+        self.catch_stack.push(CatchHandler {
+            frame_idx: self.frames.len().saturating_sub(1),
+            target_ip: target as usize,
+            stack_len: self.stack.len(),
+            scopes_len,
+            is_finally: true,
+            finally_start: finally_start as usize,
+            kind_slot,
+        });
+    }
+
+    pub(crate) fn op_end_finally(&mut self, kind_slot: u16, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+        let frame = self.frames.last().unwrap();
+        let kind = frame.locals.get(kind_slot as usize).and_then(|v| v.as_number()).unwrap_or(0.0) as i32;
+        let val = frame.locals.get((kind_slot + 1) as usize).copied().unwrap_or_else(JsValue::undefined);
+        match kind {
+            0 => Ok(None),
+            1 => {
+                self.handle_exception_at_depth(VmError::Thrown(val), target_depth)?;
+                Ok(None)
+            }
+            2 => {
+                self.push(val);
+                self.op_return(target_depth)
+            }
+            _ => Ok(None),
+        }
     }
 
     pub(crate) fn op_push_catch_scope(&mut self, name_idx: u16, chunk: &BytecodeChunk) -> Result<(), VmError> {

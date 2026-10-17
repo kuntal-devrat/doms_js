@@ -101,8 +101,9 @@ pub fn get_own_property_descriptor_internal(
                     ObjectKind::Array(elements) => {
                         if prop_name == "length" {
                             let desc = vm.alloc_object();
+                            let is_writ = !vm.non_writable_props.contains(&(target, "length".to_string()));
                             vm.set_property(desc, "value", JsValue::from_int32(elements.len() as i32));
-                            vm.set_property(desc, "writable", JsValue::from_boolean(true));
+                            vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
                             vm.set_property(desc, "enumerable", JsValue::from_boolean(false));
                             vm.set_property(desc, "configurable", JsValue::from_boolean(false));
                             return Ok(desc);
@@ -112,9 +113,12 @@ pub fn get_own_property_descriptor_internal(
                                 if !elem.is_hole() {
                                     let desc = vm.alloc_object();
                                     vm.set_property(desc, "value", *elem);
-                                    vm.set_property(desc, "writable", JsValue::from_boolean(true));
-                                    vm.set_property(desc, "enumerable", JsValue::from_boolean(true));
-                                    vm.set_property(desc, "configurable", JsValue::from_boolean(true));
+                                    let is_writ = !vm.non_writable_props.contains(&(target, prop_name.clone()));
+                                    let is_enum = !vm.non_enumerable_props.contains(&(target, prop_name.clone()));
+                                    let is_conf = !vm.non_configurable_props.contains(&(target, prop_name.clone()));
+                                    vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
+                                    vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
+                                    vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
                                     return Ok(desc);
                                 }
                             }
@@ -163,9 +167,12 @@ pub fn get_own_property_descriptor_internal(
                             };
                             let desc = vm.alloc_object();
                             vm.set_property(desc, "value", JsValue::from_int32(len as i32));
-                            vm.set_property(desc, "writable", JsValue::from_boolean(false));
-                            vm.set_property(desc, "enumerable", JsValue::from_boolean(false));
-                            vm.set_property(desc, "configurable", JsValue::from_boolean(true));
+                            let is_writ = false;
+                            let is_enum = false;
+                            let is_conf = !vm.non_configurable_props.contains(&(target, prop_name.clone()));
+                            vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
+                            vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
+                            vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
                             return Ok(desc);
                         }
                         if prop_name == "name" {
@@ -177,9 +184,12 @@ pub fn get_own_property_descriptor_internal(
                             let name_val = vm.alloc_string(name_str.to_string());
                             let desc = vm.alloc_object();
                             vm.set_property(desc, "value", name_val);
-                            vm.set_property(desc, "writable", JsValue::from_boolean(false));
-                            vm.set_property(desc, "enumerable", JsValue::from_boolean(false));
-                            vm.set_property(desc, "configurable", JsValue::from_boolean(true));
+                            let is_writ = false;
+                            let is_enum = false;
+                            let is_conf = !vm.non_configurable_props.contains(&(target, prop_name.clone()));
+                            vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
+                            vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
+                            vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
                             return Ok(desc);
                         }
                     }
@@ -236,7 +246,7 @@ pub(super) fn register_descriptor(vm: &mut Vm) -> (JsValue, JsValue) {
             Some(t) if !t.is_nullish() => *t,
             _ => return Err(VmError::TypeError("Object.getOwnPropertyDescriptor called on non-object".into())),
         };
-        let target_obj = if target.is_object() {
+        let target_obj = if target.is_js_object() {
             target
         } else {
             vm.to_object_value(target)?
@@ -253,7 +263,7 @@ pub(super) fn register_descriptor(vm: &mut Vm) -> (JsValue, JsValue) {
             Some(t) if !t.is_nullish() => *t,
             _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
         };
-        let target_obj = if target.is_object() {
+        let target_obj = if target.is_js_object() {
             target
         } else {
             vm.to_object_value(target)?

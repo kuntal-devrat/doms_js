@@ -44,6 +44,8 @@ pub(super) fn register_symbol(vm: &mut Vm) {
     vm.non_enumerable_props.insert((symbol_proto, "constructor".to_string()));
     vm.set_property(symbol_ctor, "prototype", symbol_proto);
     vm.non_enumerable_props.insert((symbol_ctor, "prototype".to_string()));
+    vm.non_writable_props.insert((symbol_ctor, "prototype".to_string()));
+    vm.non_configurable_props.insert((symbol_ctor, "prototype".to_string()));
 
     let symbol_for = vm.alloc_native_function("for", 1, |vm, _this, args| {
         let key = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
@@ -100,6 +102,7 @@ pub(super) fn register_symbol(vm: &mut Vm) {
     vm.set_property(symbol_ctor, "unscopables", sym_unscopables);
 
     vm.symbol_iterator = Some(sym_iter);
+    vm.symbol_async_iterator = Some(sym_async_iter);
     vm.symbol_to_string_tag = Some(sym_tag);
     vm.symbol_is_concat_spreadable = Some(sym_concat_spread);
     vm.symbol_species = Some(sym_species);

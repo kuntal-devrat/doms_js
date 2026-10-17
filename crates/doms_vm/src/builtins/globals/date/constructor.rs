@@ -81,6 +81,8 @@ pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue)
     vm.non_enumerable_props.insert((date_proto, "constructor".to_string()));
     vm.set_property(date_ctor, "prototype", date_proto);
     vm.non_enumerable_props.insert((date_ctor, "prototype".to_string()));
+    vm.non_writable_props.insert((date_ctor, "prototype".to_string()));
+    vm.non_configurable_props.insert((date_ctor, "prototype".to_string()));
 
     vm.set_property(date_ctor, "now", date_now_fn);
     vm.non_enumerable_props.insert((date_ctor, "now".to_string()));

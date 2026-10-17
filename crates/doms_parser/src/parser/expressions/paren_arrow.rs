@@ -5,17 +5,17 @@ impl<'a> Parser<'a> {
                 if self.match_token(&TokenKind::RParen)? {
                     if !self.current.has_preceding_line_terminator && self.match_token(&TokenKind::FatArrow)? {
                         let prev_in_func = self.in_function;
+                        let prev_in_static = self.in_static_block;
                         self.in_function = true;
+                        self.in_static_block = false;
                         let body = if self.check(&TokenKind::LBrace) {
-                            match self.parse_statement()? {
-                                Statement::Block(stmts) => stmts,
-                                other => vec![other],
-                            }
+                            self.parse_function_body(&[], None)?
                         } else {
                             let expr = self.parse_expression(1)?;
                             vec![Statement::Return(Some(expr))]
                         };
                         self.in_function = prev_in_func;
+                        self.in_static_block = prev_in_static;
                         return Ok(Expression::ArrowExpr {
                             params: vec![],
                             body,
@@ -46,9 +46,9 @@ impl<'a> Parser<'a> {
                 if !self.current.has_preceding_line_terminator && self.match_token(&TokenKind::FatArrow)? {
                     let mut params = Vec::new();
                     let mut defaults = Vec::new();
-                    for e in &exprs {
+                    for e in exprs {
                         match e {
-                            Expression::Identifier(name) => params.push(name.clone()),
+                            Expression::Identifier(name) => params.push(name),
                             Expression::Assignment { target, value } => {
                                 params.push(target.clone());
                                 defaults.push(Statement::If {
@@ -58,20 +58,32 @@ impl<'a> Parser<'a> {
                                         right: Box::new(Expression::Literal(Literal::Undefined)),
                                     },
                                     then_branch: Box::new(Statement::Expression(Expression::Assignment {
-                                        target: target.clone(),
-                                        value: value.clone(),
+                                        target,
+                                        value,
                                     })),
                                     else_branch: None,
                                 });
                             }
-                            Expression::Array(_) | Expression::Object(_) => {
+                            Expression::DestructuringAssignment { pattern, value } => {
                                 let name = format!("__param_{}", self.destruct_counter);
                                 self.destruct_counter += 1;
                                 params.push(name.clone());
                                 defaults.push(Statement::If {
                                     condition: Expression::Binary {
+                                        op: BinaryOp::StrictEq,
+                                        left: Box::new(Expression::Identifier(name.clone())),
+                                        right: Box::new(Expression::Literal(Literal::Undefined)),
+                                    },
+                                    then_branch: Box::new(Statement::Expression(Expression::Assignment {
+                                        target: name.clone(),
+                                        value,
+                                    })),
+                                    else_branch: None,
+                                });
+                                defaults.push(Statement::If {
+                                    condition: Expression::Binary {
                                         op: BinaryOp::Eq,
-                                        left: Box::new(Expression::Identifier(name)),
+                                        left: Box::new(Expression::Identifier(name.clone())),
                                         right: Box::new(Expression::Literal(Literal::Null)),
                                     },
                                     then_branch: Box::new(Statement::Throw(Expression::New {
@@ -84,6 +96,45 @@ impl<'a> Parser<'a> {
                                     })),
                                     else_branch: None,
                                 });
+                                let mut bound_names = Vec::new();
+                                collect_arrow_bound_names(&pattern, &mut bound_names);
+                                if !bound_names.is_empty() {
+                                    defaults.push(Statement::VarDecl {
+                                        kind: VarKind::Var,
+                                        declarations: bound_names.into_iter().map(|n| VarDeclarator { name: n, init: None }).collect(),
+                                    });
+                                }
+                                self.desugar_assignment_destructuring(&pattern, Expression::Identifier(name), &mut defaults);
+                            }
+                            pat @ Expression::Array(_) | pat @ Expression::Object(_) => {
+                                let name = format!("__param_{}", self.destruct_counter);
+                                self.destruct_counter += 1;
+                                params.push(name.clone());
+                                defaults.push(Statement::If {
+                                    condition: Expression::Binary {
+                                        op: BinaryOp::Eq,
+                                        left: Box::new(Expression::Identifier(name.clone())),
+                                        right: Box::new(Expression::Literal(Literal::Null)),
+                                    },
+                                    then_branch: Box::new(Statement::Throw(Expression::New {
+                                        callee: Box::new(Expression::Identifier("TypeError".to_string())),
+                                        args: vec![Expression::Literal(Literal::String {
+                                            value: "Cannot destructure 'undefined' or 'null'".to_string(),
+                                            has_escape: false,
+                                            has_legacy_escape: false,
+                                        })],
+                                    })),
+                                    else_branch: None,
+                                });
+                                let mut bound_names = Vec::new();
+                                collect_arrow_bound_names(&pat, &mut bound_names);
+                                if !bound_names.is_empty() {
+                                    defaults.push(Statement::VarDecl {
+                                        kind: VarKind::Var,
+                                        declarations: bound_names.into_iter().map(|n| VarDeclarator { name: n, init: None }).collect(),
+                                    });
+                                }
+                                self.desugar_assignment_destructuring(&pat, Expression::Identifier(name), &mut defaults);
                             }
                             _ => {}
                         }
@@ -92,7 +143,9 @@ impl<'a> Parser<'a> {
                         params.push(r);
                     }
                     let prev_in_func = self.in_function;
+                    let prev_in_static = self.in_static_block;
                     self.in_function = true;
+                    self.in_static_block = false;
                     let mut body = if self.check(&TokenKind::LBrace) {
                         self.parse_function_body(&params, None)?
                     } else {
@@ -100,6 +153,7 @@ impl<'a> Parser<'a> {
                         vec![Statement::Return(Some(expr))]
                     };
                     self.in_function = prev_in_func;
+                    self.in_static_block = prev_in_static;
                     Self::apply_parameter_defaults(&mut body, defaults);
                     return Ok(Expression::ArrowExpr {
                         params,
@@ -114,5 +168,47 @@ impl<'a> Parser<'a> {
                 } else {
                     Ok(Expression::Sequence(exprs))
                 }
+    }
+}
+
+fn collect_arrow_bound_names(e: &Expression, out: &mut Vec<String>) {
+    match e {
+        Expression::Identifier(name) => {
+            if !out.contains(name) {
+                out.push(name.clone());
+            }
+        }
+        Expression::Assignment { target, .. } => {
+            if !out.contains(target) {
+                out.push(target.clone());
+            }
+        }
+        Expression::DestructuringAssignment { pattern, .. } => {
+            collect_arrow_bound_names(pattern, out);
+        }
+        Expression::Spread(inner) => {
+            collect_arrow_bound_names(inner, out);
+        }
+        Expression::ObjectRest { target, .. } => {
+            collect_arrow_bound_names(target, out);
+        }
+        Expression::Array(elements) => {
+            for elem in elements {
+                collect_arrow_bound_names(elem, out);
+            }
+        }
+        Expression::Object(props) => {
+            for prop in props {
+                match prop {
+                    ObjectProperty::KeyValue(_, val) => collect_arrow_bound_names(val, out),
+                    ObjectProperty::Spread(inner) => collect_arrow_bound_names(inner, out),
+                    _ => {}
+                }
+            }
+        }
+        Expression::Grouping(inner) => {
+            collect_arrow_bound_names(inner, out);
+        }
+        _ => {}
     }
 }

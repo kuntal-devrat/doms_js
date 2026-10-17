@@ -22,6 +22,33 @@ impl Vm {
                                 return Ok(m);
                             }
                         }
+                        ObjectKind::Generator(_) => {
+                            let iter_self = self.alloc_closure_native_function(
+                                "[Symbol.iterator]",
+                                0,
+                                Arc::new(move |_vm, this, _args| Ok(this)),
+                            );
+                            return Ok(iter_self);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if let Some(sym_async) = self.symbol_async_iterator {
+            if key == sym_async {
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    match &obj.kind {
+                        ObjectKind::Generator(g) if g.function.is_async => {
+                            let iter_self = self.alloc_closure_native_function(
+                                "[Symbol.asyncIterator]",
+                                0,
+                                Arc::new(move |_vm, this, _args| Ok(this)),
+                            );
+                            return Ok(iter_self);
+                        }
                         _ => {}
                     }
                 }
@@ -96,20 +123,44 @@ impl Vm {
     }
 
     pub fn set_symbol_property_result(&mut self, target: JsValue, key: JsValue, value: JsValue) -> Result<(), VmError> {
+        let is_strict = self.is_strict || self.frames.last().map(|f| f.is_strict).unwrap_or(false);
         if self.module_namespace_objects.contains(&target) {
-            let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
             if is_strict {
                 return Err(VmError::TypeError("Cannot assign to read only property on module namespace object".into()));
+            }
+            return Ok(());
+        }
+        let key_name = format!("[Symbol:{:x}]", key.raw_bits());
+        if self.non_writable_props.contains(&(target, key_name)) {
+            if is_strict {
+                return Err(VmError::TypeError("Cannot assign to read only property".into()));
+            }
+            return Ok(());
+        }
+        if !target.is_object() {
+            if is_strict {
+                return Err(VmError::TypeError("Cannot create property on primitive".into()));
             }
             return Ok(());
         }
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
 
+            let has_sym = obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false)
+                || obj.symbol_accessors.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
+            if self.non_extensible_objects.contains(&target) && !has_sym {
+                if is_strict {
+                    return Err(VmError::TypeError("Cannot add property, object is not extensible".into()));
+                }
+                return Ok(());
+            }
+
             if let Some(accs) = &obj.symbol_accessors {
                 if let Some(acc) = accs.get(&key) {
                     if let Some(setter) = acc.setter {
                         let _ = self.call(setter, target, &[value])?;
+                    } else if is_strict {
+                        return Err(VmError::TypeError("Cannot set property of object which has only a getter".into()));
                     }
                     return Ok(());
                 }
@@ -123,6 +174,8 @@ impl Vm {
                         if let Some(acc) = accs.get(&key) {
                             if let Some(setter) = acc.setter {
                                 let _ = self.call(setter, target, &[value])?;
+                            } else if is_strict {
+                                return Err(VmError::TypeError("Cannot set property of object which has only a getter".into()));
                             }
                             return Ok(());
                         }
@@ -187,6 +240,16 @@ impl Vm {
 
         match prop_key {
             PropertyKeyVal::Symbol(sym) => {
+                if let Some(sym_iter) = self.symbol_iterator {
+                    if *sym == sym_iter && matches!(&obj.kind, ObjectKind::Map(_) | ObjectKind::Set(_) | ObjectKind::Generator(_)) {
+                        return true;
+                    }
+                }
+                if let Some(sym_async) = self.symbol_async_iterator {
+                    if *sym == sym_async && matches!(&obj.kind, ObjectKind::Generator(g) if g.function.is_async) {
+                        return true;
+                    }
+                }
                 if let Some(syms) = &obj.symbol_properties {
                     if syms.contains_key(sym) {
                         return true;
@@ -204,6 +267,11 @@ impl Vm {
                     return false;
                 }
                 match &obj.kind {
+                    ObjectKind::Generator(_) => {
+                        if matches!(key.as_str(), "next" | "return" | "throw") {
+                            return true;
+                        }
+                    }
                     ObjectKind::Array(elements) => {
                         if key == "length" {
                             return true;

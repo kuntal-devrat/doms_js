@@ -191,8 +191,10 @@ impl<'a> Parser<'a> {
         let prev_strict = self.is_strict;
         let prev_in_func = self.in_function;
         let prev_in_non_arrow = self.in_non_arrow_function;
+        let prev_in_static = self.in_static_block;
         self.in_function = true;
         self.in_non_arrow_function = true;
+        self.in_static_block = false;
         if prev_strict {
             Self::validate_strict_params_and_name(params, name, self.current.line, self.current.col)?;
         }
@@ -226,6 +228,7 @@ impl<'a> Parser<'a> {
         self.lexer.is_strict = prev_strict;
         self.in_function = prev_in_func;
         self.in_non_arrow_function = prev_in_non_arrow;
+        self.in_static_block = prev_in_static;
         Ok(body)
     }
 
@@ -264,6 +267,8 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_function_expr(&mut self) -> Result<Expression, ParseError> {
+        let prev_in_static = self.in_static_block;
+        self.in_static_block = false;
         let is_generator = self.match_token(&TokenKind::Star)?;
         let prev_gen = self.in_generator;
         if is_generator {
@@ -271,20 +276,40 @@ impl<'a> Parser<'a> {
         }
         let name = if let TokenKind::Ident(id) = &self.current.kind {
             if self.is_strict && (is_strict_reserved_word(id) || id == "eval" || id == "arguments") {
+                self.in_generator = prev_gen;
+                self.in_static_block = prev_in_static;
                 return Err(ParseError::UnexpectedToken(TokenKind::Ident(id.clone()), self.current.line, self.current.col));
             }
             let n = id.clone();
             self.advance()?;
             Some(n)
+        } else if !self.is_module && !self.in_async && self.check(&TokenKind::Await) {
+            self.advance()?;
+            Some("await".to_string())
         } else {
             None
         };
 
-        let (params, defaults) = self.parse_formal_parameters()?;
-        let mut body = self.parse_function_body(&params, name.as_deref())?;
+        let (params, defaults) = match self.parse_formal_parameters() {
+            Ok(p) => p,
+            Err(e) => {
+                self.in_generator = prev_gen;
+                self.in_static_block = prev_in_static;
+                return Err(e);
+            }
+        };
+        let mut body = match self.parse_function_body(&params, name.as_deref()) {
+            Ok(b) => b,
+            Err(e) => {
+                self.in_generator = prev_gen;
+                self.in_static_block = prev_in_static;
+                return Err(e);
+            }
+        };
         Self::apply_parameter_defaults(&mut body, defaults);
 
         self.in_generator = prev_gen;
+        self.in_static_block = prev_in_static;
         if is_generator {
             Ok(Expression::GeneratorExpr { name, params, body })
         } else {

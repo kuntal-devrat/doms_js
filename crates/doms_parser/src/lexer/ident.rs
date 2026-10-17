@@ -5,7 +5,7 @@ use super::token::{LexError, TokenKind};
 use super::Lexer;
 
 impl<'a> Lexer<'a> {
-    pub(super) fn read_identifier_or_keyword(&mut self, line: usize, col: usize) -> Result<TokenKind, LexError> {
+    pub(super) fn read_identifier_or_keyword(&mut self, line: usize, col: usize) -> Result<(TokenKind, bool), LexError> {
         let mut s = String::new();
         let mut has_escape = false;
         while let Some(c) = self.peek() {
@@ -92,7 +92,7 @@ impl<'a> Lexer<'a> {
             if is_reserved_word(&s) {
                 return Err(LexError::UnexpectedChar('\\', line, col));
             }
-            return Ok(TokenKind::Ident(s));
+            return Ok((TokenKind::Ident(s), true));
         }
 
         let kind = match s.as_str() {
@@ -149,6 +149,6 @@ impl<'a> Lexer<'a> {
             _ => TokenKind::Ident(s),
         };
 
-        Ok(kind)
+        Ok((kind, false))
     }
 }

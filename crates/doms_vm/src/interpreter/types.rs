@@ -46,7 +46,7 @@ pub struct CallFrame {
     pub ip: usize,
     pub base_sp: usize,
     pub this_val: JsValue,
-    pub gen_ptr: Option<*mut JsObject>,
+    pub gen_val: Option<JsValue>,
     pub locals: Vec<JsValue>,
     pub local_names: Vec<String>,
     pub lexical_local_names: Vec<String>,
@@ -63,7 +63,9 @@ pub struct CallFrame {
     pub in_param_init: bool,
     pub is_indirect_eval: bool,
     pub callee_func: Option<JsFunction>,
+    pub callee_val: Option<JsValue>,
     pub mapped_arguments: Option<Vec<bool>>,
+    pub home_object: Option<JsValue>,
 }
 
 /// Compatibility enum for earlier Phase 0 API callers.
@@ -100,6 +102,9 @@ pub struct CatchHandler {
     pub target_ip: usize,
     pub stack_len: usize,
     pub scopes_len: usize,
+    pub is_finally: bool,
+    pub finally_start: usize,
+    pub kind_slot: u16,
 }
 
 #[derive(Clone)]

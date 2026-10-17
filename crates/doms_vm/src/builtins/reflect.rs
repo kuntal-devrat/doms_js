@@ -33,7 +33,11 @@ pub(super) fn register_reflect(vm: &mut Vm) {
             let jsobj = unsafe { &mut *(this_ptr as *mut JsObject) };
             jsobj.prototype = Some(proto);
         }
-        let res = vm.call(target, this_obj, &args_list)?;
+        let prev_constructing = vm.is_constructing;
+        vm.is_constructing = true;
+        let res = vm.call(target, this_obj, &args_list);
+        vm.is_constructing = prev_constructing;
+        let res = res?;
         if res.is_object() {
             if proto.is_object() {
                 if let Some(r_ptr) = res.as_object_ptr() {

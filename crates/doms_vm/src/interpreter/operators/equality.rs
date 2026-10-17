@@ -4,51 +4,9 @@ use super::*;
 
 impl Vm {
     pub fn strict_equal(&self, a: JsValue, b: JsValue) -> bool {
-        if a == b {
-            if a.is_double() && a.as_double().unwrap().is_nan() {
-                return false;
-            }
-            return true;
-        }
-        if a.is_number() && b.is_number() {
-            let na = a.to_number().unwrap();
-            let nb = b.to_number().unwrap();
-            if na.is_nan() || nb.is_nan() {
-                return false;
-            }
-            return na == nb;
-        }
-        let a_str = if a.is_string() {
-            a.as_string_ptr().map(|p| unsafe { &*(p as *mut JsObject) })
-        } else if a.is_object() {
-            a.as_object_ptr().map(|p| unsafe { &*(p as *mut JsObject) })
-        } else {
-            None
-        };
-        let b_str = if b.is_string() {
-            b.as_string_ptr().map(|p| unsafe { &*(p as *mut JsObject) })
-        } else if b.is_object() {
-            b.as_object_ptr().map(|p| unsafe { &*(p as *mut JsObject) })
-        } else {
-            None
-        };
-        if let (Some(oa), Some(ob)) = (a_str, b_str) {
-            if let (ObjectKind::String(sa), ObjectKind::String(sb)) = (&oa.kind, &ob.kind) {
-                return sa == sb;
-            }
-        }
-        let a_ptr = a.as_object_ptr();
-        let b_ptr = b.as_object_ptr();
-        if let (Some(pa), Some(pb)) = (a_ptr, b_ptr) {
-            let oa = unsafe { &*(pa as *mut JsObject) };
-            let ob = unsafe { &*(pb as *mut JsObject) };
-            if let (ObjectKind::BigInt(ba), ObjectKind::BigInt(bb)) = (&oa.kind, &ob.kind) {
-                return ba == bb;
-            }
-            return pa == pb;
-        }
-        false
+        crate::object::js_strict_equal(a, b)
     }
+
 
     pub fn same_value(&self, a: JsValue, b: JsValue) -> bool {
         if a.is_number() && b.is_number() {

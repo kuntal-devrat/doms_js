@@ -5,7 +5,6 @@ members = [
     "crates/doms_parser",
     "crates/doms_compiler",
     "crates/doms_vm",
-    "crates/doms_runtime",
     "crates/doms_parallel",
     "crates/doms_core",
     "crates/doms_ffi",
@@ -30,7 +29,6 @@ doms_gc = { path = "crates/doms_gc" }
 doms_parser = { path = "crates/doms_parser" }
 doms_compiler = { path = "crates/doms_compiler" }
 doms_vm = { path = "crates/doms_vm" }
-doms_runtime = { path = "crates/doms_runtime" }
 doms_parallel = { path = "crates/doms_parallel" }
 doms_core = { path = "crates/doms_core" }
 doms_ffi = { path = "crates/doms_ffi" }
@@ -44,10 +42,15 @@ unicode-ident = "1.0"
 num-bigint = "0.4.8"
 num-traits = "0.2.19"
 regress = "0.12"
+cranelift-codegen = "0.137.0-rc.1"
+cranelift-frontend = "0.137.0-rc.1"
+cranelift-jit = "0.137.0-rc.1"
+cranelift-module = "0.137.0-rc.1"
 
 [profile.release]
 opt-level = 3
-lto = "fat"
-codegen-units = 1
+lto = "thin"
+codegen-units = 4
 panic = "unwind"
-strip = true
+debug = 1
+strip = false

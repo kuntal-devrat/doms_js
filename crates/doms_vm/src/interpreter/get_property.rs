@@ -140,8 +140,11 @@ impl Vm {
 
             // Special properties on Generator
             if let ObjectKind::Generator(_) = &obj.kind {
-                if key == "next" {
-                    return self.get_generator_next(target).unwrap_or_default();
+                match key {
+                    "next" => return self.get_generator_next(target).unwrap_or_default(),
+                    "return" => return self.get_generator_return(target).unwrap_or_default(),
+                    "throw" => return self.get_generator_throw(target).unwrap_or_default(),
+                    _ => {}
                 }
             }
 

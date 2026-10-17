@@ -41,9 +41,15 @@ impl Vm {
                     }
                     let prev_constructing = self.is_constructing;
                     self.is_constructing = true;
-                    let res = self.call(callee, this_obj, args);
+                    let call_res = self.execute_call_internal(callee, this_obj, args.to_vec());
                     self.is_constructing = prev_constructing;
-                    let val = res?;
+                    let res_opt = call_res?;
+                    let val = if let Some(res) = res_opt {
+                        res
+                    } else {
+                        let target_depth = self.frames.len() - 1;
+                        self.run_until_depth(target_depth)?
+                    };
                     if val.is_object() {
                         Ok(val)
                     } else {

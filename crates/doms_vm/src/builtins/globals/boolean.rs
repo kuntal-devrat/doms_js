@@ -49,6 +49,8 @@ pub(super) fn register_boolean_global(vm: &mut Vm) {
     vm.non_enumerable_props.insert((boolean_proto, "constructor".to_string()));
     vm.set_property(bool_ctor, "prototype", boolean_proto);
     vm.non_enumerable_props.insert((bool_ctor, "prototype".to_string()));
+    vm.non_writable_props.insert((bool_ctor, "prototype".to_string()));
+    vm.non_configurable_props.insert((bool_ctor, "prototype".to_string()));
     vm.globals.insert("Boolean".to_string(), bool_ctor);
     if vm.global_object.is_object() {
         vm.set_property(vm.global_object, "Boolean", bool_ctor);

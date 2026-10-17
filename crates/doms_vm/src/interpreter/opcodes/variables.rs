@@ -17,6 +17,11 @@ impl Vm {
                         Constant::Boolean(b) => JsValue::from_boolean(*b),
                         Constant::Function(f) => {
                             let upvalues = self.capture_upvalues();
+                            let home_object = if f.is_arrow {
+                                self.frames.last().and_then(|fr| fr.home_object)
+                            } else {
+                                None
+                            };
                             let js_fn = JsFunction {
                                 name: f.name.clone(),
                                 params: f.params.clone(),
@@ -32,6 +37,7 @@ impl Vm {
                                 has_param_exprs: f.has_param_exprs,
                                 is_method: f.is_method,
                                 is_arrow: f.is_arrow,
+                                home_object,
                             };
                             self.alloc_function(js_fn)
                         }

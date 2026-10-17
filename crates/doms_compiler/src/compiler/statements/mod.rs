@@ -44,8 +44,8 @@ impl Compiler {
             Statement::ForIn { var_kind, left, right, body } => {
                 self.compile_for_in(var_kind, left, right, body)?;
             }
-            Statement::ForOf { var_kind, left, right, body, .. } => {
-                self.compile_for_of(var_kind, left, right, body)?;
+            Statement::ForOf { var_kind, left, right, body, is_await } => {
+                self.compile_for_of(var_kind, left, right, body, *is_await)?;
             }
             Statement::Labeled { label, body } => {
                 self.compile_labeled(label, body, is_last)?;
@@ -70,6 +70,23 @@ impl Compiler {
                     self.compile_expression(expr)?;
                 } else {
                     self.chunk.emit(OpCode::LoadUndefined, 0);
+                }
+                if self.break_targets.iter().any(|t| t.iter_slot.is_some()) {
+                    let ret_slot = self.symbols.define_local(format!("@ret_{}", self.chunk.instructions.len()));
+                    self.chunk.emit(OpCode::SetLocal(ret_slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                    for t in self.break_targets.iter().rev() {
+                        if let Some(slot) = t.iter_slot {
+                            self.chunk.emit(OpCode::PopCatch, 0);
+                            self.chunk.emit(OpCode::GetLocal(slot), 0);
+                            if t.is_async_iter {
+                                self.chunk.emit(OpCode::AsyncIteratorClose(false), 0);
+                            } else {
+                                self.chunk.emit(OpCode::IteratorClose(false), 0);
+                            }
+                        }
+                    }
+                    self.chunk.emit(OpCode::GetLocal(ret_slot), 0);
                 }
                 self.chunk.emit(OpCode::Return, 0);
             }
@@ -144,17 +161,7 @@ impl Compiler {
             }
             Statement::ClassDecl(class_def) => {
                 self.compile_class_definition(class_def)?;
-                if let Some(ref n) = class_def.name {
-                    if self.symbols.scope_depth > 0 {
-                        let slot = self.symbols.define_local(n.clone());
-                        self.chunk.emit(OpCode::SetLocal(slot), 0);
-                        self.chunk.emit(OpCode::Pop, 0);
-                    } else {
-                        let name_idx = self.chunk.add_constant(Constant::String(n.clone()));
-                        self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
-                        self.chunk.emit(OpCode::Pop, 0);
-                    }
-                }
+                self.chunk.emit(OpCode::Pop, 0);
             }
             Statement::With { object, body } => {
                 self.compile_expression(object)?;

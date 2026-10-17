@@ -19,11 +19,11 @@ impl Vm {
                 let this_str = vm.to_string_value(this);
                 Ok(JsValue::from_boolean(this_str.contains(&target)))
             })),
-            "toLowerCase" => Some(self.alloc_native_function("toLowerCase", 0, |vm, this, _args| {
+            "toLowerCase" | "toLocaleLowerCase" => Some(self.alloc_native_function(name, 0, |vm, this, _args| {
                 let s = vm.to_string_value(this).to_lowercase();
                 Ok(vm.alloc_string(s))
             })),
-            "toUpperCase" => Some(self.alloc_native_function("toUpperCase", 0, |vm, this, _args| {
+            "toUpperCase" | "toLocaleUpperCase" => Some(self.alloc_native_function(name, 0, |vm, this, _args| {
                 let s = vm.to_string_value(this).to_uppercase();
                 Ok(vm.alloc_string(s))
             })),
@@ -262,6 +262,111 @@ impl Vm {
                     let idx = vm.get_property(res, "index");
                     Ok(idx)
                 }
+            })),
+            "lastIndexOf" => Some(self.alloc_native_function("lastIndexOf", 1, |vm, this, args| {
+                let target = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                let this_str = vm.to_string_value(this);
+                if let Some(idx) = this_str.rfind(&target) {
+                    Ok(JsValue::from_int32(idx as i32))
+                } else {
+                    Ok(JsValue::from_int32(-1))
+                }
+            })),
+            "split" => Some(self.alloc_native_function("split", 2, |vm, this, args| {
+                let this_str = vm.to_string_value(this);
+                let sep = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                let limit = args.get(1).and_then(|v| v.to_int32()).map(|n| n as usize);
+                let parts: Vec<JsValue> = if sep.is_empty() {
+                    this_str.chars().map(|c| vm.alloc_string(c.to_string())).collect()
+                } else {
+                    this_str.split(&sep).map(|p| vm.alloc_string(p.to_string())).collect()
+                };
+                let parts = if let Some(lim) = limit {
+                    parts.into_iter().take(lim).collect()
+                } else {
+                    parts
+                };
+                Ok(vm.alloc_array(parts))
+            })),
+            "substring" => Some(self.alloc_native_function("substring", 2, |vm, this, args| {
+                let s = vm.to_string_value(this);
+                let len = s.len() as i32;
+                let mut start = args.first().and_then(|v| v.to_int32()).unwrap_or(0).clamp(0, len);
+                let mut end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len).clamp(0, len);
+                if start > end {
+                    std::mem::swap(&mut start, &mut end);
+                }
+                let sub = &s[start as usize..end as usize];
+                Ok(vm.alloc_string(sub.to_string()))
+            })),
+            "concat" => Some(self.alloc_native_function("concat", 1, |vm, this, args| {
+                let mut res = vm.to_string_value(this);
+                for arg in args {
+                    res.push_str(&vm.to_string_value(*arg));
+                }
+                Ok(vm.alloc_string(res))
+            })),
+            "startsWith" => Some(self.alloc_native_function("startsWith", 1, |vm, this, args| {
+                let this_str = vm.to_string_value(this);
+                let search = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                let pos = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+                let starts = if pos <= this_str.len() {
+                    this_str[pos..].starts_with(&search)
+                } else {
+                    false
+                };
+                Ok(JsValue::from_boolean(starts))
+            })),
+            "endsWith" => Some(self.alloc_native_function("endsWith", 1, |vm, this, args| {
+                let this_str = vm.to_string_value(this);
+                let search = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                let end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(this_str.len() as i32).clamp(0, this_str.len() as i32) as usize;
+                let ends = this_str[..end].ends_with(&search);
+                Ok(JsValue::from_boolean(ends))
+            })),
+            "repeat" => Some(self.alloc_native_function("repeat", 1, |vm, this, args| {
+                let this_str = vm.to_string_value(this);
+                let count_f = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0);
+                if count_f < 0.0 || count_f.is_infinite() {
+                    return Err(VmError::RangeError("Invalid count value".into()));
+                }
+                let count = count_f as usize;
+                Ok(vm.alloc_string(this_str.repeat(count)))
+            })),
+            "padStart" => Some(self.alloc_native_function("padStart", 1, |vm, this, args| {
+                let this_str = vm.to_string_value(this);
+                let target_len = args.first().and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+                let pad_str = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_else(|| " ".to_string());
+                if this_str.len() >= target_len || pad_str.is_empty() {
+                    return Ok(vm.alloc_string(this_str));
+                }
+                let diff = target_len - this_str.len();
+                let pad_repeats = pad_str.repeat((diff / pad_str.len()) + 1);
+                let mut res = pad_repeats[..diff].to_string();
+                res.push_str(&this_str);
+                Ok(vm.alloc_string(res))
+            })),
+            "padEnd" => Some(self.alloc_native_function("padEnd", 1, |vm, this, args| {
+                let mut this_str = vm.to_string_value(this);
+                let target_len = args.first().and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
+                let pad_str = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_else(|| " ".to_string());
+                if this_str.len() >= target_len || pad_str.is_empty() {
+                    return Ok(vm.alloc_string(this_str));
+                }
+                let diff = target_len - this_str.len();
+                let pad_repeats = pad_str.repeat((diff / pad_str.len()) + 1);
+                this_str.push_str(&pad_repeats[..diff]);
+                Ok(vm.alloc_string(this_str))
+            })),
+            "localeCompare" => Some(self.alloc_native_function("localeCompare", 1, |vm, this, args| {
+                let a = vm.to_string_value(this);
+                let b = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+                let cmp = match a.cmp(&b) {
+                    std::cmp::Ordering::Less => -1,
+                    std::cmp::Ordering::Equal => 0,
+                    std::cmp::Ordering::Greater => 1,
+                };
+                Ok(JsValue::from_int32(cmp))
             })),
             _ => None,
         }

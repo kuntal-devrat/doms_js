@@ -16,6 +16,11 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
+                for d in &destruct_decls {
+                    if !d.name.starts_with('@') && (kind == VarKind::Let || kind == VarKind::Const) && d.name == "let" {
+                        return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+                    }
+                }
                 declarations.push(VarDeclarator { name: tmp_name, init });
                 declarations.extend(destruct_decls);
             } else if self.match_token(&TokenKind::LBrace)? {
@@ -28,10 +33,18 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
+                for d in &destruct_decls {
+                    if !d.name.starts_with('@') && (kind == VarKind::Let || kind == VarKind::Const) && d.name == "let" {
+                        return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+                    }
+                }
                 declarations.push(VarDeclarator { name: tmp_name, init });
                 declarations.extend(destruct_decls);
             } else {
                 let name = self.expect_identifier()?;
+                if (kind == VarKind::Let || kind == VarKind::Const) && name == "let" {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+                }
                 let init = if self.match_token(&TokenKind::Eq)? {
                     Some(self.parse_expression(1)?)
                 } else {
@@ -47,5 +60,25 @@ impl<'a> Parser<'a> {
 
         self.consume_semicolon()?;
         Ok(Statement::VarDecl { kind, declarations })
+    }
+
+    pub(crate) fn parse_using_decl(&mut self) -> Result<Statement, ParseError> {
+        let mut declarations = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            if name == "let" || name == "using" || (name == "await" && (self.is_module || self.in_async || self.in_static_block)) {
+                return Err(ParseError::UnexpectedToken(TokenKind::Ident(name), self.current.line, self.current.col));
+            }
+            if !self.match_token(&TokenKind::Eq)? {
+                return Err(ParseError::General("Using declarations must have an initializer".to_string()));
+            }
+            let init = Some(self.parse_expression(1)?);
+            declarations.push(VarDeclarator { name, init });
+            if !self.match_token(&TokenKind::Comma)? {
+                break;
+            }
+        }
+        self.consume_semicolon()?;
+        Ok(Statement::VarDecl { kind: VarKind::Const, declarations })
     }
 }

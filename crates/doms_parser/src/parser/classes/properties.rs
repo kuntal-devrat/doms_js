@@ -8,7 +8,8 @@ impl<'a> Parser<'a> {
             Ok((PropertyKey::Computed(expr), false))
         } else {
             let key_tok = self.advance()?;
-            let is_ident = matches!(&key_tok.kind, TokenKind::Ident(_));
+            let is_ident = matches!(&key_tok.kind, TokenKind::Ident(_))
+                || (!self.is_module && !self.in_async && !self.in_static_block && key_tok.kind == TokenKind::Await);
             let key = match &key_tok.kind {
                 TokenKind::StringLit { value, .. } => value.clone(),
                 TokenKind::Number(n) => n.to_string(),

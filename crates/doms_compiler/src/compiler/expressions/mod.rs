@@ -1,7 +1,7 @@
 //! Expression compilation and routing.
 
 use super::Compiler;
-use crate::bytecode::OpCode;
+use crate::bytecode::{Constant, OpCode};
 use crate::compiler::CompileError;
 use doms_parser::ast::*;
 
@@ -109,6 +109,24 @@ impl Compiler {
                 }
                 self.chunk.emit(OpCode::Yield, 0);
             }
+            Expression::YieldStar(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit(OpCode::GetIterator, 0);
+                let iter_slot = self.symbols.define_local(format!("@iter_ys_{}", self.chunk.instructions.len()));
+                self.chunk.emit(OpCode::SetLocal(iter_slot), 0);
+                self.chunk.emit(OpCode::Pop, 0);
+
+                let loop_start = self.chunk.instructions.len() as i32;
+                self.chunk.emit(OpCode::GetLocal(iter_slot), 0);
+                let jump_exit_idx = self.chunk.emit(OpCode::IteratorNext(0), 0);
+                self.chunk.emit(OpCode::Yield, 0);
+                self.chunk.emit(OpCode::Pop, 0);
+                self.chunk.emit(OpCode::Jump(loop_start), 0);
+
+                let exit_target = self.chunk.instructions.len() as i32;
+                self.chunk.patch_jump(jump_exit_idx, exit_target);
+                self.chunk.emit(OpCode::LoadUndefined, 0);
+            }
             Expression::DynamicImport(expr) => {
                 self.compile_expression(expr)?;
                 self.chunk.emit(OpCode::DynamicImport, 0);
@@ -124,6 +142,36 @@ impl Compiler {
             }
             Expression::Spread(inner) => {
                 self.compile_expression(inner)?;
+            }
+            Expression::PrivateIdentifier(name) => {
+                let idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit(OpCode::LoadConst(idx), 0);
+            }
+            Expression::ObjectRest { target, excluded_keys } => {
+                self.compile_expression(target)?;
+                for key in excluded_keys {
+                    self.compile_expression(key)?;
+                }
+                self.chunk.emit(OpCode::ObjectRest(excluded_keys.len() as u16), 0);
+            }
+            Expression::DestructuringAssignment { pattern, value } => {
+                self.compile_destructuring_assignment(pattern, value)?;
+            }
+            Expression::DefineField { target, property, value } => {
+                self.compile_expression(target)?;
+                self.compile_expression(value)?;
+                let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                self.chunk.emit(OpCode::DefinePrivateField(prop_idx), 0);
+            }
+            Expression::DefinePrivateAccessor { target, property, is_getter, accessor } => {
+                self.compile_expression(target)?;
+                self.compile_expression(accessor)?;
+                let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                if *is_getter {
+                    self.chunk.emit(OpCode::DefinePrivateGetter(prop_idx), 0);
+                } else {
+                    self.chunk.emit(OpCode::DefinePrivateSetter(prop_idx), 0);
+                }
             }
         }
         Ok(())

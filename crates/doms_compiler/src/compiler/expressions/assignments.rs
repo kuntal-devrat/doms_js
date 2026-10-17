@@ -10,9 +10,23 @@ impl Compiler {
         target: &str,
         value: &Expression,
     ) -> Result<(), CompileError> {
-        self.compile_expression(value)?;
+        match value {
+            Expression::Conditional { condition, then_expr, else_expr } if !target.starts_with('@') => {
+                self.compile_conditional_with_name(condition, then_expr, else_expr, Some(target))?;
+            }
+            Expression::ClassExpr(class_def) if !target.starts_with('@') && class_def.name.is_none() => {
+                self.compile_class_definition_with_name(class_def, Some(target.to_string()))?;
+            }
+            _ => {
+                self.compile_expression(value)?;
+                if !target.starts_with('@') && Self::is_anonymous_function_definition(value) {
+                    let name_idx = self.chunk.add_constant(Constant::String(target.to_string()));
+                    self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                }
+            }
+        }
         self.chunk.emit(OpCode::Dup, 0);
-        if self.is_in_function && self.with_depth == 0 {
+        if (self.is_in_function || target.starts_with('@')) && self.with_depth == 0 {
             if let Some(slot) = self.symbols.resolve_local(target) {
                 self.chunk.emit(OpCode::SetLocal(slot), 0);
                 self.chunk.emit(OpCode::Pop, 0);
@@ -167,6 +181,34 @@ impl Compiler {
             }
             _ => return Err(CompileError::General("Invalid assignment target in update expression".into())),
         }
+        Ok(())
+    }
+
+    pub(crate) fn compile_destructuring_assignment(
+        &mut self,
+        pattern: &Expression,
+        value: &Expression,
+    ) -> Result<(), CompileError> {
+        self.compile_expression(value)?;
+        self.chunk.emit(OpCode::Dup, 0);
+        let tmp_var = format!("@dstr_val_{}", self.symbols.locals.len());
+        let slot = self.symbols.define_local(tmp_var.clone());
+        self.chunk.emit(OpCode::SetLocal(slot), 0);
+        self.chunk.emit(OpCode::Pop, 0);
+
+        let mut parser = doms_parser::Parser::new("")
+            .map_err(|e| CompileError::General(format!("{:?}", e)))?;
+        let mut stmts = Vec::new();
+        parser.desugar_assignment_destructuring(
+            pattern,
+            Expression::Identifier(tmp_var),
+            &mut stmts,
+        );
+
+        for stmt in &stmts {
+            self.compile_statement(stmt, false)?;
+        }
+
         Ok(())
     }
 }

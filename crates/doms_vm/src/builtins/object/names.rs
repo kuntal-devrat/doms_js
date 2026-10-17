@@ -26,6 +26,25 @@ pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<Propert
                     let key = vm.to_property_key(elem)?;
                     keys.push(key);
                 }
+                for (t, prop) in &vm.non_configurable_props {
+                    if *t == inner_target && !prop.starts_with("[Symbol:") {
+                        let prop_key = PropertyKeyVal::String(prop.clone());
+                        if !keys.contains(&prop_key) {
+                            return Err(VmError::TypeError("Proxy ownKeys must include all non-configurable properties of the target".into()));
+                        }
+                    }
+                }
+                if vm.non_extensible_objects.contains(&inner_target) {
+                    let target_keys = get_own_property_keys(vm, inner_target)?;
+                    for tk in &target_keys {
+                        if !keys.contains(tk) {
+                            return Err(VmError::TypeError("Proxy ownKeys on non-extensible target must report all properties".into()));
+                        }
+                    }
+                    if keys.len() != target_keys.len() {
+                        return Err(VmError::TypeError("Proxy ownKeys on non-extensible target cannot report extra properties".into()));
+                    }
+                }
                 return Ok(keys);
             } else {
                 return get_own_property_keys(vm, inner_target);
@@ -55,10 +74,6 @@ pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<Propert
                 for i in 0..ta.length {
                     raw_names.push(i.to_string());
                 }
-                raw_names.push("length".to_string());
-                raw_names.push("byteLength".to_string());
-                raw_names.push("byteOffset".to_string());
-                raw_names.push("buffer".to_string());
             }
             ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => {
                 raw_names.push("length".to_string());
@@ -69,8 +84,8 @@ pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<Propert
             }
             _ => {}
         }
-        if let Some(accs) = &obj.accessors {
-            for k in accs.keys() {
+        if let Some(order) = &obj.prop_order {
+            for k in order {
                 if !raw_names.contains(k) {
                     raw_names.push(k.clone());
                 }
@@ -79,6 +94,13 @@ pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<Propert
         for prop in vm.shapes.all_properties(obj.shape_id) {
             if !raw_names.contains(&prop) {
                 raw_names.push(prop);
+            }
+        }
+        if let Some(accs) = &obj.accessors {
+            for k in accs.keys() {
+                if !raw_names.contains(k) {
+                    raw_names.push(k.clone());
+                }
             }
         }
         for ((ns, re_name), _) in &vm.module_reexports {

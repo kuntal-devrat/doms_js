@@ -111,6 +111,9 @@ pub(super) fn register_function_builtins(vm: &mut Vm) {
 
     vm.set_property(function_proto, "constructor", function_constructor);
     vm.set_property(function_constructor, "prototype", function_proto);
+    vm.non_enumerable_props.insert((function_constructor, "prototype".to_string()));
+    vm.non_writable_props.insert((function_constructor, "prototype".to_string()));
+    vm.non_configurable_props.insert((function_constructor, "prototype".to_string()));
     if let Some(ptr) = function_constructor.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         obj.prototype = Some(function_proto);

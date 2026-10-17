@@ -20,24 +20,22 @@ impl Vm {
                     let min_frame_idx = if is_indirect || is_func { num_frames.saturating_sub(1) } else { 0 };
                     for f_idx in (min_frame_idx..num_frames).rev() {
                         let num_scopes = self.frames[f_idx].scopes.len();
-                        if !name.starts_with('@') {
-                            for s_idx in (0..num_scopes).rev() {
-                                let scope_val = self.frames[f_idx].scopes[s_idx];
-                                if scope_val.is_object() {
-                                    if self.has_property(scope_val, &name).unwrap_or(false) {
-                                        self.set_property(scope_val, &name, val);
-                                        for f in &mut self.frames {
-                                            if f.env_obj == Some(scope_val) {
-                                                for (i, l_name) in f.local_names.iter().enumerate() {
-                                                    if l_name == &name && i < f.locals.len() {
-                                                        f.locals[i] = val;
-                                                    }
+                        for s_idx in (0..num_scopes).rev() {
+                            let scope_val = self.frames[f_idx].scopes[s_idx];
+                            if scope_val.is_object() {
+                                if self.has_property(scope_val, &name).unwrap_or(false) {
+                                    self.set_property(scope_val, &name, val);
+                                    for f in &mut self.frames {
+                                        if f.env_obj == Some(scope_val) {
+                                            for (i, l_name) in f.local_names.iter().enumerate() {
+                                                if l_name == &name && i < f.locals.len() {
+                                                    f.locals[i] = val;
                                                 }
                                             }
                                         }
-                                        assigned = true;
-                                        break;
                                     }
+                                    assigned = true;
+                                    break;
                                 }
                             }
                         }
@@ -63,6 +61,25 @@ impl Vm {
                             self.set_property(env, &name, val);
                         }
                         if assigned { break; }
+                    }
+                    if !assigned {
+                        if let Some(frame) = self.frames.last() {
+                            if let Some(ref callee_f) = frame.callee_func {
+                                if let Some(ref fn_name) = callee_f.name {
+                                    if fn_name == &name {
+                                        if frame.is_strict {
+                                            self.handle_exception_at_depth(
+                                                VmError::TypeError(format!("Assignment to constant variable '{}'", name)),
+                                                target_depth,
+                                            )?;
+                                            return Ok(Some(JsValue::undefined()));
+                                        } else {
+                                            return Ok(None);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     if assigned {
                         if let Some(mod_obj) = self.current_module_obj {
@@ -207,6 +224,15 @@ impl Vm {
                             self.globals.insert(name.clone(), val);
                             if self.global_object.is_object() {
                                 self.set_property(self.global_object, &name, val);
+                            }
+                        }
+                    }
+                    for f in &mut self.frames {
+                        if !f.is_function {
+                            for (i, l_name) in f.local_names.iter().enumerate() {
+                                if l_name == &name && i < f.locals.len() {
+                                    f.locals[i] = val;
+                                }
                             }
                         }
                     }

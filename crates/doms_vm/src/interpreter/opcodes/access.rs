@@ -1,6 +1,7 @@
 //! Property and element reads/writes (`GetProp`, `SetProp`, `GetElem`, `SetElem`).
 
 use super::*;
+use crate::object::PrivateElement;
 
 impl Vm {
 
@@ -15,6 +16,55 @@ impl Vm {
             _ => return Err(VmError::TypeError("Property name must be string".into())),
         };
         let obj = self.pop()?;
+
+        if name.starts_with('#') {
+            if !obj.is_js_object() {
+                let err = VmError::TypeError(format!(
+                    "Cannot read private member {} from non-object",
+                    name
+                ));
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            }
+            if let Some(ptr) = obj.as_object_ptr() {
+                let jsobj = unsafe { &*(ptr as *mut JsObject) };
+                if let Some(elem) = jsobj.get_private_element(&name).cloned() {
+                    match elem {
+                        PrivateElement::Value(v) => {
+                            self.push(v);
+                            return Ok(());
+                        }
+                        PrivateElement::Accessor(acc) => {
+                            if let Some(getter) = acc.getter {
+                                let val = self.call(getter, obj, &[]).unwrap_or(JsValue::undefined());
+                                self.push(val);
+                                return Ok(());
+                            } else {
+                                let err = VmError::TypeError(format!(
+                                    "Cannot read private member {} which has no getter",
+                                    name
+                                ));
+                                self.handle_exception_at_depth(err, target_depth)?;
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                let err = VmError::TypeError(format!(
+                    "Cannot read private member {} from an object whose class did not declare it",
+                    name
+                ));
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            } else {
+                let err = VmError::TypeError(format!(
+                    "Cannot read private member {} from non-object",
+                    name
+                ));
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            }
+        }
 
         let chunk_key = chunk.id;
         let call_site_ip = self.frames.last().map(|f| f.ip.saturating_sub(1)).unwrap_or(0);
@@ -74,6 +124,59 @@ impl Vm {
         let val = self.pop()?;
         let obj = self.pop()?;
 
+        if name.starts_with('#') {
+            if !obj.is_js_object() {
+                let err = VmError::TypeError(format!(
+                    "Cannot write private member {} to non-object",
+                    name
+                ));
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            }
+            if let Some(ptr) = obj.as_object_ptr() {
+                let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let Some(elem) = jsobj.get_private_element(&name).cloned() {
+                    match elem {
+                        PrivateElement::Value(_) => {
+                            jsobj.insert_private_element(name, val);
+                            self.push(val);
+                            return Ok(());
+                        }
+                        PrivateElement::Accessor(acc) => {
+                            if let Some(setter) = acc.setter {
+                                if let Err(err) = self.call(setter, obj, &[val]) {
+                                    self.handle_exception_at_depth(err, target_depth)?;
+                                    return Ok(());
+                                }
+                                self.push(val);
+                                return Ok(());
+                            } else {
+                                let err = VmError::TypeError(format!(
+                                    "Cannot write private member {} which has no setter",
+                                    name
+                                ));
+                                self.handle_exception_at_depth(err, target_depth)?;
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                let err = VmError::TypeError(format!(
+                    "Cannot write private member {} to an object whose class did not declare it",
+                    name
+                ));
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            } else {
+                let err = VmError::TypeError(format!(
+                    "Cannot write private member {} to non-object",
+                    name
+                ));
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            }
+        }
+
         let this_val = self.frames.last().map(|f| f.this_val).unwrap_or(JsValue::undefined());
         if self.module_namespace_objects.contains(&this_val) {
             let prop_val = self.get_property(this_val, &name);
@@ -97,6 +200,15 @@ impl Vm {
             }
             self.push(val);
             return Ok(());
+        }
+
+        if let Some(val_ptr) = val.as_object_ptr() {
+            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                if f.is_method && f.home_object.is_none() {
+                    f.home_object = Some(obj);
+                }
+            }
         }
 
         let chunk_key = chunk.id;
@@ -151,8 +263,11 @@ impl Vm {
                         if let ObjectKind::Array(elements) = &jsobj.kind {
                             if let Some(i) = key.to_int32() {
                                 if i >= 0 && (i as usize) < elements.len() {
-                                    self.push(elements[i as usize]);
-                                    return Ok(());
+                                    let el = elements[i as usize];
+                                    if !el.is_hole() {
+                                        self.push(el);
+                                        return Ok(());
+                                    }
                                 }
                             }
                         }
@@ -225,7 +340,7 @@ impl Vm {
                                     let idx = i as usize;
                                     if idx < 65536 && idx <= elements.len() + 1024 {
                                         if idx >= elements.len() {
-                                            elements.resize(idx + 1, JsValue::undefined());
+                                            elements.resize(idx + 1, JsValue::hole());
                                         }
                                         elements[idx] = val;
                                         self.push(val);

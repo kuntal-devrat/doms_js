@@ -31,6 +31,9 @@ pub struct TargetScope {
     pub labels: Vec<String>,
     pub jumps: Vec<usize>,
     pub scope_depth: usize,
+    pub iter_slot: Option<u16>,
+    pub is_async_iter: bool,
+    pub break_depth: usize,
 }
 
 pub struct Compiler {
@@ -77,6 +80,20 @@ impl Compiler {
     pub(crate) fn emit_pop_scope(&mut self) {
         self.chunk.emit(OpCode::PopScope, 0);
         self.block_scope_depth = self.block_scope_depth.saturating_sub(1);
+    }
+
+    pub fn is_anonymous_function_definition(expr: &doms_parser::ast::Expression) -> bool {
+        use doms_parser::ast::Expression;
+        match expr {
+            Expression::ArrowExpr { .. } => true,
+            Expression::FunctionExpr { name, .. } => name.is_none(),
+            Expression::AsyncFunctionExpr { name, .. } => name.is_none(),
+            Expression::GeneratorExpr { name, .. } => name.is_none(),
+            Expression::AsyncGeneratorExpr { name, .. } => name.is_none(),
+            Expression::ClassExpr(class_def) => class_def.name.is_none(),
+            Expression::Grouping(inner) => Self::is_anonymous_function_definition(inner),
+            _ => false,
+        }
     }
 }
 

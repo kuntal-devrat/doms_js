@@ -62,6 +62,29 @@ impl Trace for JsObject {
                 }
             }
         }
+        if let Some(privs) = &self.private_elements {
+            for v in privs.values() {
+                match v {
+                    PrivateElement::Value(val) => {
+                        if let Some(p) = val.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
+                    }
+                    PrivateElement::Accessor(acc) => {
+                        if let Some(g) = acc.getter {
+                            if let Some(p) = g.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
+                        if let Some(s) = acc.setter {
+                            if let Some(p) = s.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         match &self.kind {
             ObjectKind::Array(elements) => {
                 for el in elements {
@@ -73,6 +96,11 @@ impl Trace for JsObject {
             ObjectKind::Function(f) => {
                 for upval in &f.upvalues {
                     if let Some(p) = upval.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+                if let Some(ho) = f.home_object {
+                    if let Some(p) = ho.as_heap_ptr() {
                         tracer.trace_ref(p);
                     }
                 }
@@ -95,6 +123,31 @@ impl Trace for JsObject {
             ObjectKind::Generator(g) => {
                 for v in &g.stack {
                     if let Some(r) = v.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                }
+                for v in &g.locals {
+                    if let Some(r) = v.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                }
+                for sc in &g.scopes {
+                    if let Some(r) = sc.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                }
+                if let Some(env) = g.env_obj {
+                    if let Some(r) = env.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                }
+                for uv in &g.function.upvalues {
+                    if let Some(r) = uv.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                }
+                if let Some(ho) = g.function.home_object {
+                    if let Some(r) = ho.as_heap_ptr() {
                         tracer.trace_ref(r);
                     }
                 }
@@ -230,6 +283,9 @@ impl JsObject {
                 for uv in &mut f.upvalues {
                     visitor(uv);
                 }
+                if let Some(ref mut ho) = f.home_object {
+                    visitor(ho);
+                }
             }
             ObjectKind::Promise(p) => {
                 visitor(&mut p.result);
@@ -244,8 +300,20 @@ impl JsObject {
                 for v in &mut g.stack {
                     visitor(v);
                 }
+                for v in &mut g.locals {
+                    visitor(v);
+                }
+                for sc in &mut g.scopes {
+                    visitor(sc);
+                }
+                if let Some(env) = &mut g.env_obj {
+                    visitor(env);
+                }
                 for uv in &mut g.function.upvalues {
                     visitor(uv);
+                }
+                if let Some(ref mut ho) = g.function.home_object {
+                    visitor(ho);
                 }
                 visitor(&mut g.this_val);
                 if let Some(args) = &mut g.arguments {

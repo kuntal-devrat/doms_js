@@ -9,9 +9,12 @@ pub struct JsObject {
     pub slots: Vec<JsValue>,
     pub kind: ObjectKind,
     pub accessors: Option<Box<std::collections::HashMap<String, Accessor>>>,
+    pub accessor_order: Option<Vec<String>>,
+    pub prop_order: Option<Vec<String>>,
     pub symbol_properties: Option<Box<std::collections::HashMap<JsValue, JsValue>>>,
     pub symbol_accessors: Option<Box<std::collections::HashMap<JsValue, Accessor>>>,
     pub symbol_order: Option<Vec<JsValue>>,
+    pub private_elements: Option<Box<std::collections::HashMap<String, PrivateElement>>>,
 }
 
 impl JsObject {
@@ -22,10 +25,44 @@ impl JsObject {
             slots: Vec::new(),
             kind,
             accessors: None,
+            accessor_order: None,
+            prop_order: None,
             symbol_properties: None,
             symbol_accessors: None,
             symbol_order: None,
+            private_elements: None,
         }
+    }
+
+    pub fn insert_private_element(&mut self, name: String, val: JsValue) {
+        let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        privs.insert(name, PrivateElement::Value(val));
+    }
+
+    pub fn insert_private_getter(&mut self, name: String, getter: JsValue) {
+        let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let entry = privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor { getter: None, setter: None }));
+        match entry {
+            PrivateElement::Accessor(acc) => acc.getter = Some(getter),
+            PrivateElement::Value(_) => *entry = PrivateElement::Accessor(Accessor { getter: Some(getter), setter: None }),
+        }
+    }
+
+    pub fn insert_private_setter(&mut self, name: String, setter: JsValue) {
+        let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let entry = privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor { getter: None, setter: None }));
+        match entry {
+            PrivateElement::Accessor(acc) => acc.setter = Some(setter),
+            PrivateElement::Value(_) => *entry = PrivateElement::Accessor(Accessor { getter: None, setter: Some(setter) }),
+        }
+    }
+
+    pub fn get_private_element(&self, name: &str) -> Option<&PrivateElement> {
+        self.private_elements.as_ref().and_then(|p| p.get(name))
+    }
+
+    pub fn contains_private_element(&self, name: &str) -> bool {
+        self.private_elements.as_ref().map_or(false, |p| p.contains_key(name))
     }
 
     pub fn insert_symbol_property(&mut self, sym: JsValue, val: JsValue) {
@@ -233,27 +270,55 @@ impl JsObject {
         Self::new_with_kind(shape_id, prototype, ObjectKind::BigInt(val))
     }
 
+    pub fn add_prop_order(&mut self, key: String) {
+        let order = self.prop_order.get_or_insert_with(Vec::new);
+        if !order.contains(&key) {
+            order.push(key);
+        }
+    }
+
+    pub fn remove_prop_order(&mut self, key: &str) {
+        if let Some(order) = &mut self.prop_order {
+            order.retain(|k| k != key);
+        }
+    }
+
     pub fn define_getter(&mut self, key: String, getter: JsValue) {
         let accs = self.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        let acc = accs.entry(key).or_default();
-        acc.getter = Some(getter);
+        let acc = accs.entry(key.clone()).or_default();
+        acc.getter = if getter.is_undefined() { None } else { Some(getter) };
+        let order = self.accessor_order.get_or_insert_with(Vec::new);
+        if !order.contains(&key) {
+            order.push(key.clone());
+        }
+        self.add_prop_order(key);
     }
 
     pub fn define_setter(&mut self, key: String, setter: JsValue) {
         let accs = self.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        let acc = accs.entry(key).or_default();
-        acc.setter = Some(setter);
+        let acc = accs.entry(key.clone()).or_default();
+        acc.setter = if setter.is_undefined() { None } else { Some(setter) };
+        let order = self.accessor_order.get_or_insert_with(Vec::new);
+        if !order.contains(&key) {
+            order.push(key.clone());
+        }
+        self.add_prop_order(key);
     }
 
     pub fn define_accessor(&mut self, key: String, getter: Option<JsValue>, setter: Option<JsValue>) {
         let accs = self.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        let acc = accs.entry(key).or_default();
+        let acc = accs.entry(key.clone()).or_default();
         if getter.is_some() {
             acc.getter = getter;
         }
         if setter.is_some() {
             acc.setter = setter;
         }
+        let order = self.accessor_order.get_or_insert_with(Vec::new);
+        if !order.contains(&key) {
+            order.push(key.clone());
+        }
+        self.add_prop_order(key);
     }
 
     #[inline]

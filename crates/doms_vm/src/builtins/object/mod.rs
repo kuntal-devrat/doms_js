@@ -4,7 +4,7 @@ use super::*;
 
 mod constructor;
 mod define_property;
-mod descriptor;
+pub(crate) mod descriptor;
 mod group_by;
 mod integrity;
 mod legacy_accessors;
@@ -83,6 +83,8 @@ pub(super) fn register_object_builtins(vm: &mut Vm) {
     for name in statics {
         vm.non_enumerable_props.insert((object_constructor, name.to_string()));
     }
+    vm.non_writable_props.insert((object_constructor, "prototype".to_string()));
+    vm.non_configurable_props.insert((object_constructor, "prototype".to_string()));
 
     vm.globals.insert("Object".to_string(), object_constructor);
     if vm.global_object.is_object() {

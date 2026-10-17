@@ -101,6 +101,7 @@ fn test_phase3_jit_hot_execution() {
         has_param_exprs: false,
         is_method: false,
         is_arrow: false,
+        home_object: None,
     };
     let fn_val = vm.alloc_function(js_fn);
 
@@ -111,6 +112,14 @@ fn test_phase3_jit_hot_execution() {
         total += res.as_number().unwrap();
     }
     assert_eq!(total, 120.0);
+
+    let obj = unsafe { &*(fn_val.as_object_ptr().unwrap() as *mut JsObject) };
+    if let ObjectKind::Function(f) = &obj.kind {
+        assert!(f.jit_entry.is_some(), "Function should have been JIT compiled");
+        assert!(f.jit_entry.as_ref().unwrap().is_native(), "JIT code should be native Cranelift machine code");
+    } else {
+        panic!("Expected Function ObjectKind");
+    }
 }
 
 #[test]

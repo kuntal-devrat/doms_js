@@ -171,6 +171,92 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
         obj.kind = ObjectKind::Date(new_ms);
         Ok(JsValue::from_double(new_ms))
     });
+    let date_set_full_year = vm.alloc_native_function("setFullYear", 3, |vm, this, args| {
+        let (ptr, ms) = get_date_ms(this)?;
+        let arg_y = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(f64::NAN);
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let y = if arg_y.is_nan() { cur_y } else { arg_y as i32 };
+        let m = args.get(1).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_m);
+        let d = args.get(2).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_d);
+        let new_ms = utc_to_ms(y, m, d, cur_h, cur_min, cur_s, cur_ms);
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        obj.kind = ObjectKind::Date(new_ms);
+        Ok(JsValue::from_double(new_ms))
+    });
+
+    let date_set_month = vm.alloc_native_function("setMonth", 2, |vm, this, args| {
+        let (ptr, ms) = get_date_ms(this)?;
+        let arg_m = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(f64::NAN);
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let m = if arg_m.is_nan() { cur_m } else { arg_m as i32 };
+        let d = args.get(1).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_d);
+        let new_ms = utc_to_ms(cur_y, m, d, cur_h, cur_min, cur_s, cur_ms);
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        obj.kind = ObjectKind::Date(new_ms);
+        Ok(JsValue::from_double(new_ms))
+    });
+
+    let date_set_date = vm.alloc_native_function("setDate", 1, |vm, this, args| {
+        let (ptr, ms) = get_date_ms(this)?;
+        let arg_d = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(f64::NAN);
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let d = if arg_d.is_nan() { cur_d } else { arg_d as i32 };
+        let new_ms = utc_to_ms(cur_y, cur_m, d, cur_h, cur_min, cur_s, cur_ms);
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        obj.kind = ObjectKind::Date(new_ms);
+        Ok(JsValue::from_double(new_ms))
+    });
+
+    let date_set_hours = vm.alloc_native_function("setHours", 4, |vm, this, args| {
+        let (ptr, ms) = get_date_ms(this)?;
+        let arg_h = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(f64::NAN);
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let h = if arg_h.is_nan() { cur_h } else { arg_h as i32 };
+        let min = args.get(1).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_min);
+        let s = args.get(2).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_s);
+        let ms_part = args.get(3).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_ms);
+        let new_ms = utc_to_ms(cur_y, cur_m, cur_d, h, min, s, ms_part);
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        obj.kind = ObjectKind::Date(new_ms);
+        Ok(JsValue::from_double(new_ms))
+    });
+
+    let date_set_minutes = vm.alloc_native_function("setMinutes", 3, |vm, this, args| {
+        let (ptr, ms) = get_date_ms(this)?;
+        let arg_min = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(f64::NAN);
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let min = if arg_min.is_nan() { cur_min } else { arg_min as i32 };
+        let s = args.get(1).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_s);
+        let ms_part = args.get(2).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_ms);
+        let new_ms = utc_to_ms(cur_y, cur_m, cur_d, cur_h, min, s, ms_part);
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        obj.kind = ObjectKind::Date(new_ms);
+        Ok(JsValue::from_double(new_ms))
+    });
+
+    let date_set_seconds = vm.alloc_native_function("setSeconds", 2, |vm, this, args| {
+        let (ptr, ms) = get_date_ms(this)?;
+        let arg_s = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(f64::NAN);
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let s = if arg_s.is_nan() { cur_s } else { arg_s as i32 };
+        let ms_part = args.get(1).and_then(|v| vm.to_number_value(*v).ok()).map(|n| n as i32).unwrap_or(cur_ms);
+        let new_ms = utc_to_ms(cur_y, cur_m, cur_d, cur_h, cur_min, s, ms_part);
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        obj.kind = ObjectKind::Date(new_ms);
+        Ok(JsValue::from_double(new_ms))
+    });
+
+    let date_set_millis = vm.alloc_native_function("setMilliseconds", 1, |vm, this, args| {
+        let (ptr, ms) = get_date_ms(this)?;
+        let arg_ms = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(f64::NAN);
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let ms_part = if arg_ms.is_nan() { cur_ms } else { arg_ms as i32 };
+        let new_ms = utc_to_ms(cur_y, cur_m, cur_d, cur_h, cur_min, cur_s, ms_part);
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        obj.kind = ObjectKind::Date(new_ms);
+        Ok(JsValue::from_double(new_ms))
+    });
+
     vec![
         ("getTime", date_get_time),
         ("valueOf", date_value_of),
@@ -194,5 +280,19 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
         ("getYear", date_get_year),
         ("setYear", date_set_year),
         ("setTime", date_set_time),
+        ("setFullYear", date_set_full_year),
+        ("setUTCFullYear", date_set_full_year),
+        ("setMonth", date_set_month),
+        ("setUTCMonth", date_set_month),
+        ("setDate", date_set_date),
+        ("setUTCDate", date_set_date),
+        ("setHours", date_set_hours),
+        ("setUTCHours", date_set_hours),
+        ("setMinutes", date_set_minutes),
+        ("setUTCMinutes", date_set_minutes),
+        ("setSeconds", date_set_seconds),
+        ("setUTCSeconds", date_set_seconds),
+        ("setMilliseconds", date_set_millis),
+        ("setUTCMilliseconds", date_set_millis),
     ]
 }

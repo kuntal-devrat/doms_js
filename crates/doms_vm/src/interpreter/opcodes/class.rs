@@ -39,6 +39,13 @@ impl Vm {
                         self.get_property(ctor_val, "prototype")
                     };
 
+                    if let Some(f_ptr) = func_val.as_object_ptr() {
+                        let f_obj = unsafe { &mut *(f_ptr as *mut JsObject) };
+                        if let ObjectKind::Function(ref mut f) = f_obj.kind {
+                            f.home_object = Some(target);
+                        }
+                    }
+
                     if let Some(target_ptr) = target.as_object_ptr() {
                         let target_obj = unsafe { &mut *(target_ptr as *mut JsObject) };
                         match kind {

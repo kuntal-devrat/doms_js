@@ -60,7 +60,29 @@ impl Vm {
             return obj_ptr;
         }
 
-        // 7. Fallback to large object space
+        // 7. OldGen full: trigger full mark-sweep major GC and retry OldGen
+        let prev_temp2 = self.temp_roots.len();
+        obj.visit_values_mut(|val| self.temp_roots.push(*val));
+        self.gc_collect();
+        {
+            let mut iter = self.temp_roots.drain(prev_temp2..);
+            obj.visit_values_mut(|val| {
+                if let Some(updated) = iter.next() {
+                    *val = updated;
+                }
+            });
+        }
+
+        if let Some(ptr) = self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+            let obj_ptr = ptr as *mut JsObject;
+            unsafe {
+                std::ptr::write(obj_ptr, obj);
+            }
+            self.track_ptr(obj_ptr);
+            return obj_ptr;
+        }
+
+        // 8. Fallback to large object space
         if let Some(ptr) = self.heap.large_objects.allocate(payload_size, doms_gc::header::TypeTag::Object) {
             let obj_ptr = ptr as *mut JsObject;
             unsafe {
@@ -70,7 +92,7 @@ impl Vm {
             return obj_ptr;
         }
 
-        // 8. Emergency fallback to OS heap if all GC spaces are exhausted
+        // 9. Emergency fallback to OS heap if all GC spaces are exhausted
         self.oom = true;
         let ptr = Box::into_raw(Box::new(obj));
         self.track_ptr(ptr);

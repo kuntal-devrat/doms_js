@@ -140,11 +140,15 @@ impl Nursery {
             space_remaining
         );
 
+        let cur_age = header.age();
+
         // Copy the entire object (header + payload) to to-space.
         let new_header_ptr = *to_cursor;
         // SAFETY: Both pointers are valid, non-overlapping, and to-space has space.
         unsafe {
             ptr::copy_nonoverlapping(header_ptr as *const u8, new_header_ptr, total_size);
+            let new_header = &mut *(new_header_ptr as *mut GcHeader);
+            new_header.set_age((cur_age + 1).min(15));
         }
 
         // The new payload is at header + HEADER_SIZE.

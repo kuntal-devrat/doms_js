@@ -38,6 +38,7 @@ pub enum OpCode {
     This,
     LoadSuper,
     SetThis,
+    LoadUninitialized,
 
     // Objects & Arrays
     CreateObject,
@@ -47,6 +48,12 @@ pub enum OpCode {
     RequireObjectCoercible,
     CreateRegExp(u16, u16),
     GetKeys,
+    GetIterator,
+    IteratorNext(i32),
+    IteratorClose(bool),
+    GetAsyncIterator,
+    AsyncIteratorNext(i32),
+    AsyncIteratorClose(bool),
     GetProp(u16),
     SetProp(u16),
     DefineGetter(u16),
@@ -57,6 +64,11 @@ pub enum OpCode {
     InheritClass,
     GetElem,
     SetElem,
+    ObjectSpread,
+    ObjectRest(u16),
+    DefinePrivateField(u16),
+    DefinePrivateGetter(u16),
+    DefinePrivateSetter(u16),
 
     // Functions, Calls & Construction
     CreateFunction(u16),
@@ -75,6 +87,7 @@ pub enum OpCode {
     Return,
     Await,
     Yield,
+    SetFunctionName(u16),
 
     // Modules
     Export(u16),
@@ -112,6 +125,7 @@ pub enum OpCode {
     Gte,
     Instanceof,
     In,
+    PrivateIn(u16),
 
     // Bitwise & Shift
     BitAnd,
@@ -129,7 +143,9 @@ pub enum OpCode {
     // Exceptions
     Throw,
     PushCatch(i32),
+    PushFinally(i32, i32, u16),
     PopCatch,
+    EndFinally(u16),
 
     // Variable Access
     GetLocal(u16),
@@ -255,7 +271,16 @@ impl BytecodeChunk {
             OpCode::JumpIfFalse(offset) => *offset = target,
             OpCode::JumpIfTrue(offset) => *offset = target,
             OpCode::PushCatch(offset) => *offset = target,
+            OpCode::PushFinally(offset, _, _) => *offset = target,
+            OpCode::IteratorNext(offset) => *offset = target,
+            OpCode::AsyncIteratorNext(offset) => *offset = target,
             _ => panic!("Attempted to patch non-jump instruction"),
+        }
+    }
+
+    pub fn patch_finally_start(&mut self, index: usize, start: i32) {
+        if let OpCode::PushFinally(_, finally_start, _) = &mut self.instructions[index] {
+            *finally_start = start;
         }
     }
 }

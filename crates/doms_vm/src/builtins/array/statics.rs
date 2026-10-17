@@ -26,11 +26,11 @@ pub(super) fn register_statics(vm: &mut Vm, array_constructor: JsValue) {
                 let mut idx = 0;
                 while vm.is_callable(next_fn) {
                     let step = vm.call(next_fn, iterator, &[])?;
-                    let done = vm.get_property(step, "done").is_truthy();
+                    let done = vm.get_property_result(step, "done")?.is_truthy();
                     if done {
                         break;
                     }
-                    let val = vm.get_property(step, "value");
+                    let val = vm.get_property_result(step, "value")?;
                     let mapped = if has_map {
                         vm.call(map_fn, this_arg, &[val, JsValue::from_int32(idx)])?
                     } else {

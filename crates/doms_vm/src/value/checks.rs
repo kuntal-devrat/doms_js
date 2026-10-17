@@ -46,6 +46,27 @@ impl JsValue {
     }
 
     #[inline]
+    pub fn is_empty_string(&self) -> bool {
+        if self.is_string() {
+            if let Some(ptr) = self.as_string_ptr() {
+                let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
+                if let crate::object::ObjectKind::String(ref s) = obj.kind {
+                    return s.is_empty();
+                }
+            }
+        }
+        if self.is_object() {
+            if let Some(ptr) = self.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
+                if let crate::object::ObjectKind::String(ref s) = obj.kind {
+                    return s.is_empty();
+                }
+            }
+        }
+        false
+    }
+
+    #[inline]
     pub fn is_nullish(&self) -> bool {
         self.is_null() || self.is_undefined()
     }
@@ -53,6 +74,19 @@ impl JsValue {
     #[inline]
     pub fn is_object(&self) -> bool {
         (self.0 & TAG_MASK) == TAG_OBJECT
+    }
+
+    #[inline]
+    pub fn is_js_object(&self) -> bool {
+        if !self.is_object() {
+            return false;
+        }
+        if let Some(ptr) = self.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
+            !matches!(obj.kind, crate::object::ObjectKind::String(_) | crate::object::ObjectKind::Symbol(_) | crate::object::ObjectKind::BigInt(_))
+        } else {
+            false
+        }
     }
 
     #[inline]

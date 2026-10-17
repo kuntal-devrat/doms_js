@@ -52,3 +52,10 @@ pub struct Accessor {
     pub getter: Option<JsValue>,
     pub setter: Option<JsValue>,
 }
+
+#[derive(Debug, Clone)]
+pub enum PrivateElement {
+    Value(JsValue),
+    Accessor(Accessor),
+}
+

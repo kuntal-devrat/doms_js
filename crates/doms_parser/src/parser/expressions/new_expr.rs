@@ -5,7 +5,7 @@ impl<'a> Parser<'a> {
                 if self.match_token(&TokenKind::Dot)? {
                     let ident = self.expect_identifier()?;
                     if ident == "target" {
-                        if !self.in_non_arrow_function {
+                        if !self.in_non_arrow_function && !self.in_static_block {
                             return Err(ParseError::UnexpectedToken(TokenKind::Ident(ident), line, col));
                         }
                         return Ok(Expression::NewTarget);
@@ -17,16 +17,21 @@ impl<'a> Parser<'a> {
                 while self.check(&TokenKind::Dot) {
                     self.advance()?;
                     let prop_tok = self.advance()?;
-                    let prop = match prop_tok.kind.as_prop_name() {
+                    let mut prop = match prop_tok.kind.as_prop_name() {
                         Some(id) => id,
                         None => return Err(ParseError::UnexpectedToken(prop_tok.kind, prop_tok.line, prop_tok.col)),
                     };
-                    if prop.starts_with('#') && !self.private_names_stack.iter().any(|set| set.contains(&prop)) {
-                        return Err(ParseError::UnexpectedToken(
-                            prop_tok.kind,
-                            prop_tok.line,
-                            prop_tok.col,
-                        ));
+                    if prop.starts_with('#') {
+                        prop = match self.resolve_private_name(&prop) {
+                            Some(scoped) => scoped,
+                            None => {
+                                return Err(ParseError::UnexpectedToken(
+                                    prop_tok.kind,
+                                    prop_tok.line,
+                                    prop_tok.col,
+                                ));
+                            }
+                        };
                     }
                     callee = Expression::Member { object: Box::new(callee), property: prop };
                 }

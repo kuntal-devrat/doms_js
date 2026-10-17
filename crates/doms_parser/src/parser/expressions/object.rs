@@ -4,6 +4,16 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_object_literal(&mut self) -> Result<Expression, ParseError> {
         let mut props = Vec::new();
         while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
+            // Check for spread: ...expr
+            if self.match_token(&TokenKind::DotDotDot)? {
+                let expr = self.parse_expression(1)?;
+                props.push(ObjectProperty::Spread(expr));
+                if !self.match_token(&TokenKind::Comma)? || self.check(&TokenKind::RBrace) {
+                    break;
+                }
+                continue;
+            }
+
             // Check for getter: get <prop>() { ... }
             if self.check_ident("get")
                 && self.peeked.kind != TokenKind::Colon
@@ -45,21 +55,29 @@ impl<'a> Parser<'a> {
             {
                 self.advance()?; // 'set'
                 let key = self.parse_property_name()?;
-                self.expect(TokenKind::LParen)?;
-                let param = self.expect_identifier()?;
-                self.expect(TokenKind::RParen)?;
+                let prev_in_static = self.in_static_block;
+                self.in_static_block = false;
                 let prev_ctor = self.in_derived_constructor;
                 let prev_method = self.in_method;
                 self.in_method = true;
                 self.in_derived_constructor = false;
-                let body = self.parse_function_body(&[param.clone()], None)?;
+                let (params, defaults) = self.parse_formal_parameters()?;
+                if params.len() != 1 || params[0].starts_with("...") {
+                    self.in_method = prev_method;
+                    self.in_derived_constructor = prev_ctor;
+                    self.in_static_block = prev_in_static;
+                    return Err(ParseError::General("Setter must have exactly one formal parameter".to_string()));
+                }
+                let mut body = self.parse_function_body(&params, None)?;
                 self.in_method = prev_method;
                 self.in_derived_constructor = prev_ctor;
+                self.in_static_block = prev_in_static;
+                Self::apply_parameter_defaults(&mut body, defaults);
                 props.push(ObjectProperty::Setter(
                     key,
                     Expression::FunctionExpr {
                         name: None,
-                        params: vec![param],
+                        params,
                         body,
                     },
                 ));
@@ -72,8 +90,17 @@ impl<'a> Parser<'a> {
             // Check for generator method: * <prop>() { ... }
             if self.match_token(&TokenKind::Star)? {
                 let key = self.parse_property_name()?;
+                let prev_in_static = self.in_static_block;
+                self.in_static_block = false;
+                let prev_ctor = self.in_derived_constructor;
+                let prev_method = self.in_method;
+                self.in_method = true;
+                self.in_derived_constructor = false;
                 let (params, defaults) = self.parse_formal_parameters()?;
                 let mut body = self.parse_function_body(&params, None)?;
+                self.in_method = prev_method;
+                self.in_derived_constructor = prev_ctor;
+                self.in_static_block = prev_in_static;
                 Self::apply_parameter_defaults(&mut body, defaults);
                 let fn_name = match &key {
                     PropertyKey::Literal(s) => Some(s.clone()),
@@ -103,8 +130,17 @@ impl<'a> Parser<'a> {
                 self.advance()?; // 'async'
                 let is_gen = self.match_token(&TokenKind::Star)?;
                 let key = self.parse_property_name()?;
+                let prev_in_static = self.in_static_block;
+                self.in_static_block = false;
+                let prev_ctor = self.in_derived_constructor;
+                let prev_method = self.in_method;
+                self.in_method = true;
+                self.in_derived_constructor = false;
                 let (params, defaults) = self.parse_formal_parameters()?;
                 let mut body = self.parse_function_body(&params, None)?;
+                self.in_method = prev_method;
+                self.in_derived_constructor = prev_ctor;
+                self.in_static_block = prev_in_static;
                 Self::apply_parameter_defaults(&mut body, defaults);
                 let fn_name = match &key {
                     PropertyKey::Literal(s) => Some(s.clone()),
@@ -132,14 +168,17 @@ impl<'a> Parser<'a> {
                 self.parse_expression(1)?
             } else if self.check(&TokenKind::LParen) {
                 // Method shorthand: foo() { ... } or [expr]() { ... }
-                let (params, defaults) = self.parse_formal_parameters()?;
+                let prev_in_static = self.in_static_block;
+                self.in_static_block = false;
                 let prev_ctor = self.in_derived_constructor;
                 let prev_method = self.in_method;
                 self.in_method = true;
                 self.in_derived_constructor = false;
+                let (params, defaults) = self.parse_formal_parameters()?;
                 let mut body = self.parse_function_body(&params, None)?;
                 self.in_method = prev_method;
                 self.in_derived_constructor = prev_ctor;
+                self.in_static_block = prev_in_static;
                 Self::apply_parameter_defaults(&mut body, defaults);
                 let fn_name = match &key {
                     PropertyKey::Literal(s) => Some(s.clone()),

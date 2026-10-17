@@ -20,20 +20,24 @@ impl Vm {
             return upvalues;
         }
 
-        let (local_names, locals) = {
+        let (local_names, locals, arguments, callee_name, callee_val) = {
             let frame = self.frames.last().unwrap();
-            (frame.local_names.clone(), frame.locals.clone())
+            let c_name = frame.callee_func.as_ref().and_then(|f| f.name.clone());
+            (frame.local_names.clone(), frame.locals.clone(), frame.arguments, c_name, frame.callee_val)
         };
         let env = self.alloc_object();
         for (i, name) in local_names.iter().enumerate() {
             let val = locals.get(i).copied().unwrap_or(JsValue::undefined());
             self.set_property(env, name, val);
         }
-        if let Some(frame) = self.frames.last() {
-            if let Some(args_val) = frame.arguments {
-                if !local_names.iter().any(|n| n == "arguments") {
-                    self.set_property(env, "arguments", args_val);
-                }
+        if let Some(args_val) = arguments {
+            if !local_names.iter().any(|n| n == "arguments") {
+                self.set_property(env, "arguments", args_val);
+            }
+        }
+        if let (Some(fn_name), Some(val)) = (callee_name, callee_val) {
+            if !local_names.iter().any(|n| n == &fn_name) {
+                self.set_property(env, &fn_name, val);
             }
         }
         if let Some(frame) = self.frames.last_mut() {

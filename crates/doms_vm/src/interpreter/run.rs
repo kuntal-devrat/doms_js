@@ -12,7 +12,7 @@ impl Vm {
             ip: 0,
             base_sp: self.stack.len(),
             this_val: if self.is_module { JsValue::undefined() } else { self.global_object },
-            gen_ptr: None,
+            gen_val: None,
             locals: Vec::new(),
             local_names: Vec::new(),
             lexical_local_names: Vec::new(),
@@ -29,7 +29,9 @@ impl Vm {
             in_param_init: false,
             is_indirect_eval: false,
             callee_func: None,
+            callee_val: None,
             mapped_arguments: None,
+            home_object: None,
         });
         let result = self.run_until_depth(target_depth)?;
         self.drain_microtasks()?;
@@ -106,10 +108,12 @@ impl Vm {
                     } else {
                         JsValue::undefined()
                     };
-                    if let Some(g_ptr) = finished.gen_ptr {
-                        let g_obj = unsafe { &mut *(g_ptr) };
-                        if let ObjectKind::Generator(ref mut g) = g_obj.kind {
-                            g.state = crate::object::GeneratorState::Completed;
+                    if let Some(g_val) = finished.gen_val {
+                        if let Some(g_ptr) = g_val.as_object_ptr() {
+                            let g_obj = unsafe { &mut *(g_ptr as *mut JsObject) };
+                            if let ObjectKind::Generator(ref mut g) = g_obj.kind {
+                                g.state = crate::object::GeneratorState::Completed;
+                            }
                         }
                         let iter_res = self.make_iter_result(ret_val, true);
                         self.stack.truncate(finished.base_sp);
@@ -138,6 +142,7 @@ impl Vm {
                 OpCode::LoadNull => self.push(JsValue::null()),
                 OpCode::LoadUndefined => self.push(JsValue::undefined()),
                 OpCode::LoadHole => self.push(JsValue::hole()),
+                OpCode::LoadUninitialized => self.push(JsValue::uninitialized()),
                 OpCode::LoadTrue => self.push(JsValue::from_boolean(true)),
                 OpCode::LoadFalse => self.push(JsValue::from_boolean(false)),
                 OpCode::This => {
@@ -151,13 +156,21 @@ impl Vm {
                     }
                 }
                 OpCode::LoadSuper => {
-                    let this_val = self.frames.last().unwrap().this_val;
-                    if let Some(ptr) = this_val.as_object_ptr() {
+                    let frame = self.frames.last().unwrap();
+                    let base = if let Some(home_obj) = frame.home_object {
+                        if let Some(ptr) = home_obj.as_object_ptr() {
+                            let obj = unsafe { &*(ptr as *mut JsObject) };
+                            obj.prototype.unwrap_or(JsValue::null())
+                        } else {
+                            JsValue::null()
+                        }
+                    } else if let Some(ptr) = frame.this_val.as_object_ptr() {
                         let obj = unsafe { &*(ptr as *mut JsObject) };
-                        self.push(obj.prototype.unwrap_or(JsValue::null()));
+                        obj.prototype.unwrap_or(JsValue::null())
                     } else {
-                        self.push(JsValue::null());
-                    }
+                        JsValue::null()
+                    };
+                    self.push(base);
                 }
 
                 OpCode::CreateObject => {
@@ -181,6 +194,36 @@ impl Vm {
                 }
                 OpCode::GetKeys => {
                     if let Some(v) = self.op_get_keys(target_depth)? {
+                        return Ok(v);
+                    }
+                }
+                OpCode::GetIterator => {
+                    if let Some(v) = self.op_get_iterator(target_depth)? {
+                        return Ok(v);
+                    }
+                }
+                OpCode::IteratorNext(target) => {
+                    if let Some(v) = self.op_iterator_next(target, target_depth)? {
+                        return Ok(v);
+                    }
+                }
+                OpCode::IteratorClose(is_abrupt) => {
+                    if let Some(v) = self.op_iterator_close(is_abrupt, target_depth)? {
+                        return Ok(v);
+                    }
+                }
+                OpCode::GetAsyncIterator => {
+                    if let Some(v) = self.op_get_async_iterator(target_depth)? {
+                        return Ok(v);
+                    }
+                }
+                OpCode::AsyncIteratorNext(target) => {
+                    if let Some(v) = self.op_async_iterator_next(target, target_depth)? {
+                        return Ok(v);
+                    }
+                }
+                OpCode::AsyncIteratorClose(is_abrupt) => {
+                    if let Some(v) = self.op_async_iterator_close(is_abrupt, target_depth)? {
                         return Ok(v);
                     }
                 }
@@ -213,6 +256,67 @@ impl Vm {
                 }
                 OpCode::SetElem => {
                     self.op_set_elem(target_depth)?;
+                }
+                OpCode::ObjectSpread => {
+                    let source = self.pop()?;
+                    let target = *self.stack.last().ok_or(VmError::StackUnderflow)?;
+                    self.copy_data_properties(target, source, &[])?;
+                }
+                OpCode::ObjectRest(count) => {
+                    let mut excluded = Vec::with_capacity(count as usize);
+                    for _ in 0..count {
+                        excluded.push(self.pop()?);
+                    }
+                    excluded.reverse();
+                    let source = self.pop()?;
+                    let target = self.alloc_object();
+                    self.copy_data_properties(target, source, &excluded)?;
+                    self.push(target);
+                }
+                OpCode::DefinePrivateField(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Private field name must be string".into())),
+                    };
+                    let val = self.pop()?;
+                    let obj = self.pop()?;
+                    if let Some(ptr) = obj.as_object_ptr() {
+                        let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                        jsobj.insert_private_element(name, val);
+                        self.push(val);
+                    } else {
+                        return Err(VmError::TypeError(format!("Cannot install private field {} on non-object", name)));
+                    }
+                }
+                OpCode::DefinePrivateGetter(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Private getter name must be string".into())),
+                    };
+                    let getter = self.pop()?;
+                    let obj = self.pop()?;
+                    if let Some(ptr) = obj.as_object_ptr() {
+                        let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                        jsobj.insert_private_getter(name, getter);
+                        self.push(getter);
+                    } else {
+                        return Err(VmError::TypeError(format!("Cannot install private getter {} on non-object", name)));
+                    }
+                }
+                OpCode::DefinePrivateSetter(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Private setter name must be string".into())),
+                    };
+                    let setter = self.pop()?;
+                    let obj = self.pop()?;
+                    if let Some(ptr) = obj.as_object_ptr() {
+                        let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                        jsobj.insert_private_setter(name, setter);
+                        self.push(setter);
+                    } else {
+                        return Err(VmError::TypeError(format!("Cannot install private setter {} on non-object", name)));
+                    }
                 }
 
                 OpCode::CreateFunction(const_idx) => {
@@ -272,6 +376,9 @@ impl Vm {
                     if let Some(v) = self.op_yield(target_depth)? {
                         return Ok(v);
                     }
+                }
+                OpCode::SetFunctionName(name_idx) => {
+                    self.op_set_function_name(name_idx, &chunk)?;
                 }
 
                 OpCode::Export(name_idx) => {
@@ -399,6 +506,23 @@ impl Vm {
                 OpCode::In => {
                     self.op_in()?;
                 }
+                OpCode::PrivateIn(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Private field name must be string".into())),
+                    };
+                    let rhs = self.pop()?;
+                    if !rhs.is_js_object() {
+                        return Err(VmError::TypeError("Cannot use 'in' operator to search for private field in non-object".into()));
+                    }
+                    let has = if let Some(ptr) = rhs.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        obj.contains_private_element(&name)
+                    } else {
+                        false
+                    };
+                    self.push(JsValue::from_boolean(has));
+                }
 
                 OpCode::Jump(target) => {
                     let frame = self.frames.last_mut().unwrap();
@@ -418,8 +542,16 @@ impl Vm {
                 OpCode::PushCatch(target) => {
                     self.op_push_catch(target);
                 }
+                OpCode::PushFinally(target, start, slot) => {
+                    self.op_push_finally(target, start, slot);
+                }
                 OpCode::PopCatch => {
                     self.catch_stack.pop();
+                }
+                OpCode::EndFinally(slot) => {
+                    if let Some(v) = self.op_end_finally(slot, target_depth)? {
+                        return Ok(v);
+                    }
                 }
 
                 OpCode::GetLocal(slot) => {

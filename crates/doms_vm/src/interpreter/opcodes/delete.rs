@@ -33,6 +33,7 @@ impl Vm {
                             if let Some(accs) = &mut obj.accessors {
                                 accs.remove(&prop);
                             }
+                            obj.remove_prop_order(&prop);
                             let new_shape_id = self.shapes.remove_property(obj.shape_id, &prop);
                             obj.shape_id = new_shape_id;
                             if target == self.global_object {
@@ -56,8 +57,10 @@ impl Vm {
                     if let Some(ptr) = target.as_object_ptr() {
                         let obj = unsafe { &mut *(ptr as *mut JsObject) };
                         if key_val.is_symbol() || key_val.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))) {
+                            let key_name = format!("[Symbol:{:x}]", key_val.raw_bits());
                             if self.module_namespace_objects.contains(&target)
                                 || self.non_configurable_props.contains(&(target, "[Symbol.toStringTag]".to_string()))
+                                || self.non_configurable_props.contains(&(target, key_name))
                             {
                                 if is_strict {
                                     self.handle_exception_at_depth(
@@ -93,10 +96,32 @@ impl Vm {
                                     self.push(JsValue::from_boolean(false));
                                 }
                             } else {
+                                if let ObjectKind::Array(elements) = &mut obj.kind {
+                                    if prop == "length" {
+                                        if is_strict {
+                                            self.handle_exception_at_depth(
+                                                VmError::TypeError("Cannot delete property 'length'".into()),
+                                                target_depth,
+                                            )?;
+                                            return Ok(Some(JsValue::undefined()));
+                                        } else {
+                                            self.push(JsValue::from_boolean(false));
+                                            return Ok(None);
+                                        }
+                                    }
+                                    if let Ok(idx) = prop.parse::<usize>() {
+                                        if idx < elements.len() {
+                                            elements[idx] = JsValue::hole();
+                                            self.push(JsValue::from_boolean(true));
+                                            return Ok(None);
+                                        }
+                                    }
+                                }
                                 self.deleted_props.insert((target, prop.clone()));
                                 if let Some(accs) = &mut obj.accessors {
                                     accs.remove(&prop);
                                 }
+                                obj.remove_prop_order(&prop);
                                 let new_shape_id = self.shapes.remove_property(obj.shape_id, &prop);
                                 obj.shape_id = new_shape_id;
                                 if target == self.global_object {

@@ -35,7 +35,7 @@ impl<'a> Parser<'a> {
                 }
                 self.advance()?;
                 let prop_tok = self.advance()?;
-                let prop = match prop_tok.kind.as_prop_name() {
+                let mut prop = match prop_tok.kind.as_prop_name() {
                     Some(id) => id,
                     None => {
                         return Err(ParseError::UnexpectedToken(
@@ -45,12 +45,17 @@ impl<'a> Parser<'a> {
                         ));
                     }
                 };
-                if prop.starts_with('#') && !self.private_names_stack.iter().any(|set| set.contains(&prop)) {
-                    return Err(ParseError::UnexpectedToken(
-                        prop_tok.kind,
-                        prop_tok.line,
-                        prop_tok.col,
-                    ));
+                if prop.starts_with('#') {
+                    prop = match self.resolve_private_name(&prop) {
+                        Some(scoped) => scoped,
+                        None => {
+                            return Err(ParseError::UnexpectedToken(
+                                prop_tok.kind,
+                                prop_tok.line,
+                                prop_tok.col,
+                            ));
+                        }
+                    };
                 }
                 lhs = Expression::Member { object: Box::new(lhs), property: prop };
                 continue;
@@ -154,7 +159,11 @@ impl<'a> Parser<'a> {
                         right: Box::new(value),
                     };
                 }
-                match lhs {
+                let mut target_pattern = lhs;
+                while let Expression::Grouping(inner) = target_pattern {
+                    target_pattern = *inner;
+                }
+                match target_pattern {
                     Expression::Identifier(name) => {
                         if self.is_strict && (name == "eval" || name == "arguments") {
                             return Err(ParseError::UnexpectedToken(TokenKind::Ident(name), self.current.line, self.current.col));
@@ -166,6 +175,12 @@ impl<'a> Parser<'a> {
                     }
                     Expression::Index { object, index } => {
                         lhs = Expression::IndexAssignment { object, index, value: Box::new(value) };
+                    }
+                    p @ Expression::Array(_) | p @ Expression::Object(_) if opt_bin_op.is_none() => {
+                        lhs = Expression::DestructuringAssignment {
+                            pattern: Box::new(p),
+                            value: Box::new(value),
+                        };
                     }
                     _ => {
                         return Err(ParseError::InvalidAssignmentTarget(
@@ -229,7 +244,17 @@ impl<'a> Parser<'a> {
 
             self.advance()?;
             let rhs = self.parse_expression(r_bp)?;
+            if matches!(rhs, Expression::PrivateIdentifier(_)) {
+                return Err(ParseError::UnexpectedToken(TokenKind::In, self.current.line, self.current.col));
+            }
+            if matches!(lhs, Expression::PrivateIdentifier(_)) && matches!(rhs, Expression::ArrowExpr { .. }) {
+                return Err(ParseError::UnexpectedToken(TokenKind::FatArrow, self.current.line, self.current.col));
+            }
             lhs = Expression::Binary { op, left: Box::new(lhs), right: Box::new(rhs) };
+        }
+
+        if matches!(lhs, Expression::PrivateIdentifier(_)) {
+            return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
         }
 
         Ok(lhs)

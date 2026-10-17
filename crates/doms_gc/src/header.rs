@@ -25,6 +25,11 @@ const FLAG_MARKED: u16 = 1 << 2;
 /// Flag: object has been promoted to old generation.
 const FLAG_TENURED: u16 = 1 << 3;
 
+/// Bit shift for object age (number of scavenges survived).
+const AGE_SHIFT: u16 = 4;
+/// Bit mask for object age (4 bits: 0..15).
+const AGE_MASK: u16 = 0x00F0;
+
 /// Type tag identifying the kind of GC-managed object.
 ///
 /// The GC uses this to dispatch tracing — each type tag corresponds to a
@@ -197,6 +202,27 @@ impl GcHeader {
     #[inline]
     pub fn set_tenured(&mut self) {
         self.flags |= FLAG_TENURED;
+    }
+
+    /// Returns the object's age (number of scavenges survived).
+    #[inline]
+    pub fn age(&self) -> u8 {
+        ((self.flags & AGE_MASK) >> AGE_SHIFT) as u8
+    }
+
+    /// Set the object's age (0..15).
+    #[inline]
+    pub fn set_age(&mut self, age: u8) {
+        let age_bits = ((age.min(15) as u16) << AGE_SHIFT) & AGE_MASK;
+        self.flags = (self.flags & !AGE_MASK) | age_bits;
+    }
+
+    /// Increment the object's age by 1, saturating at 15.
+    #[inline]
+    pub fn increment_age(&mut self) -> u8 {
+        let new_age = (self.age() + 1).min(15);
+        self.set_age(new_age);
+        new_age
     }
 
     // ── Forwarding (used during nursery scavenge) ──

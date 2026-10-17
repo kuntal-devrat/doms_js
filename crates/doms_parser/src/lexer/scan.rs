@@ -36,6 +36,7 @@ impl<'a> Lexer<'a> {
                     line,
                     col,
                     has_preceding_line_terminator,
+                    has_escape: false,
                 };
                 self.record_token(TokenKind::Eof);
                 return Ok(tok);
@@ -50,17 +51,19 @@ impl<'a> Lexer<'a> {
                 line,
                 col,
                 has_preceding_line_terminator,
+                has_escape: false,
             });
         }
 
         if is_identifier_start(ch) || ch == '\\' {
-            let kind = self.read_identifier_or_keyword(line, col)?;
+            let (kind, has_escape) = self.read_identifier_or_keyword(line, col)?;
             let kind = self.record_token(kind);
             return Ok(Token {
                 kind,
                 line,
                 col,
                 has_preceding_line_terminator,
+                has_escape,
             });
         }
 
@@ -68,7 +71,7 @@ impl<'a> Lexer<'a> {
             self.advance(); // consume '#'
             if let Some(next_c) = self.peek() {
                 if is_identifier_start(next_c) || next_c == '\\' {
-                    let ident_token = self.read_identifier_or_keyword(line, col)?;
+                    let (ident_token, has_escape) = self.read_identifier_or_keyword(line, col)?;
                     let name = ident_token.as_prop_name().unwrap_or_default();
                     let kind = self.record_token(TokenKind::PrivateIdent(name));
                     return Ok(Token {
@@ -76,6 +79,7 @@ impl<'a> Lexer<'a> {
                         line,
                         col,
                         has_preceding_line_terminator,
+                        has_escape,
                     });
                 }
             }
@@ -92,6 +96,7 @@ impl<'a> Lexer<'a> {
                     line,
                     col,
                     has_preceding_line_terminator,
+                    has_escape: false,
                 });
             }
             if next_c == Some('.') && self.peek3() == Some('.') {
@@ -104,6 +109,7 @@ impl<'a> Lexer<'a> {
                     line,
                     col,
                     has_preceding_line_terminator,
+                    has_escape: false,
                 });
             }
         }
@@ -116,6 +122,7 @@ impl<'a> Lexer<'a> {
                 line,
                 col,
                 has_preceding_line_terminator,
+                has_escape: false,
             });
         }
 
@@ -127,6 +134,7 @@ impl<'a> Lexer<'a> {
                 line,
                 col,
                 has_preceding_line_terminator,
+                has_escape: false,
             });
         }
 
@@ -138,6 +146,7 @@ impl<'a> Lexer<'a> {
                 line,
                 col,
                 has_preceding_line_terminator,
+                has_escape: false,
             });
         }
 
@@ -149,6 +158,7 @@ impl<'a> Lexer<'a> {
             line,
             col,
             has_preceding_line_terminator,
+            has_escape: false,
         })
     }
 

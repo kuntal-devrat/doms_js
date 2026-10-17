@@ -87,6 +87,12 @@ impl Vm {
             mark_val(*target, &mut worklist, &mut live);
         }
         for frame in &self.frames {
+            if let Some(gv) = frame.gen_val {
+                mark_val(gv, &mut worklist, &mut live);
+            }
+            if let Some(cv) = frame.callee_val {
+                mark_val(cv, &mut worklist, &mut live);
+            }
             mark_val(frame.this_val, &mut worklist, &mut live);
             for local in &frame.locals {
                 mark_val(*local, &mut worklist, &mut live);
@@ -99,6 +105,20 @@ impl Vm {
             }
             if let Some(args_val) = frame.arguments {
                 mark_val(args_val, &mut worklist, &mut live);
+            }
+            if let Some(nt) = frame.new_target {
+                mark_val(nt, &mut worklist, &mut live);
+            }
+            if let Some(ho) = frame.home_object {
+                mark_val(ho, &mut worklist, &mut live);
+            }
+            if let Some(f) = &frame.callee_func {
+                for uv in &f.upvalues {
+                    mark_val(*uv, &mut worklist, &mut live);
+                }
+                if let Some(ho) = f.home_object {
+                    mark_val(ho, &mut worklist, &mut live);
+                }
             }
         }
         for val in self.globals.values() {
@@ -123,6 +143,9 @@ impl Vm {
             }
         }
         if let Some(s) = self.symbol_iterator {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_async_iterator {
             mark_val(s, &mut worklist, &mut live);
         }
         if let Some(s) = self.symbol_to_string_tag {
@@ -191,6 +214,9 @@ impl Vm {
                     for uv in &f.upvalues {
                         mark_val(*uv, &mut worklist, &mut live);
                     }
+                    if let Some(ho) = f.home_object {
+                        mark_val(ho, &mut worklist, &mut live);
+                    }
                 }
                 ObjectKind::Promise(p) => {
                     mark_val(p.result, &mut worklist, &mut live);
@@ -205,8 +231,20 @@ impl Vm {
                     for v in &g.stack {
                         mark_val(*v, &mut worklist, &mut live);
                     }
+                    for v in &g.locals {
+                        mark_val(*v, &mut worklist, &mut live);
+                    }
+                    for sc in &g.scopes {
+                        mark_val(*sc, &mut worklist, &mut live);
+                    }
+                    if let Some(env) = g.env_obj {
+                        mark_val(env, &mut worklist, &mut live);
+                    }
                     for uv in &g.function.upvalues {
                         mark_val(*uv, &mut worklist, &mut live);
+                    }
+                    if let Some(ho) = g.function.home_object {
+                        mark_val(ho, &mut worklist, &mut live);
                     }
                     mark_val(g.this_val, &mut worklist, &mut live);
                     if let Some(args) = g.arguments {
@@ -347,6 +385,14 @@ impl Vm {
         }
         copy_val(&mut self.global_object, &mut to_cursor);
         for frame in &mut self.frames {
+            if let Some(mut gv) = frame.gen_val {
+                copy_val(&mut gv, &mut to_cursor);
+                frame.gen_val = Some(gv);
+            }
+            if let Some(mut cv) = frame.callee_val {
+                copy_val(&mut cv, &mut to_cursor);
+                frame.callee_val = Some(cv);
+            }
             copy_val(&mut frame.this_val, &mut to_cursor);
             for local in &mut frame.locals {
                 copy_val(local, &mut to_cursor);
@@ -365,6 +411,18 @@ impl Vm {
             if let Some(mut nt) = frame.new_target {
                 copy_val(&mut nt, &mut to_cursor);
                 frame.new_target = Some(nt);
+            }
+            if let Some(mut ho) = frame.home_object {
+                copy_val(&mut ho, &mut to_cursor);
+                frame.home_object = Some(ho);
+            }
+            if let Some(f) = &mut frame.callee_func {
+                for uv in &mut f.upvalues {
+                    copy_val(uv, &mut to_cursor);
+                }
+                if let Some(ref mut ho) = f.home_object {
+                    copy_val(ho, &mut to_cursor);
+                }
             }
         }
         for val in self.globals.values_mut() {
@@ -391,6 +449,10 @@ impl Vm {
         if let Some(mut s) = self.symbol_iterator {
             copy_val(&mut s, &mut to_cursor);
             self.symbol_iterator = Some(s);
+        }
+        if let Some(mut s) = self.symbol_async_iterator {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_async_iterator = Some(s);
         }
         if let Some(mut s) = self.symbol_to_string_tag {
             copy_val(&mut s, &mut to_cursor);

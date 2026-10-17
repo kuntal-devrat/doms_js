@@ -42,7 +42,11 @@ pub struct Parser<'a> {
     pub in_derived_constructor: bool,
     pub allow_in: bool,
     pub in_param: bool,
-    pub private_names_stack: Vec<std::collections::HashSet<String>>,
+    pub in_single_statement_context: bool,
+    pub in_static_block: bool,
+    pub private_names_stack: Vec<std::collections::HashMap<String, String>>,
+    pub class_id_counter: usize,
+    pub(crate) trailing_comma_after_rest: bool,
 }
 
 #[inline]
@@ -85,7 +89,11 @@ impl<'a> Parser<'a> {
             in_derived_constructor: false,
             allow_in: true,
             in_param: false,
+            in_single_statement_context: false,
+            in_static_block: false,
             private_names_stack: Vec::new(),
+            class_id_counter: 0,
+            trailing_comma_after_rest: false,
         })
     }
 
@@ -115,7 +123,11 @@ impl<'a> Parser<'a> {
             in_derived_constructor: false,
             allow_in: true,
             in_param: false,
+            in_single_statement_context: false,
+            in_static_block: false,
             private_names_stack: Vec::new(),
+            class_id_counter: 0,
+            trailing_comma_after_rest: false,
         })
     }
 
@@ -150,9 +162,13 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn check_ident(&self, name: &str) -> bool {
         match &self.current.kind {
-            TokenKind::Ident(s) => s == name,
+            TokenKind::Ident(s) => s == name && !self.current.has_escape,
             _ => false,
         }
+    }
+
+    pub(crate) fn resolve_private_name(&self, name: &str) -> Option<String> {
+        self.private_names_stack.iter().rev().find_map(|map| map.get(name).cloned())
     }
 
     pub(crate) fn match_token(&mut self, kind: &TokenKind) -> Result<bool, ParseError> {
@@ -207,7 +223,7 @@ impl<'a> Parser<'a> {
             TokenKind::From => "from".to_string(),
             TokenKind::Async => "async".to_string(),
             TokenKind::Await => {
-                if self.is_module || self.is_strict {
+                if self.is_module || self.in_async || self.in_static_block {
                     return Err(ParseError::UnexpectedToken(TokenKind::Await, tok.line, tok.col));
                 }
                 "await".to_string()

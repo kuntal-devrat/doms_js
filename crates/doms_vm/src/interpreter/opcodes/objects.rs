@@ -108,6 +108,378 @@ impl Vm {
         Ok(None)
     }
 
+    pub(crate) fn op_get_iterator(&mut self, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+        let iterable = self.pop()?;
+        if iterable.is_nullish() {
+            let err = VmError::TypeError("Value is not iterable".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let sym_iter = match self.symbol_iterator {
+            Some(s) => s,
+            None => {
+                let err = VmError::TypeError("No Symbol.iterator".into());
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(None);
+            }
+        };
+        let method = match self.get_symbol_property_result(iterable, sym_iter) {
+            Ok(m) => m,
+            Err(e) => {
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        if !self.is_callable(method) {
+            let err = VmError::TypeError("Value is not iterable".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(iterable);
+        self.temp_roots.push(method);
+        let iterator = match self.call(method, iterable, &[]) {
+            Ok(it) => it,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        self.temp_roots.truncate(prev_temp);
+        if !iterator.is_object() {
+            let err = VmError::TypeError("Iterator is not an object".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let next_fn = match self.get_property_result(iterator, "next") {
+            Ok(n) => n,
+            Err(e) => {
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        if !self.is_callable(next_fn) {
+            let err = VmError::TypeError("Iterator next is not callable".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        self.push(iterator);
+        Ok(None)
+    }
+
+    pub(crate) fn op_iterator_next(&mut self, target: i32, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+        let iterator = self.pop()?;
+        let next_fn = match self.get_property_result(iterator, "next") {
+            Ok(n) => n,
+            Err(e) => {
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        if !self.is_callable(next_fn) {
+            let err = VmError::TypeError("Iterator next is not callable".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(iterator);
+        self.temp_roots.push(next_fn);
+        let step = match self.call(next_fn, iterator, &[]) {
+            Ok(s) => s,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        self.temp_roots.push(step);
+        if !step.is_object() {
+            self.temp_roots.truncate(prev_temp);
+            let err = VmError::TypeError("Iterator result is not an object".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let done = match self.get_property_result(step, "done") {
+            Ok(d) => d,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        if done.is_truthy() {
+            self.temp_roots.truncate(prev_temp);
+            if let Some(frame) = self.frames.last_mut() {
+                frame.ip = target as usize;
+            }
+        } else {
+            let val = match self.get_property_result(step, "value") {
+                Ok(v) => v,
+                Err(e) => {
+                    self.temp_roots.truncate(prev_temp);
+                    self.handle_exception_at_depth(e, target_depth)?;
+                    return Ok(None);
+                }
+            };
+            self.temp_roots.truncate(prev_temp);
+            self.push(val);
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn op_iterator_close(&mut self, is_abrupt: bool, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+        let iterator = self.pop()?;
+        if !iterator.is_object() {
+            return Ok(None);
+        }
+        let ret_method = match self.get_property_result(iterator, "return") {
+            Ok(m) => m,
+            Err(e) => {
+                if is_abrupt {
+                    return Ok(None);
+                } else {
+                    self.handle_exception_at_depth(e, target_depth)?;
+                    return Ok(None);
+                }
+            }
+        };
+        if ret_method.is_undefined() || ret_method.is_null() {
+            return Ok(None);
+        }
+        if !self.is_callable(ret_method) {
+            if is_abrupt {
+                return Ok(None);
+            } else {
+                let err = VmError::TypeError("Iterator return is not callable".into());
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(None);
+            }
+        }
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(iterator);
+        self.temp_roots.push(ret_method);
+        let inner_result = self.call(ret_method, iterator, &[]);
+        self.temp_roots.truncate(prev_temp);
+        if is_abrupt {
+            return Ok(None);
+        }
+        match inner_result {
+            Ok(inner_val) => {
+                if !inner_val.is_object() {
+                    let err = VmError::TypeError("Iterator return did not return an object".into());
+                    self.handle_exception_at_depth(err, target_depth)?;
+                    return Ok(None);
+                }
+            }
+            Err(e) => {
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn op_get_async_iterator(&mut self, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+        let iterable = self.pop()?;
+        if iterable.is_nullish() {
+            let err = VmError::TypeError("Value is not async iterable".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let mut method = if let Some(sym_async) = self.symbol_async_iterator {
+            match self.get_symbol_property_result(iterable, sym_async) {
+                Ok(m) if self.is_callable(m) => Some(m),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if method.is_none() {
+            if let Some(sym_iter) = self.symbol_iterator {
+                if let Ok(m) = self.get_symbol_property_result(iterable, sym_iter) {
+                    if self.is_callable(m) {
+                        method = Some(m);
+                    }
+                }
+            }
+        }
+        let method = match method {
+            Some(m) => m,
+            None => {
+                let err = VmError::TypeError("Value is not async iterable".into());
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(None);
+            }
+        };
+
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(iterable);
+        self.temp_roots.push(method);
+        let iterator = match self.call(method, iterable, &[]) {
+            Ok(it) => it,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        self.temp_roots.truncate(prev_temp);
+        if !iterator.is_object() {
+            let err = VmError::TypeError("Iterator is not an object".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let next_fn = match self.get_property_result(iterator, "next") {
+            Ok(n) => n,
+            Err(e) => {
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        if !self.is_callable(next_fn) {
+            let err = VmError::TypeError("Iterator next is not callable".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        self.push(iterator);
+        Ok(None)
+    }
+
+    pub(crate) fn op_async_iterator_next(&mut self, target: i32, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+        let iterator = self.pop()?;
+        let next_fn = match self.get_property_result(iterator, "next") {
+            Ok(n) => n,
+            Err(e) => {
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        if !self.is_callable(next_fn) {
+            let err = VmError::TypeError("Iterator next is not callable".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(iterator);
+        self.temp_roots.push(next_fn);
+        let step_promise = match self.call(next_fn, iterator, &[]) {
+            Ok(s) => s,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        self.temp_roots.push(step_promise);
+        let step = match self.await_value(step_promise) {
+            Ok(s) => s,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        self.temp_roots.push(step);
+        if !step.is_object() {
+            self.temp_roots.truncate(prev_temp);
+            let err = VmError::TypeError("Iterator result is not an object".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        let done = match self.get_property_result(step, "done") {
+            Ok(d) => d,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                self.handle_exception_at_depth(e, target_depth)?;
+                return Ok(None);
+            }
+        };
+        if done.is_truthy() {
+            self.temp_roots.truncate(prev_temp);
+            if let Some(frame) = self.frames.last_mut() {
+                frame.ip = target as usize;
+            }
+        } else {
+            let val = match self.get_property_result(step, "value") {
+                Ok(v) => v,
+                Err(e) => {
+                    self.temp_roots.truncate(prev_temp);
+                    self.handle_exception_at_depth(e, target_depth)?;
+                    return Ok(None);
+                }
+            };
+            self.temp_roots.truncate(prev_temp);
+            self.push(val);
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn op_async_iterator_close(&mut self, is_abrupt: bool, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+        let iterator = self.pop()?;
+        if !iterator.is_object() {
+            return Ok(None);
+        }
+        let ret_method = match self.get_property_result(iterator, "return") {
+            Ok(m) => m,
+            Err(e) => {
+                if is_abrupt {
+                    return Ok(None);
+                } else {
+                    self.handle_exception_at_depth(e, target_depth)?;
+                    return Ok(None);
+                }
+            }
+        };
+        if ret_method.is_undefined() || ret_method.is_null() {
+            return Ok(None);
+        }
+        if !self.is_callable(ret_method) {
+            if is_abrupt {
+                return Ok(None);
+            } else {
+                let err = VmError::TypeError("Iterator return is not callable".into());
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(None);
+            }
+        }
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(iterator);
+        self.temp_roots.push(ret_method);
+        let ret_promise = match self.call(ret_method, iterator, &[]) {
+            Ok(r) => r,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                if is_abrupt {
+                    return Ok(None);
+                } else {
+                    self.handle_exception_at_depth(e, target_depth)?;
+                    return Ok(None);
+                }
+            }
+        };
+        self.temp_roots.push(ret_promise);
+        let ret_res = match self.await_value(ret_promise) {
+            Ok(r) => r,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                if is_abrupt {
+                    return Ok(None);
+                } else {
+                    self.handle_exception_at_depth(e, target_depth)?;
+                    return Ok(None);
+                }
+            }
+        };
+        self.temp_roots.truncate(prev_temp);
+        if !ret_res.is_object() && !is_abrupt {
+            let err = VmError::TypeError("Iterator return did not return an object".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
+        }
+        Ok(None)
+    }
+
     pub(crate) fn op_define_getter(&mut self, prop_idx: u16, chunk: &BytecodeChunk) -> Result<(), VmError> {
         let name = match &chunk.constants[prop_idx as usize] {
             Constant::String(s) => s.clone(),
@@ -115,6 +487,12 @@ impl Vm {
         };
         let getter = self.pop()?;
         let obj = self.pop()?;
+        if let Some(val_ptr) = getter.as_object_ptr() {
+            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                f.home_object = Some(obj);
+            }
+        }
         if let Some(ptr) = obj.as_object_ptr() {
             let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
             jsobj.define_getter(name, getter);
@@ -129,6 +507,12 @@ impl Vm {
         };
         let setter = self.pop()?;
         let obj = self.pop()?;
+        if let Some(val_ptr) = setter.as_object_ptr() {
+            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                f.home_object = Some(obj);
+            }
+        }
         if let Some(ptr) = obj.as_object_ptr() {
             let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
             jsobj.define_setter(name, setter);
@@ -147,6 +531,12 @@ impl Vm {
                 return Ok(());
             }
         };
+        if let Some(val_ptr) = getter_val.as_object_ptr() {
+            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                f.home_object = Some(obj_val);
+            }
+        }
         if let Some(ptr) = obj_val.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             match prop_key {
@@ -173,6 +563,12 @@ impl Vm {
                 return Ok(());
             }
         };
+        if let Some(val_ptr) = setter_val.as_object_ptr() {
+            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                f.home_object = Some(obj_val);
+            }
+        }
         if let Some(ptr) = obj_val.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             match prop_key {

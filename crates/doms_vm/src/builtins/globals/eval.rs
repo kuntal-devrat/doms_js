@@ -40,14 +40,14 @@ pub(super) fn register_eval(vm: &mut Vm) {
         }
 
         let is_direct = std::mem::take(&mut vm.in_direct_eval);
-        let (caller_strict, caller_in_method, caller_in_function, caller_is_fn) = if is_direct {
+        let (caller_strict, caller_in_method, caller_in_function, caller_is_fn, caller_home_obj) = if is_direct {
             if let Some(f) = vm.frames.last() {
-                (f.is_strict, f.is_method, f.is_function && !f.is_arrow, f.is_function)
+                (f.is_strict, f.is_method, f.is_function && !f.is_arrow, f.is_function, f.home_object)
             } else {
-                (vm.is_strict, false, false, false)
+                (vm.is_strict, false, false, false, None)
             }
         } else {
-            (false, false, false, false)
+            (false, false, false, false, None)
         };
 
         let program = doms_parser::parse_eval(&code_str, caller_strict, caller_in_method, caller_in_function)
@@ -218,7 +218,7 @@ pub(super) fn register_eval(vm: &mut Vm) {
                 ip: 0,
                 base_sp,
                 this_val: effective_this,
-                gen_ptr: None,
+                gen_val: None,
                 locals: Vec::new(),
                 local_names: Vec::new(),
                 lexical_local_names: Vec::new(),
@@ -235,7 +235,9 @@ pub(super) fn register_eval(vm: &mut Vm) {
                 in_param_init: false,
                 is_indirect_eval: !is_direct,
                 callee_func: None,
+                callee_val: None,
                 mapped_arguments: None,
+                home_object: caller_home_obj,
             });
             vm.run_until_depth(target_depth)
         })();

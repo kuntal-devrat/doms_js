@@ -74,6 +74,39 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
         }
         Err(VmError::TypeError("toISOString is not callable".into()))
     });
+    let date_to_locale_string = vm.alloc_native_function("toLocaleString", 0, |vm, this, _args| {
+        let (_, ms) = get_date_ms(this)?;
+        match ms_to_utc(ms) {
+            Some((y, m, d, _, h, min, s, _)) => {
+                let s = format!("{:02}/{:02}/{:04}, {:02}:{:02}:{:02}", m + 1, d, y, h, min, s);
+                Ok(vm.alloc_string(s))
+            }
+            None => Ok(vm.alloc_string("Invalid Date".into())),
+        }
+    });
+
+    let date_to_locale_date_string = vm.alloc_native_function("toLocaleDateString", 0, |vm, this, _args| {
+        let (_, ms) = get_date_ms(this)?;
+        match ms_to_utc(ms) {
+            Some((y, m, d, _, _, _, _, _)) => {
+                let s = format!("{:02}/{:02}/{:04}", m + 1, d, y);
+                Ok(vm.alloc_string(s))
+            }
+            None => Ok(vm.alloc_string("Invalid Date".into())),
+        }
+    });
+
+    let date_to_locale_time_string = vm.alloc_native_function("toLocaleTimeString", 0, |vm, this, _args| {
+        let (_, ms) = get_date_ms(this)?;
+        match ms_to_utc(ms) {
+            Some((_, _, _, _, h, min, s, _)) => {
+                let s = format!("{:02}:{:02}:{:02}", h, min, s);
+                Ok(vm.alloc_string(s))
+            }
+            None => Ok(vm.alloc_string("Invalid Date".into())),
+        }
+    });
+
     vec![
         ("toISOString", date_to_iso_string),
         ("toUTCString", date_to_utc_string),
@@ -82,5 +115,8 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
         ("toTimeString", date_to_time_string),
         ("toString", date_to_string),
         ("toJSON", date_to_json),
+        ("toLocaleString", date_to_locale_string),
+        ("toLocaleDateString", date_to_locale_date_string),
+        ("toLocaleTimeString", date_to_locale_time_string),
     ]
 }

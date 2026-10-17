@@ -49,6 +49,23 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
     });
     vm.set_property(array_proto, "join", join_fn);
 
+    let to_string_fn = vm.alloc_native_function("toString", 0, |vm, this, _args| {
+        let join = vm.get_property(this, "join");
+        if vm.is_callable(join) {
+            vm.call(join, this, &[])
+        } else {
+            let obj_proto = vm.object_proto.unwrap_or(JsValue::undefined());
+            let obj_to_string = vm.get_property(obj_proto, "toString");
+            if vm.is_callable(obj_to_string) {
+                vm.call(obj_to_string, this, &[])
+            } else {
+                Ok(vm.alloc_string("[object Array]".into()))
+            }
+        }
+    });
+    vm.set_property(array_proto, "toString", to_string_fn);
+    vm.set_property(array_proto, "toLocaleString", to_string_fn);
+
     let push_fn = vm.alloc_native_function("push", 1, |_vm, this, args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
@@ -155,7 +172,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Array(elements) = &obj.kind {
                 for (i, el) in elements.iter().enumerate() {
-                    if *el == search {
+                    if crate::object::js_strict_equal(*el, search) {
                         return Ok(JsValue::from_int32(i as i32));
                     }
                 }
@@ -171,7 +188,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Array(elements) = &obj.kind {
                 for el in elements {
-                    if *el == search {
+                    if crate::object::js_values_equal(*el, search) {
                         return Ok(JsValue::from_boolean(true));
                     }
                 }

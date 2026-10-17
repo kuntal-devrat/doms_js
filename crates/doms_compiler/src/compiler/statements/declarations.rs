@@ -18,12 +18,34 @@ impl Compiler {
         }
         for decl in declarations {
             if let Some(init_expr) = &decl.init {
-                self.compile_expression(init_expr)?;
-                if decl.name.starts_with("__destruct_") || decl.name.starts_with("@destruct_") {
+                match init_expr {
+                    Expression::Conditional { condition, then_expr, else_expr } if !decl.name.starts_with('@') => {
+                        self.compile_conditional_with_name(condition, then_expr, else_expr, Some(&decl.name))?;
+                    }
+                    Expression::ClassExpr(class_def) if !decl.name.starts_with('@') && class_def.name.is_none() => {
+                        self.compile_class_definition_with_name(class_def, Some(decl.name.clone()))?;
+                    }
+                    _ => {
+                        self.compile_expression(init_expr)?;
+                        if !decl.name.starts_with('@') && Self::is_anonymous_function_definition(init_expr) {
+                            let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
+                            self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                        }
+                    }
+                }
+                if decl.name.starts_with("__destruct_") || decl.name.starts_with("@destruct_") || decl.name.starts_with("@dstr_") {
                     self.chunk.emit(OpCode::RequireObjectCoercible, 0);
                 }
 
-                if *kind == VarKind::Var && !self.is_in_function {
+                if decl.name.starts_with('@') {
+                    let slot = if let Some(existing) = self.symbols.resolve_local(&decl.name) {
+                        existing
+                    } else {
+                        self.symbols.define_local(decl.name.clone())
+                    };
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                } else if *kind == VarKind::Var && !self.is_in_function {
                     let is_touched = self.touched_bindings.remove(&decl.name);
                     let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
                     if is_touched {
@@ -65,6 +87,15 @@ impl Compiler {
                     }
                     self.chunk.emit(OpCode::Pop, 0);
                 }
+            } else if decl.name.starts_with('@') {
+                self.chunk.emit(OpCode::LoadUndefined, 0);
+                let slot = if let Some(existing) = self.symbols.resolve_local(&decl.name) {
+                    existing
+                } else {
+                    self.symbols.define_local(decl.name.clone())
+                };
+                self.chunk.emit(OpCode::SetLocal(slot), 0);
+                self.chunk.emit(OpCode::Pop, 0);
             } else if *kind == VarKind::Let {
                 self.chunk.emit(OpCode::LoadUndefined, 0);
                 if self.is_in_function && self.symbols.scope_depth > 0 {
@@ -106,7 +137,7 @@ impl Compiler {
                 match s {
                     Statement::VarDecl { kind, declarations } if *kind != VarKind::Var => {
                         for d in declarations {
-                            if !block_lex_names.contains(&d.name) {
+                            if !d.name.starts_with('@') && !block_lex_names.contains(&d.name) {
                                 block_lex_names.push(d.name.clone());
                             }
                         }

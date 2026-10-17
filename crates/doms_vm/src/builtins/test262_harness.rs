@@ -19,8 +19,8 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
     vm.set_property(test262_obj, "evalScript", eval_script_fn);
 
     let gc_fn = vm.alloc_native_function("gc", 0, |vm, _this, _args| {
-        vm.heap.collect_nursery();
-        let _ = vm.heap.collect_old_gen_compact();
+        vm.scavenge_nursery();
+        let _ = vm.gc_collect();
         Ok(JsValue::undefined())
     });
     vm.set_property(test262_obj, "gc", gc_fn);
@@ -96,7 +96,7 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
                 ip: 0,
                 base_sp: vm.stack.len(),
                 this_val: realm_glob,
-                gen_ptr: None,
+                gen_val: None,
                 locals: Vec::new(),
                 local_names: Vec::new(),
                 lexical_local_names: Vec::new(),
@@ -113,7 +113,9 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
                 in_param_init: false,
                 is_indirect_eval: true,
                 callee_func: None,
+                callee_val: None,
                 mapped_arguments: None,
+                home_object: None,
             });
             vm.run_until_depth(target_depth)
         }));

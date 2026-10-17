@@ -10,7 +10,6 @@ doms_gc.workspace = true
 doms_parser.workspace = true
 doms_compiler.workspace = true
 doms_vm.workspace = true
-doms_runtime.workspace = true
 doms_parallel.workspace = true
 thiserror.workspace = true
 log.workspace = true

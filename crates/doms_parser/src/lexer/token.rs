@@ -209,4 +209,5 @@ pub struct Token {
     pub line: usize,
     pub col: usize,
     pub has_preceding_line_terminator: bool,
+    pub has_escape: bool,
 }

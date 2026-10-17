@@ -30,7 +30,7 @@ use crate::builtins::register_builtins;
 use crate::inline_cache::InlineCacheSlot;
 use crate::object::{
     Accessor, JsFunction, JsGenerator, JsObject, JsTypedArray, NativeFn, NativeFunction, ObjectKind,
-    PromiseState, TypedArrayKind,
+    PromiseState, SavedCatchHandler, TypedArrayKind,
 };
 use crate::shape::ShapeRegistry;
 use crate::value::JsValue;

@@ -48,8 +48,109 @@ pub(super) fn register_number_global(vm: &mut Vm) {
             Ok(vm.alloc_string(s))
         }
     });
-    vm.set_property(number_proto, "valueOf", num_value_of);
-    vm.set_property(number_proto, "toString", num_to_string);
+
+    let num_to_locale_string = vm.alloc_native_function("toLocaleString", 0, |vm, this, _args| {
+        let n = if this.is_number() {
+            this.to_number().unwrap_or(0.0)
+        } else if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::NumberObject(num) = obj.kind {
+                num
+            } else {
+                return Err(VmError::TypeError("Number.prototype.toLocaleString requires that 'this' be a Number".into()));
+            }
+        } else {
+            return Err(VmError::TypeError("Number.prototype.toLocaleString requires that 'this' be a Number".into()));
+        };
+        Ok(vm.alloc_string(vm.to_string_value(JsValue::from_double(n))))
+    });
+
+    let num_to_fixed = vm.alloc_native_function("toFixed", 1, |vm, this, args| {
+        let n = if this.is_number() {
+            this.to_number().unwrap_or(0.0)
+        } else if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::NumberObject(num) = obj.kind {
+                num
+            } else {
+                return Err(VmError::TypeError("Number.prototype.toFixed requires that 'this' be a Number".into()));
+            }
+        } else {
+            return Err(VmError::TypeError("Number.prototype.toFixed requires that 'this' be a Number".into()));
+        };
+        let frac = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
+        if !(0..=100).contains(&frac) {
+            return Err(VmError::RangeError("toFixed() digits argument must be between 0 and 100".into()));
+        }
+        if n.is_nan() || n.is_infinite() {
+            return Ok(vm.alloc_string(vm.to_string_value(JsValue::from_double(n))));
+        }
+        let s = format!("{:.*}", frac as usize, n);
+        Ok(vm.alloc_string(s))
+    });
+
+    let num_to_exponential = vm.alloc_native_function("toExponential", 1, |vm, this, args| {
+        let n = if this.is_number() {
+            this.to_number().unwrap_or(0.0)
+        } else if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::NumberObject(num) = obj.kind {
+                num
+            } else {
+                return Err(VmError::TypeError("Number.prototype.toExponential requires that 'this' be a Number".into()));
+            }
+        } else {
+            return Err(VmError::TypeError("Number.prototype.toExponential requires that 'this' be a Number".into()));
+        };
+        let frac = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
+        if !(0..=100).contains(&frac) {
+            return Err(VmError::RangeError("toExponential() argument must be between 0 and 100".into()));
+        }
+        if n.is_nan() || n.is_infinite() {
+            return Ok(vm.alloc_string(vm.to_string_value(JsValue::from_double(n))));
+        }
+        let s = format!("{:.*e}", frac as usize, n);
+        Ok(vm.alloc_string(s))
+    });
+
+    let num_to_precision = vm.alloc_native_function("toPrecision", 1, |vm, this, args| {
+        let n = if this.is_number() {
+            this.to_number().unwrap_or(0.0)
+        } else if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::NumberObject(num) = obj.kind {
+                num
+            } else {
+                return Err(VmError::TypeError("Number.prototype.toPrecision requires that 'this' be a Number".into()));
+            }
+        } else {
+            return Err(VmError::TypeError("Number.prototype.toPrecision requires that 'this' be a Number".into()));
+        };
+        let prec = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
+        if prec == 0 {
+            return Ok(vm.alloc_string(vm.to_string_value(JsValue::from_double(n))));
+        }
+        if !(1..=100).contains(&prec) {
+            return Err(VmError::RangeError("toPrecision() argument must be between 1 and 100".into()));
+        }
+        if n.is_nan() || n.is_infinite() {
+            return Ok(vm.alloc_string(vm.to_string_value(JsValue::from_double(n))));
+        }
+        let s = format!("{:.*}", prec as usize, n);
+        Ok(vm.alloc_string(s))
+    });
+
+    for (m, f) in [
+        ("valueOf", num_value_of),
+        ("toString", num_to_string),
+        ("toLocaleString", num_to_locale_string),
+        ("toFixed", num_to_fixed),
+        ("toExponential", num_to_exponential),
+        ("toPrecision", num_to_precision),
+    ] {
+        vm.set_property(number_proto, m, f);
+        vm.non_enumerable_props.insert((number_proto, m.to_string()));
+    }
 
     let num_ctor = vm.alloc_native_function("Number", 1, |vm, _this, args| {
         let n = if let Some(arg) = args.first() {
@@ -68,6 +169,8 @@ pub(super) fn register_number_global(vm: &mut Vm) {
     vm.non_enumerable_props.insert((number_proto, "constructor".to_string()));
     vm.set_property(num_ctor, "prototype", number_proto);
     vm.non_enumerable_props.insert((num_ctor, "prototype".to_string()));
+    vm.non_writable_props.insert((num_ctor, "prototype".to_string()));
+    vm.non_configurable_props.insert((num_ctor, "prototype".to_string()));
 
     let num_constants: [(&str, f64); 8] = [
         ("NaN", f64::NAN),

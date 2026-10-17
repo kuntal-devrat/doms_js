@@ -27,6 +27,7 @@ impl<'a> Parser<'a> {
             }
             body.push(stmt);
         }
+        Self::validate_labels_and_jumps(&body)?;
         if self.is_module {
             self.validate_module_early_errors(&body)?;
         }

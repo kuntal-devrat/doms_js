@@ -9,7 +9,11 @@ impl<'a> Parser<'a> {
                 continue;
             }
             elements.push(self.parse_expression(1)?);
+            let is_spread = matches!(elements.last(), Some(Expression::Spread(_)));
             if self.match_token(&TokenKind::Comma)? {
+                if is_spread && self.check(&TokenKind::RBracket) {
+                    self.trailing_comma_after_rest = true;
+                }
                 continue;
             } else {
                 break;

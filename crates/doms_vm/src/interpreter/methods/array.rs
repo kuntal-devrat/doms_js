@@ -82,7 +82,7 @@ impl Vm {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Array(elements) = &obj.kind {
                         for (i, el) in elements.iter().enumerate() {
-                            if *el == target {
+                            if crate::object::js_strict_equal(*el, target) {
                                 return Ok(JsValue::from_int32(i as i32));
                             }
                         }
@@ -95,7 +95,11 @@ impl Vm {
                 if let Some(ptr) = this.as_object_ptr() {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Array(elements) = &obj.kind {
-                        return Ok(JsValue::from_boolean(elements.contains(&target)));
+                        for el in elements {
+                            if crate::object::js_values_equal(*el, target) {
+                                return Ok(JsValue::from_boolean(true));
+                            }
+                        }
                     }
                 }
                 Ok(JsValue::from_boolean(false))

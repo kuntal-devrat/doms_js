@@ -47,6 +47,8 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     vm.non_enumerable_props.insert((string_proto, "constructor".to_string()));
     vm.set_property(str_ctor, "prototype", string_proto);
     vm.non_enumerable_props.insert((str_ctor, "prototype".to_string()));
+    vm.non_writable_props.insert((str_ctor, "prototype".to_string()));
+    vm.non_configurable_props.insert((str_ctor, "prototype".to_string()));
 
     let html_methods: [(&str, &str, &str, bool); 13] = [
         ("anchor", "a", "name", true),
@@ -115,9 +117,10 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     vm.non_enumerable_props.insert((string_proto, "trimRight".to_string()));
 
     let string_methods = [
-        "indexOf", "includes", "toLowerCase", "toUpperCase", "trim",
+        "indexOf", "includes", "toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase", "trim",
         "charAt", "charCodeAt", "slice", "isWellFormed", "toWellFormed", "replace",
-        "match", "search",
+        "match", "search", "lastIndexOf", "split", "concat", "startsWith", "endsWith",
+        "repeat", "padStart", "padEnd", "localeCompare", "substring",
     ];
     for name in string_methods {
         if let Some(m) = vm.get_string_method(name) {

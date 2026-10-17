@@ -14,28 +14,33 @@ impl Vm {
                 }
             }
 
-            if !name.starts_with('@') {
-                let scopes = frame.scopes.clone();
-                for scope_val in scopes.into_iter().rev() {
-                    if scope_val.is_object() {
-                        let has = self.has_property(scope_val, name).unwrap_or(false);
-                        if has {
-                            return Some(self.get_property(scope_val, name));
-                        }
+            let scopes = frame.scopes.clone();
+            for scope_val in scopes.into_iter().rev() {
+                if scope_val.is_object() {
+                    let has = self.has_property(scope_val, name).unwrap_or(false);
+                    if has {
+                        return Some(self.get_property(scope_val, name));
                     }
                 }
             }
             if let Some(frame) = self.frames.last() {
-                if !frame.scopes.is_empty() {
-                    for (i, local_name) in frame.local_names.iter().enumerate().rev() {
-                        if local_name == name {
-                            return Some(frame.locals.get(i).copied().unwrap_or(JsValue::undefined()));
-                        }
+                for (i, local_name) in frame.local_names.iter().enumerate().rev() {
+                    if local_name == name {
+                        return Some(frame.locals.get(i).copied().unwrap_or(JsValue::undefined()));
                     }
                 }
                 if name == "arguments" && !frame.is_arrow {
                     if let Some(args_val) = frame.arguments {
                         return Some(args_val);
+                    }
+                }
+                if let Some(ref callee_f) = frame.callee_func {
+                    if let Some(ref fn_name) = callee_f.name {
+                        if fn_name == name {
+                            if let Some(val) = frame.callee_val {
+                                return Some(val);
+                            }
+                        }
                     }
                 }
             }

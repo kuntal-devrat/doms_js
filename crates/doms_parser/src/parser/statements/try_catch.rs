@@ -20,11 +20,8 @@ impl<'a> Parser<'a> {
                     catch_param = Some(tmp.clone());
                     self.parse_array_destructuring_into(&tmp, &mut pattern_decls)?;
                 } else {
-                    let p_tok = self.advance()?;
-                    match p_tok.kind {
-                        TokenKind::Ident(id) => catch_param = Some(id),
-                        other => return Err(ParseError::UnexpectedToken(other, p_tok.line, p_tok.col)),
-                    }
+                    let id = self.expect_identifier()?;
+                    catch_param = Some(id);
                 }
                 self.expect(TokenKind::RParen)?;
             }

@@ -60,7 +60,11 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         Ok(vm.alloc_regexp(pattern, flags))
     });
     vm.set_property(regexp_ctor, "prototype", regexp_proto);
+    vm.non_enumerable_props.insert((regexp_ctor, "prototype".to_string()));
+    vm.non_writable_props.insert((regexp_ctor, "prototype".to_string()));
+    vm.non_configurable_props.insert((regexp_ctor, "prototype".to_string()));
     vm.set_property(regexp_proto, "constructor", regexp_ctor);
+    vm.non_enumerable_props.insert((regexp_proto, "constructor".to_string()));
 
     let re_exec_fn = vm.alloc_native_function("exec", 1, |vm, this, args| {
         let text = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();

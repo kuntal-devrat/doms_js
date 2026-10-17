@@ -37,6 +37,7 @@ impl Vm {
                 let (new_shape_id, offset) = self.shapes.transition(obj.shape_id, key);
                 obj.shape_id = new_shape_id;
                 obj.set_slot(offset, value);
+                obj.add_prop_order(key.to_string());
             }
         }
     }
@@ -73,18 +74,23 @@ impl Vm {
             if let ObjectKind::Array(elements) = &mut obj.kind {
                 if key == "length" {
                     if let Some(new_len) = value.to_number().map(|n| n as usize) {
-                        elements.truncate(new_len);
+                        if new_len < elements.len() {
+                            elements.truncate(new_len);
+                        } else if new_len < 100_000 {
+                            elements.resize(new_len, JsValue::hole());
+                        }
                         return;
                     }
                 }
                 if let Ok(idx) = key.parse::<usize>() {
                     if idx < elements.len() {
                         elements[idx] = value;
+                        return;
                     } else if idx < 100_000 {
-                        elements.resize(idx + 1, JsValue::undefined());
+                        elements.resize(idx + 1, JsValue::hole());
                         elements[idx] = value;
+                        return;
                     }
-                    return;
                 }
             }
 
@@ -127,6 +133,7 @@ impl Vm {
                 let (new_shape_id, offset) = self.shapes.transition(obj.shape_id, key);
                 obj.shape_id = new_shape_id;
                 obj.set_slot(offset, value);
+                obj.add_prop_order(key.to_string());
             }
         }
         if target == self.global_object {
@@ -143,18 +150,23 @@ impl Vm {
             if let ObjectKind::Array(elements) = &mut obj.kind {
                 if key == "length" {
                     if let Some(new_len) = value.to_number().map(|n| n as usize) {
-                        elements.truncate(new_len);
+                        if new_len < elements.len() {
+                            elements.truncate(new_len);
+                        } else if new_len < 100_000 {
+                            elements.resize(new_len, JsValue::hole());
+                        }
                         return;
                     }
                 }
                 if let Ok(idx) = key.parse::<usize>() {
                     if idx < elements.len() {
                         elements[idx] = value;
+                        return;
                     } else if idx < 100_000 {
-                        elements.resize(idx + 1, JsValue::undefined());
+                        elements.resize(idx + 1, JsValue::hole());
                         elements[idx] = value;
+                        return;
                     }
-                    return;
                 }
             }
 
@@ -175,6 +187,7 @@ impl Vm {
                 let (new_shape_id, offset) = self.shapes.transition(obj.shape_id, key);
                 obj.shape_id = new_shape_id;
                 obj.set_slot(offset, value);
+                obj.add_prop_order(key.to_string());
             }
         }
         if target == self.global_object {
@@ -267,6 +280,58 @@ impl Vm {
         self.non_writable_props.remove(&(target, key_string.clone()));
         self.non_enumerable_props.remove(&(target, key_string.clone()));
         self.set_own_property(target, key, value);
+        Ok(())
+    }
+
+    pub fn copy_data_properties(
+        &mut self,
+        target: JsValue,
+        source: JsValue,
+        excluded_keys: &[JsValue],
+    ) -> Result<(), VmError> {
+        if source.is_nullish() {
+            return Ok(());
+        }
+        let from = self.to_object_value(source)?;
+        let keys = crate::builtins::object::names::get_own_property_keys(self, from)?;
+        for key in keys {
+            let is_excluded = excluded_keys.iter().any(|excluded| {
+                match &key {
+                    PropertyKeyVal::String(s) => {
+                        let exc_s = self.to_string_value(*excluded);
+                        s == &exc_s
+                    }
+                    PropertyKeyVal::Symbol(sym) => {
+                        excluded.is_symbol() && *excluded == *sym
+                    }
+                }
+            });
+            if is_excluded {
+                continue;
+            }
+
+            let desc = crate::builtins::object::descriptor::get_own_property_descriptor_internal(self, from, &key)?;
+            if desc.is_object() {
+                let enum_val = self.get_property(desc, "enumerable");
+                if enum_val.is_truthy() {
+                    let val = match &key {
+                        PropertyKeyVal::String(s) => self.get_property_result(from, s)?,
+                        PropertyKeyVal::Symbol(sym) => self.get_symbol_property_result(from, *sym)?,
+                    };
+                    match &key {
+                        PropertyKeyVal::String(s) => {
+                            self.create_data_property_or_throw(target, s, val)?;
+                        }
+                        PropertyKeyVal::Symbol(sym) => {
+                            if let Some(ptr) = target.as_object_ptr() {
+                                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                                obj.insert_symbol_property(*sym, val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }

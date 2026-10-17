@@ -54,6 +54,14 @@ impl Compiler {
                 self.chunk.patch_jump(jump_has_val, end_target);
                 return Ok(());
             }
+            BinaryOp::In => {
+                if let Expression::PrivateIdentifier(name) = unwrap_grouping(left) {
+                    self.compile_expression(right)?;
+                    let const_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                    self.chunk.emit(OpCode::PrivateIn(const_idx), 0);
+                    return Ok(());
+                }
+            }
             _ => {}
         }
 
@@ -150,9 +158,25 @@ impl Compiler {
         then_expr: &Expression,
         else_expr: &Expression,
     ) -> Result<(), CompileError> {
+        self.compile_conditional_with_name(condition, then_expr, else_expr, None)
+    }
+
+    pub(crate) fn compile_conditional_with_name(
+        &mut self,
+        condition: &Expression,
+        then_expr: &Expression,
+        else_expr: &Expression,
+        inferred_name: Option<&str>,
+    ) -> Result<(), CompileError> {
         self.compile_expression(condition)?;
         let jump_false_idx = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
         self.compile_expression(then_expr)?;
+        if let Some(name) = inferred_name {
+            if Self::is_anonymous_function_definition(then_expr) {
+                let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+                self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+            }
+        }
         let jump_exit_idx = self.chunk.emit(OpCode::Jump(0), 0);
         let else_start = self.chunk.instructions.len() as i32;
         self.chunk.patch_jump(jump_false_idx, else_start);

@@ -43,7 +43,13 @@ impl Compiler {
     }
 
     pub(crate) fn compile_identifier(&mut self, name: &str) -> Result<(), CompileError> {
-        if self.is_in_function && self.with_depth == 0 {
+        if name.starts_with('@') {
+            if let Some(slot) = self.symbols.resolve_local(name) {
+                self.chunk.emit(OpCode::GetLocal(slot), 0);
+                return Ok(());
+            }
+        }
+        if self.is_in_function && self.with_depth == 0 && self.block_scope_depth == 0 {
             if let Some(slot) = self.symbols.resolve_local(name) {
                 self.chunk.emit(OpCode::GetLocal(slot), 0);
                 return Ok(());
@@ -63,6 +69,10 @@ impl Compiler {
                         PropertyKey::Literal(k) => {
                             self.chunk.emit(OpCode::Dup, 0);
                             self.compile_expression(val_expr)?;
+                            if Self::is_anonymous_function_definition(val_expr) {
+                                let name_idx = self.chunk.add_constant(Constant::String(k.clone()));
+                                self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                            }
                             let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
                             self.chunk.emit(OpCode::SetProp(prop_idx), 0);
                             self.chunk.emit(OpCode::Pop, 0);
@@ -81,6 +91,8 @@ impl Compiler {
                         PropertyKey::Literal(k) => {
                             self.chunk.emit(OpCode::Dup, 0);
                             self.compile_expression(fn_expr)?;
+                            let get_name = self.chunk.add_constant(Constant::String(format!("get {}", k)));
+                            self.chunk.emit(OpCode::SetFunctionName(get_name), 0);
                             let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
                             self.chunk.emit(OpCode::DefineGetter(prop_idx), 0);
                         }
@@ -97,6 +109,8 @@ impl Compiler {
                         PropertyKey::Literal(k) => {
                             self.chunk.emit(OpCode::Dup, 0);
                             self.compile_expression(fn_expr)?;
+                            let set_name = self.chunk.add_constant(Constant::String(format!("set {}", k)));
+                            self.chunk.emit(OpCode::SetFunctionName(set_name), 0);
                             let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
                             self.chunk.emit(OpCode::DefineSetter(prop_idx), 0);
                         }
@@ -107,6 +121,10 @@ impl Compiler {
                             self.chunk.emit(OpCode::DefineComputedSetter, 0);
                         }
                     }
+                }
+                ObjectProperty::Spread(expr) => {
+                    self.compile_expression(expr)?;
+                    self.chunk.emit(OpCode::ObjectSpread, 0);
                 }
             }
         }

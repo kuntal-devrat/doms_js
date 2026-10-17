@@ -104,29 +104,47 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
 
     let define_properties_fn = vm.alloc_native_function("defineProperties", 2, |vm, _this, args| {
         let target = match args.first() {
-            Some(t) if t.is_object() => *t,
+            Some(t) if t.is_js_object() => *t,
             _ => return Err(VmError::TypeError("Object.defineProperties called on non-object".into())),
         };
         let props = match args.get(1) {
             Some(p) if !p.is_nullish() => *p,
             _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
         };
-        if !props.is_object() {
-            return Err(VmError::TypeError("Property description must be an object".into()));
-        }
-        let define_prop_fn = vm.get_property(vm.globals.get("Object").copied().unwrap_or(JsValue::undefined()), "defineProperty");
-        let keys = vm.get_for_in_keys(props);
+        let props_obj = if props.is_js_object() {
+            props
+        } else {
+            vm.to_object_value(props)?
+        };
+
+        // Pass 1: Collect own enumerable properties and descriptors
+        let keys = super::names::get_own_property_keys(vm, props_obj)?;
+        let mut descriptors = Vec::new();
         for key in keys {
-            let desc = vm.get_property(props, &key);
-            let key_val = vm.alloc_string(key);
-            vm.call(define_prop_fn, JsValue::undefined(), &[target, key_val, desc])?;
+            let desc = super::descriptor::get_own_property_descriptor_internal(vm, props_obj, &key)?;
+            if !desc.is_undefined() && vm.get_property(desc, "enumerable").is_truthy() {
+                let desc_val = match &key {
+                    PropertyKeyVal::String(s) => vm.get_property(props_obj, s),
+                    PropertyKeyVal::Symbol(sym) => vm.get_symbol_property(props_obj, *sym),
+                };
+                if !desc_val.is_js_object() {
+                    return Err(VmError::TypeError("Property description must be an object".into()));
+                }
+                descriptors.push((key, desc_val));
+            }
         }
+
+        // Pass 2: Define each property
+        for (key, desc) in descriptors {
+            super::define_property::define_property_internal(vm, target, key, desc)?;
+        }
+
         Ok(target)
     });
 
     let create_fn = vm.alloc_native_function("create", 2, |vm, _this, args| {
         let proto = args.first().copied().unwrap_or(JsValue::undefined());
-        if !proto.is_object() && !proto.is_null() {
+        if !proto.is_js_object() && !proto.is_null() {
             return Err(VmError::TypeError("Object prototype may only be an Object or null".into()));
         }
         let obj = vm.alloc_object();
@@ -136,9 +154,6 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
         }
         if let Some(props) = args.get(1) {
             if !props.is_undefined() {
-                if !props.is_object() {
-                    return Err(VmError::TypeError("Property description must be an object".into()));
-                }
                 let define_props_fn = vm.get_property(vm.globals.get("Object").copied().unwrap_or(JsValue::undefined()), "defineProperties");
                 if vm.is_callable(define_props_fn) {
                     vm.call(define_props_fn, JsValue::undefined(), &[obj, *props])?;

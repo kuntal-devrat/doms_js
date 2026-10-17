@@ -69,8 +69,8 @@ impl Vm {
                 key
             )));
         }
+        let is_strict = self.is_strict || self.frames.last().map(|f| f.is_strict).unwrap_or(false);
         if self.module_namespace_objects.contains(&target) {
-            let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
             if is_strict {
                 return Err(VmError::TypeError(format!("Cannot assign to read only property '{}'", key)));
             }
@@ -78,29 +78,39 @@ impl Vm {
         }
         let is_func = target.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Function(_) | ObjectKind::NativeFunction(_)));
         if is_func && (key == "length" || key == "name") {
-            let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
+            if is_strict {
+                return Err(VmError::TypeError(format!("Cannot assign to read only property '{}'", key)));
+            }
+            return Ok(());
+        }
+        let is_str_obj = target.as_object_ptr().is_some_and(|p| {
+            if let ObjectKind::StringObject(s) = unsafe { &(*(p as *mut JsObject)).kind } {
+                key == "length" || key.parse::<usize>().is_ok_and(|idx| idx < s.chars().count())
+            } else {
+                false
+            }
+        });
+        if is_str_obj {
             if is_strict {
                 return Err(VmError::TypeError(format!("Cannot assign to read only property '{}'", key)));
             }
             return Ok(());
         }
         if self.non_writable_props.contains(&(target, key.to_string())) {
-            let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
             if is_strict {
                 return Err(VmError::TypeError(format!("Cannot assign to read only property '{}'", key)));
             }
             return Ok(());
         }
         let is_prim_str = target.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)));
-        let is_prim_sym = target.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_)));
-        if !target.is_object() || is_prim_str || is_prim_sym {
+        if !target.is_object() || is_prim_str {
             let proto = if target.is_number() {
                 self.number_proto
             } else if target.is_string() || is_prim_str {
                 self.string_proto
             } else if target.is_boolean() {
                 self.boolean_proto
-            } else if target.is_symbol() || is_prim_sym {
+            } else if target.is_symbol() {
                 self.symbol_proto
             } else {
                 None
@@ -124,11 +134,8 @@ impl Vm {
                             if let Some(acc) = accs.get(key) {
                                 if let Some(setter) = acc.setter {
                                     self.call(setter, target, &[value])?;
-                                } else {
-                                    let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
-                                    if is_strict {
-                                        return Err(VmError::TypeError(format!("Cannot set property '{}' of object which has only a getter", key)));
-                                    }
+                                } else if is_strict {
+                                    return Err(VmError::TypeError(format!("Cannot set property '{}' of object which has only a getter", key)));
                                 }
                                 return Ok(());
                             }
@@ -139,7 +146,6 @@ impl Vm {
                     }
                 }
             }
-            let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
             if is_strict {
                 return Err(VmError::TypeError(format!("Cannot create property '{}' on primitive", key)));
             }
@@ -166,18 +172,14 @@ impl Vm {
                 if let Some(acc) = accs.get(key) {
                     if let Some(setter) = acc.setter {
                         self.call(setter, target, &[value])?;
-                    } else {
-                        let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
-                        if is_strict {
-                            return Err(VmError::TypeError(format!("Cannot set property '{}' of object which has only a getter", key)));
-                        }
+                    } else if is_strict {
+                        return Err(VmError::TypeError(format!("Cannot set property '{}' of object which has only a getter", key)));
                     }
                     return Ok(());
                 }
             }
 
             if self.non_writable_props.contains(&(target, key.to_string())) {
-                let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
                 if is_strict {
                     return Err(VmError::TypeError(format!("Cannot assign to read only property '{}'", key)));
                 }
@@ -208,11 +210,8 @@ impl Vm {
                             if let Some(acc) = accs.get(key) {
                                 if let Some(setter) = acc.setter {
                                     self.call(setter, target, &[value])?;
-                                } else {
-                                    let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
-                                    if is_strict {
-                                        return Err(VmError::TypeError(format!("Cannot set property '{}' of object which has only a getter", key)));
-                                    }
+                                } else if is_strict {
+                                    return Err(VmError::TypeError(format!("Cannot set property '{}' of object which has only a getter", key)));
                                 }
                                 return Ok(());
                             }
@@ -225,7 +224,6 @@ impl Vm {
             }
 
             if self.non_extensible_objects.contains(&target) && !self.shapes.has_property(obj.shape_id, key) {
-                let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
                 if is_strict {
                     return Err(VmError::TypeError(format!("Cannot add property '{}', object is not extensible", key)));
                 }
@@ -242,9 +240,24 @@ impl Vm {
             if self.non_configurable_props.contains(&(target, key.to_string())) {
                 return Ok(false);
             }
+            if let ObjectKind::Array(elements) = &mut obj.kind {
+                if key == "length" {
+                    return Ok(false);
+                }
+                if let Ok(idx) = key.parse::<usize>() {
+                    if idx < elements.len() {
+                        elements[idx] = JsValue::hole();
+                        return Ok(true);
+                    }
+                }
+            }
             if let Some(accs) = &mut obj.accessors {
                 accs.remove(key);
             }
+            if let Some(order) = &mut obj.accessor_order {
+                order.retain(|k| k != key);
+            }
+            obj.remove_prop_order(key);
             let new_shape_id = self.shapes.remove_property(obj.shape_id, key);
             obj.shape_id = new_shape_id;
             if target == self.global_object {
@@ -254,6 +267,31 @@ impl Vm {
             Ok(true)
         } else {
             Ok(true)
+        }
+    }
+
+    pub fn delete_property_key(&mut self, target: JsValue, key: &PropertyKeyVal) -> Result<bool, VmError> {
+        match key {
+            PropertyKeyVal::String(s) => self.delete_property(target, s),
+            PropertyKeyVal::Symbol(sym) => {
+                let key_name = format!("[Symbol:{:x}]", sym.raw_bits());
+                if self.non_configurable_props.contains(&(target, key_name)) {
+                    return Ok(false);
+                }
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let Some(syms) = &mut obj.symbol_properties {
+                        syms.remove(sym);
+                    }
+                    if let Some(accs) = &mut obj.symbol_accessors {
+                        accs.remove(sym);
+                    }
+                    if let Some(order) = &mut obj.symbol_order {
+                        order.retain(|s| s != sym);
+                    }
+                }
+                Ok(true)
+            }
         }
     }
 
