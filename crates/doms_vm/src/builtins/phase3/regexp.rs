@@ -311,6 +311,135 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
     vm.set_property(regexp_proto, "test", re_test_fn);
     vm.set_property(regexp_proto, "toString", re_to_string_fn);
 
+    // @@match ( string )
+    let re_match_fn = vm.alloc_native_function("[Symbol.match]", 1, |vm, this, args| {
+        let text = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        if !this.is_object() {
+            return Err(VmError::TypeError("RegExp.prototype[Symbol.match] called on non-object".into()));
+        }
+        let global = vm.get_property(this, "global").is_truthy();
+        if !global {
+            let text_val = vm.alloc_string(text);
+            return vm.call_method(this, "exec", &[text_val]);
+        }
+        let _ = vm.set_property_result(this, "lastIndex", JsValue::from_int32(0));
+        let mut matches = Vec::new();
+        loop {
+            let text_val = vm.alloc_string(text.clone());
+            let res = vm.call_method(this, "exec", &[text_val])?;
+            if res.is_null() {
+                break;
+            }
+            let match_str = vm.get_property(res, "0");
+            let s = vm.to_string_value(match_str);
+            if s.is_empty() {
+                let this_index = vm.get_property(this, "lastIndex").as_int32().unwrap_or(0);
+                let _ = vm.set_property_result(this, "lastIndex", JsValue::from_int32(this_index + 1));
+            }
+            let str_val = vm.alloc_string(s);
+            matches.push(str_val);
+        }
+        if matches.is_empty() {
+            Ok(JsValue::null())
+        } else {
+            Ok(vm.alloc_array(matches))
+        }
+    });
+
+    // @@replace ( string, replaceValue )
+    let re_replace_fn = vm.alloc_native_function("[Symbol.replace]", 2, |vm, this, args| {
+        let string_val = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let replace_val = args.get(1).copied().unwrap_or(JsValue::undefined());
+        if !this.is_object() {
+            return Err(VmError::TypeError("RegExp.prototype[Symbol.replace] called on non-object".into()));
+        }
+        let is_func = vm.is_callable(replace_val);
+        let replace_str = if is_func { String::new() } else { vm.to_string_value(replace_val) };
+        let str_arg = vm.alloc_string(string_val.clone());
+        let res = vm.call_method(this, "exec", &[str_arg])?;
+        if res.is_null() {
+            return Ok(vm.alloc_string(string_val));
+        }
+        let match_val = vm.get_property(res, "0");
+        let matched = vm.to_string_value(match_val);
+        if is_func {
+            let m_arg = vm.alloc_string(matched.clone());
+            let s_arg = vm.alloc_string(string_val.clone());
+            let rep_res = vm.call(replace_val, JsValue::undefined(), &[m_arg, JsValue::from_int32(0), s_arg])?;
+            let rep_s = vm.to_string_value(rep_res);
+            Ok(vm.alloc_string(string_val.replacen(&matched, &rep_s, 1)))
+        } else {
+            Ok(vm.alloc_string(string_val.replacen(&matched, &replace_str, 1)))
+        }
+    });
+
+    // @@search ( string )
+    let re_search_fn = vm.alloc_native_function("[Symbol.search]", 1, |vm, this, args| {
+        let string_val = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        if !this.is_object() {
+            return Err(VmError::TypeError("RegExp.prototype[Symbol.search] called on non-object".into()));
+        }
+        let _ = vm.set_property_result(this, "lastIndex", JsValue::from_int32(0));
+        let str_arg = vm.alloc_string(string_val);
+        let res = vm.call_method(this, "exec", &[str_arg])?;
+        if res.is_null() {
+            Ok(JsValue::from_int32(-1))
+        } else {
+            let index_val = vm.get_property(res, "index");
+            Ok(index_val)
+        }
+    });
+
+    // @@split ( string, limit )
+    let re_split_fn = vm.alloc_native_function("[Symbol.split]", 2, |vm, this, args| {
+        let string_val = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let limit = args.get(1).and_then(|v| v.as_int32()).map(|l| l.max(0) as usize).unwrap_or(usize::MAX);
+        if !this.is_object() {
+            return Err(VmError::TypeError("RegExp.prototype[Symbol.split] called on non-object".into()));
+        }
+        if limit == 0 {
+            return Ok(vm.alloc_array(Vec::new()));
+        }
+        let mut out = Vec::new();
+        let mut last_idx = 0;
+        let _ = vm.set_property_result(this, "lastIndex", JsValue::from_int32(0));
+        while out.len() < limit {
+            let slice_arg = vm.alloc_string(string_val[last_idx..].to_string());
+            let res = vm.call_method(this, "exec", &[slice_arg])?;
+            if res.is_null() {
+                break;
+            }
+            let idx = vm.get_property(res, "index").as_int32().unwrap_or(0) as usize + last_idx;
+            let piece = vm.alloc_string(string_val[last_idx..idx].to_string());
+            out.push(piece);
+            let match_val = vm.get_property(res, "0");
+            let matched = vm.to_string_value(match_val);
+            last_idx = idx + matched.len().max(1);
+        }
+        if out.len() < limit {
+            let rem_piece = vm.alloc_string(string_val[last_idx..].to_string());
+            out.push(rem_piece);
+        }
+        Ok(vm.alloc_array(out))
+    });
+
+    if let Some(sym) = vm.symbol_match {
+        vm.set_symbol_property(regexp_proto, sym, re_match_fn);
+        vm.non_enumerable_props.insert((regexp_proto, "[Symbol.match]".to_string()));
+    }
+    if let Some(sym) = vm.symbol_replace {
+        vm.set_symbol_property(regexp_proto, sym, re_replace_fn);
+        vm.non_enumerable_props.insert((regexp_proto, "[Symbol.replace]".to_string()));
+    }
+    if let Some(sym) = vm.symbol_search {
+        vm.set_symbol_property(regexp_proto, sym, re_search_fn);
+        vm.non_enumerable_props.insert((regexp_proto, "[Symbol.search]".to_string()));
+    }
+    if let Some(sym) = vm.symbol_split {
+        vm.set_symbol_property(regexp_proto, sym, re_split_fn);
+        vm.non_enumerable_props.insert((regexp_proto, "[Symbol.split]".to_string()));
+    }
+
     if let Some(ptr) = regexp_proto.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         obj.define_getter("global".to_string(), re_global_getter);

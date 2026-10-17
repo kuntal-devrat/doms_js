@@ -15,7 +15,7 @@ pub(super) fn register_constructor(vm: &mut Vm) -> (JsValue, JsValue) {
                 }
                 let mut v = Vec::with_capacity(len.min(1024));
                 for _ in 0..len {
-                    v.push(JsValue::undefined());
+                    v.push(JsValue::hole());
                 }
                 return Ok(vm.alloc_array(v));
             }

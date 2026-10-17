@@ -91,6 +91,27 @@ impl Vm {
         if let Some(s) = self.symbol_to_primitive {
             mark_val(s, &mut worklist, &mut live);
         }
+        if let Some(s) = self.symbol_has_instance {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_match {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_match_all {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_replace {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_search {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_split {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_unscopables {
+            mark_val(s, &mut worklist, &mut live);
+        }
         for s in self.symbol_registry.values() {
             mark_val(*s, &mut worklist, &mut live);
         }
@@ -182,6 +203,30 @@ impl Vm {
             mark_val(s, &mut worklist, &mut live);
         }
         if let Some(s) = self.symbol_to_primitive {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_species {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_has_instance {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_match {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_match_all {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_replace {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_search {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_split {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_unscopables {
             mark_val(s, &mut worklist, &mut live);
         }
         for s in self.symbol_registry.values() {
@@ -306,6 +351,34 @@ impl Vm {
         if let Some(mut s) = self.symbol_to_primitive {
             copy_val(&mut s, &mut to_cursor);
             self.symbol_to_primitive = Some(s);
+        }
+        if let Some(mut s) = self.symbol_has_instance {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_has_instance = Some(s);
+        }
+        if let Some(mut s) = self.symbol_match {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_match = Some(s);
+        }
+        if let Some(mut s) = self.symbol_match_all {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_match_all = Some(s);
+        }
+        if let Some(mut s) = self.symbol_replace {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_replace = Some(s);
+        }
+        if let Some(mut s) = self.symbol_search {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_search = Some(s);
+        }
+        if let Some(mut s) = self.symbol_split {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_split = Some(s);
+        }
+        if let Some(mut s) = self.symbol_unscopables {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_unscopables = Some(s);
         }
         for s in self.symbol_registry.values_mut() {
             copy_val(s, &mut to_cursor);

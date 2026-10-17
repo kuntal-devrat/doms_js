@@ -331,4 +331,10 @@ impl Vm {
             self.run_until_depth(target_depth)
         }
     }
+
+    pub fn call_method(&mut self, target: JsValue, method_name: &str, args: &[JsValue]) -> Result<JsValue, VmError> {
+        let method = self.get_property_result(target, method_name)?;
+        self.call(method, target, args)
+    }
 }
+

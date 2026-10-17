@@ -23,8 +23,44 @@ impl Vm {
                         for s_idx in (0..num_scopes).rev() {
                             let scope_val = self.frames[f_idx].scopes[s_idx];
                             if scope_val.is_object() {
-                                if self.has_property(scope_val, &name).unwrap_or(false) {
-                                    let cur_val = self.get_property(scope_val, &name);
+                                let has = match self.has_property(scope_val, &name) {
+                                    Ok(h) => h,
+                                    Err(e) => {
+                                        self.handle_exception_at_depth(e, target_depth)?;
+                                        return Ok(None);
+                                    }
+                                };
+                                if has {
+                                    let mut blocked = false;
+                                    if let Some(sym_unscopables) = self.symbol_unscopables {
+                                        match self.get_symbol_property_result(scope_val, sym_unscopables) {
+                                            Ok(unscopables) if unscopables.is_object() => {
+                                                match self.get_property_result(unscopables, &name) {
+                                                    Ok(b) => { blocked = b.is_truthy(); }
+                                                    Err(e) => {
+                                                        self.handle_exception_at_depth(e, target_depth)?;
+                                                        return Ok(None);
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                self.handle_exception_at_depth(e, target_depth)?;
+                                                return Ok(None);
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    if blocked {
+                                        continue;
+                                    }
+
+                                    let cur_val = match self.get_property_result(scope_val, &name) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            self.handle_exception_at_depth(e, target_depth)?;
+                                            return Ok(None);
+                                        }
+                                    };
                                     if cur_val.is_uninitialized() {
                                         self.handle_exception_at_depth(
                                             VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
@@ -32,7 +68,10 @@ impl Vm {
                                         )?;
                                         return Ok(None);
                                     }
-                                    self.set_property(scope_val, &name, val);
+                                    if let Err(e) = self.set_property_result(scope_val, &name, val) {
+                                        self.handle_exception_at_depth(e, target_depth)?;
+                                        return Ok(None);
+                                    }
                                     for f in &mut self.frames {
                                         if f.env_obj == Some(scope_val) {
                                             for (i, l_name) in f.local_names.iter().enumerate() {

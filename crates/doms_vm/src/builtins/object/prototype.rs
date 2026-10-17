@@ -34,18 +34,23 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
     let function_proto = unsafe { JsValue::from_object_ptr(fn_proto_ptr as *mut u8) };
     vm.function_proto = Some(function_proto);
     let to_string_fn = vm.alloc_native_function("toString", 0, |vm, this, _args| {
-        if let Some(ptr) = this.as_object_ptr() {
-            if let Some(sym_tag) = vm.symbol_to_string_tag {
-                let tag_val = vm.get_symbol_property(this, sym_tag);
-                if tag_val.is_string() {
-                    let s = vm.to_string_value(tag_val);
-                    return Ok(vm.alloc_string(format!("[object {}]", s)));
-                }
-            }
+        if this.is_undefined() {
+            return Ok(vm.alloc_string("[object Undefined]".into()));
+        }
+        if this.is_null() {
+            return Ok(vm.alloc_string("[object Null]".into()));
+        }
+
+        let o = vm.to_object_value(this)?;
+        let is_array = vm.is_array_result(o)?;
+
+        let builtin_tag = if is_array {
+            "Array"
+        } else if vm.is_callable(o) {
+            "Function"
+        } else if let Some(ptr) = o.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            let tag = match &obj.kind {
-                ObjectKind::Array(_) => "Array",
-                ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => "Function",
+            match &obj.kind {
                 ObjectKind::Error { .. } => "Error",
                 ObjectKind::RegExp { .. } => "RegExp",
                 ObjectKind::Date(_) => "Date",
@@ -61,21 +66,20 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
                 ObjectKind::NumberObject(_) => "Number",
                 ObjectKind::BooleanObject(_) => "Boolean",
                 _ => "Object",
-            };
-            Ok(vm.alloc_string(format!("[object {}]", tag)))
-        } else if this.is_null() {
-            Ok(vm.alloc_string("[object Null]".into()))
-        } else if this.is_undefined() {
-            Ok(vm.alloc_string("[object Undefined]".into()))
-        } else if this.is_string() {
-            Ok(vm.alloc_string("[object String]".into()))
-        } else if this.is_number() {
-            Ok(vm.alloc_string("[object Number]".into()))
-        } else if this.is_boolean() {
-            Ok(vm.alloc_string("[object Boolean]".into()))
+            }
         } else {
-            Ok(vm.alloc_string("[object Object]".into()))
+            "Object"
+        };
+
+        if let Some(sym_tag) = vm.symbol_to_string_tag {
+            let tag_val = vm.get_symbol_property_result(o, sym_tag)?;
+            if tag_val.is_js_string() {
+                let s = vm.to_string_value(tag_val);
+                return Ok(vm.alloc_string(format!("[object {}]", s)));
+            }
         }
+
+        Ok(vm.alloc_string(format!("[object {}]", builtin_tag)))
     });
     vm.set_property(object_proto, "toString", to_string_fn);
 

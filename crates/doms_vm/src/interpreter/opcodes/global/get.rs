@@ -13,17 +13,23 @@ impl Vm {
             Constant::String(s) => s.as_str(),
             _ => return Err(VmError::TypeError("Global name must be string".into())),
         };
-        if let Some(val) = self.resolve_identifier(name) {
-            if val.is_uninitialized() {
-                self.handle_exception_at_depth(
-                    VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
-                    target_depth,
-                )?;
-                return Ok(None);
+        match self.resolve_identifier(name) {
+            Ok(Some(val)) => {
+                if val.is_uninitialized() {
+                    self.handle_exception_at_depth(
+                        VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                        target_depth,
+                    )?;
+                    return Ok(None);
+                }
+                self.push(val);
             }
-            self.push(val);
-        } else {
-            self.push(JsValue::undefined());
+            Ok(None) => {
+                self.push(JsValue::undefined());
+            }
+            Err(e) => {
+                self.handle_exception_at_depth(e, target_depth)?;
+            }
         }
         Ok(None)
     }
@@ -38,17 +44,23 @@ impl Vm {
             Constant::String(s) => s.as_str(),
             _ => return Err(VmError::TypeError("Global name must be string".into())),
         };
-        if let Some(val) = self.resolve_identifier(name) {
-            if val.is_uninitialized() {
-                self.handle_exception_at_depth(
-                    VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
-                    target_depth,
-                )?;
-                return Ok(None);
+        match self.resolve_identifier(name) {
+            Ok(Some(val)) => {
+                if val.is_uninitialized() {
+                    self.handle_exception_at_depth(
+                        VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                        target_depth,
+                    )?;
+                    return Ok(None);
+                }
+                self.push(val);
             }
-            self.push(val);
-        } else {
-            self.handle_exception_at_depth(VmError::ReferenceError(format!("{} is not defined", name)), target_depth)?;
+            Ok(None) => {
+                self.handle_exception_at_depth(VmError::ReferenceError(format!("{} is not defined", name)), target_depth)?;
+            }
+            Err(e) => {
+                self.handle_exception_at_depth(e, target_depth)?;
+            }
         }
         Ok(None)
     }

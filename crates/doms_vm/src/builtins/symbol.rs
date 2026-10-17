@@ -107,6 +107,13 @@ pub(super) fn register_symbol(vm: &mut Vm) {
     vm.symbol_is_concat_spreadable = Some(sym_concat_spread);
     vm.symbol_species = Some(sym_species);
     vm.symbol_to_primitive = Some(sym_to_prim);
+    vm.symbol_has_instance = Some(sym_has_instance);
+    vm.symbol_match = Some(sym_match);
+    vm.symbol_match_all = Some(sym_match_all);
+    vm.symbol_replace = Some(sym_replace);
+    vm.symbol_search = Some(sym_search);
+    vm.symbol_split = Some(sym_split);
+    vm.symbol_unscopables = Some(sym_unscopables);
 
     vm.globals.insert("Symbol".to_string(), symbol_ctor);
     if vm.global_object.is_object() {

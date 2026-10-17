@@ -146,24 +146,31 @@ impl Vm {
         }
     }
 
-    pub fn is_array(&self, val: JsValue) -> bool {
+    pub fn is_array_result(&self, val: JsValue) -> Result<bool, VmError> {
         let mut curr = val;
         let mut hops = 0;
         while let Some(ptr) = curr.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
-                ObjectKind::Array(_) => return true,
-                ObjectKind::Proxy { target, .. } => {
+                ObjectKind::Array(_) => return Ok(true),
+                ObjectKind::Proxy { target, handler } => {
+                    if handler.is_null() {
+                        return Err(VmError::TypeError("Cannot perform IsArray on a revoked proxy".into()));
+                    }
                     hops += 1;
                     if hops > 100 {
-                        return false;
+                        return Ok(false);
                     }
                     curr = *target;
                 }
-                _ => return false,
+                _ => return Ok(false),
             }
         }
-        false
+        Ok(false)
+    }
+
+    pub fn is_array(&self, val: JsValue) -> bool {
+        self.is_array_result(val).unwrap_or(false)
     }
 
     #[inline]

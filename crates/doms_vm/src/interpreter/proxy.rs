@@ -377,7 +377,7 @@ impl Vm {
             if !trap_res.is_js_object() {
                 return Err(VmError::TypeError("Proxy ownKeys trap must return an object".into()));
             }
-            let keys_vec = self.iterate_to_vec_simple(trap_res)?;
+            let keys_vec = self.create_list_from_array_like(trap_res)?;
             let mut result_keys = Vec::with_capacity(keys_vec.len());
             for k_val in keys_vec {
                 if !k_val.is_js_string() && !k_val.is_js_symbol() {
@@ -546,23 +546,29 @@ impl Vm {
         Ok(true)
     }
 
-    pub(crate) fn iterate_to_vec_simple(&mut self, iterable: JsValue) -> Result<Vec<JsValue>, VmError> {
-        if let Some(ptr) = iterable.as_object_ptr() {
+    pub(crate) fn create_list_from_array_like(&mut self, array_like: JsValue) -> Result<Vec<JsValue>, VmError> {
+        if !array_like.is_object() {
+            return Err(VmError::TypeError("CreateListFromArrayLike called on non-object".into()));
+        }
+        if let Some(ptr) = array_like.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Array(elements) = &obj.kind {
-                return Ok(elements.iter().copied().filter(|v| !v.is_hole()).collect());
+                if obj.accessors.is_none() {
+                    return Ok(elements.iter().map(|v| if v.is_hole() { JsValue::undefined() } else { *v }).collect());
+                }
             }
         }
-        let len_val = self.get_property(iterable, "length");
-        if let Some(len) = len_val.as_int32() {
-            let mut list = Vec::with_capacity(len.max(0) as usize);
-            for i in 0..len {
-                let elem = self.get_property(iterable, &i.to_string());
-                list.push(elem);
-            }
-            return Ok(list);
+        let len_val = self.get_property_result(array_like, "length")?;
+        let len = len_val
+            .to_int32()
+            .or_else(|| len_val.to_number().map(|n| n as i32))
+            .unwrap_or(0)
+            .max(0) as usize;
+        let mut list = Vec::with_capacity(len.min(100_000));
+        for i in 0..len {
+            let elem = self.get_property_result(array_like, &i.to_string())?;
+            list.push(elem);
         }
-        let items = crate::builtins::helpers::iterate_to_vec(self, iterable)?;
-        Ok(items)
+        Ok(list)
     }
 }
