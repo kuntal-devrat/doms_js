@@ -53,7 +53,12 @@ impl Vm {
 
     pub fn handle_exception_at_depth(&mut self, err: VmError, min_frame_idx: usize) -> Result<(), VmError> {
         if let VmError::RuntimeError(ref msg) = err {
-            if msg.contains("Execution step limit exceeded") {
+            if msg.contains("Execution step limit exceeded") || msg.contains("Execution timeout exceeded") {
+                return Err(err);
+            }
+        }
+        if let VmError::RangeError(ref msg) = err {
+            if msg.contains("Out of memory") {
                 return Err(err);
             }
         }

@@ -41,9 +41,6 @@ impl Vm {
                     return self.alloc_string(ch.to_string());
                 }
             }
-            if let Some(method) = self.get_string_method(key) {
-                return method;
-            }
             if let Some(proto) = self.string_proto {
                 return self.get_property_with_receiver(proto, key, receiver);
             }
@@ -71,16 +68,9 @@ impl Vm {
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
 
-            if let ObjectKind::Proxy { target: tgt, handler: hdl } = &obj.kind {
-                let tgt = *tgt;
-                let hdl = *hdl;
-                let trap = self.get_property(hdl, "get");
-                if self.is_callable(trap) {
-                    let key_val = self.alloc_string(key.to_string());
-                    return self.call(trap, hdl, &[tgt, key_val, receiver]).unwrap_or(JsValue::undefined());
-                } else {
-                    return self.get_property_with_receiver(tgt, key, receiver);
-                }
+            if matches!(obj.kind, ObjectKind::Proxy { .. }) {
+                let prop_key = PropertyKeyVal::String(key.to_string());
+                return self.proxy_get(target, &prop_key, receiver).unwrap_or(JsValue::undefined());
             }
 
             // Check own accessor
@@ -97,7 +87,22 @@ impl Vm {
             // Special properties on Array
             if let ObjectKind::Array(elements) = &obj.kind {
                 if key == "length" {
-                    return JsValue::from_int32(elements.len() as i32);
+                    let prop_info = self.shapes.get_property_info(obj.shape_id, "length");
+                    if let Some(info) = prop_info {
+                        if let Some(val) = obj.slots.get(info.offset as usize) {
+                            if let Some(n) = val.to_number() {
+                                if (n as usize) >= elements.len() {
+                                    return *val;
+                                }
+                            }
+                        }
+                    }
+                    let len = elements.len();
+                    if len <= i32::MAX as usize {
+                        return JsValue::from_int32(len as i32);
+                    } else {
+                        return JsValue::from_double(len as f64);
+                    }
                 }
                 if let Ok(idx) = key.parse::<usize>() {
                     if let Some(elem) = elements.get(idx) {
@@ -105,9 +110,6 @@ impl Vm {
                             return *elem;
                         }
                     }
-                }
-                if let Some(method) = self.get_array_method(key) {
-                    return method;
                 }
             }
 
@@ -121,9 +123,7 @@ impl Vm {
                         return self.alloc_string(ch.to_string());
                     }
                 }
-                if let Some(method) = self.get_string_method(key) {
-                    return method;
-                }
+
             }
 
             // Special properties on Promise (fallback only if no prototype)
@@ -263,16 +263,9 @@ impl Vm {
             while let Some(proto_val) = curr_proto {
                 if let Some(proto_ptr) = proto_val.as_object_ptr() {
                     let proto_obj = unsafe { &*(proto_ptr as *mut JsObject) };
-                    if let ObjectKind::Proxy { target: tgt, handler: hdl } = &proto_obj.kind {
-                        let tgt = *tgt;
-                        let hdl = *hdl;
-                        let trap = self.get_property(hdl, "get");
-                        if self.is_callable(trap) {
-                            let key_val = self.alloc_string(key.to_string());
-                            return self.call(trap, hdl, &[tgt, key_val, receiver]).unwrap_or(JsValue::undefined());
-                        } else {
-                            return self.get_property_with_receiver(tgt, key, receiver);
-                        }
+                    if matches!(proto_obj.kind, ObjectKind::Proxy { .. }) {
+                        let prop_key = PropertyKeyVal::String(key.to_string());
+                        return self.proxy_get(proto_val, &prop_key, receiver).unwrap_or(JsValue::undefined());
                     }
                     if let Some(accs) = &proto_obj.accessors {
                         if let Some(acc) = accs.get(key) {

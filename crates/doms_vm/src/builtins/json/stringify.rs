@@ -26,64 +26,84 @@ pub(super) fn json_stringify_walk(
     vm: &mut Vm,
     holder: JsValue,
     key: &str,
-    mut val: JsValue,
-    stack: &mut Vec<*const JsObject>,
+    val: JsValue,
+    stack: &mut Vec<JsValue>,
     replacer_fn: Option<JsValue>,
     replacer_arr: Option<&[String]>,
     gap: &str,
     indent: &str,
 ) -> Result<Option<String>, VmError> {
+    let prev_temp = vm.temp_roots.len();
+    vm.temp_roots.push(holder);
+    vm.temp_roots.push(val);
+
     // 1. Check toJSON
-    if let Some(_ptr) = val.as_object_ptr() {
-        let to_json = vm.get_property(val, "toJSON");
+    let cur_val = vm.temp_roots[prev_temp + 1];
+    if let Some(_ptr) = cur_val.as_object_ptr() {
+        let to_json = vm.get_property(cur_val, "toJSON");
         if vm.is_callable(to_json) {
             let key_val = vm.alloc_string(key.to_string());
-            val = vm.call(to_json, val, &[key_val])?;
+            let cur_val = vm.temp_roots[prev_temp + 1];
+            let new_val = vm.call(to_json, cur_val, &[key_val])?;
+            vm.temp_roots[prev_temp + 1] = new_val;
         }
     }
 
     // 2. Call replacer function if provided
     if let Some(rf) = replacer_fn {
         let key_val = vm.alloc_string(key.to_string());
-        val = vm.call(rf, holder, &[key_val, val])?;
+        let cur_holder = vm.temp_roots[prev_temp];
+        let cur_val = vm.temp_roots[prev_temp + 1];
+        let new_val = vm.call(rf, cur_holder, &[key_val, cur_val])?;
+        vm.temp_roots[prev_temp + 1] = new_val;
     }
 
-    if val.is_null() {
+    let cur_val = vm.temp_roots[prev_temp + 1];
+    if cur_val.is_null() {
+        vm.temp_roots.truncate(prev_temp);
         return Ok(Some("null".to_string()));
     }
-    if val.is_boolean() {
-        return Ok(Some(if val.as_boolean() == Some(true) { "true".to_string() } else { "false".to_string() }));
+    if cur_val.is_boolean() {
+        let b = cur_val.as_boolean() == Some(true);
+        vm.temp_roots.truncate(prev_temp);
+        return Ok(Some(if b { "true".to_string() } else { "false".to_string() }));
     }
-    if val.is_number() {
-        let n = vm.to_number_value(val).unwrap_or(0.0);
+    if cur_val.is_number() {
+        let n = vm.to_number_value(cur_val).unwrap_or(0.0);
+        vm.temp_roots.truncate(prev_temp);
         if n.is_nan() || n.is_infinite() {
             return Ok(Some("null".to_string()));
         } else {
-            return Ok(Some(vm.to_string_value(val)));
+            return Ok(Some(vm.to_string_value(cur_val)));
         }
     }
-    if val.is_undefined() || val.is_symbol() {
+    if cur_val.is_undefined() || cur_val.is_symbol() {
+        vm.temp_roots.truncate(prev_temp);
         return Ok(None);
     }
 
-    if let Some(ptr) = val.as_object_ptr() {
+    let cur_val = vm.temp_roots[prev_temp + 1];
+    if let Some(ptr) = cur_val.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut JsObject) };
         if matches!(obj.kind, ObjectKind::Function(_) | ObjectKind::NativeFunction(_)) {
+            vm.temp_roots.truncate(prev_temp);
             return Ok(None);
         }
         if matches!(obj.kind, ObjectKind::Symbol(_)) {
+            vm.temp_roots.truncate(prev_temp);
             return Ok(None);
         }
         if matches!(obj.kind, ObjectKind::BigInt(_)) {
+            vm.temp_roots.truncate(prev_temp);
             return Err(VmError::TypeError("Do not know how to serialize a BigInt".into()));
         }
 
-        // Circularity check
-        let obj_raw = ptr as *const JsObject;
-        if stack.contains(&obj_raw) {
+        let cur_val = vm.temp_roots[prev_temp + 1];
+        if stack.iter().any(|v| v.as_object_ptr() == cur_val.as_object_ptr()) {
+            vm.temp_roots.truncate(prev_temp);
             return Err(VmError::TypeError("Converting circular structure to JSON".into()));
         }
-        stack.push(obj_raw);
+        stack.push(cur_val);
 
         let res = match &obj.kind {
             ObjectKind::String(s) | ObjectKind::StringObject(s) => {
@@ -104,8 +124,9 @@ pub(super) fn json_stringify_walk(
                 let mut items = Vec::with_capacity(len);
                 let next_indent = if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
                 for i in 0..len {
-                    let elem = vm.get_property(val, &i.to_string());
-                    let s = json_stringify_walk(vm, val, &i.to_string(), elem, stack, replacer_fn, replacer_arr, gap, &next_indent)?;
+                    let cur_val = vm.temp_roots[prev_temp + 1];
+                    let elem = vm.get_property(cur_val, &i.to_string());
+                    let s = json_stringify_walk(vm, cur_val, &i.to_string(), elem, stack, replacer_fn, replacer_arr, gap, &next_indent)?;
                     items.push(s.unwrap_or_else(|| "null".to_string()));
                 }
                 if items.is_empty() {
@@ -128,17 +149,19 @@ pub(super) fn json_stringify_walk(
                 }
             }
             _ => {
+                let cur_val = vm.temp_roots[prev_temp + 1];
                 let keys = if let Some(arr_keys) = replacer_arr {
                     arr_keys.to_vec()
                 } else {
-                    get_enumerable_keys(vm, val)
+                    get_enumerable_keys(vm, cur_val)
                 };
 
                 let mut pairs = Vec::new();
                 let next_indent = if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
                 for k in keys {
-                    let prop = vm.get_property(val, &k);
-                    let s_opt = json_stringify_walk(vm, val, &k, prop, stack, replacer_fn, replacer_arr, gap, &next_indent)?;
+                    let cur_val = vm.temp_roots[prev_temp + 1];
+                    let prop = vm.get_property(cur_val, &k);
+                    let s_opt = json_stringify_walk(vm, cur_val, &k, prop, stack, replacer_fn, replacer_arr, gap, &next_indent)?;
                     if let Some(s) = s_opt {
                         if gap.is_empty() {
                             pairs.push(format!("\"{}\":{}", escape_json_string(&k), s));
@@ -163,8 +186,10 @@ pub(super) fn json_stringify_walk(
         };
 
         stack.pop();
+        vm.temp_roots.truncate(prev_temp);
         res
     } else {
+        vm.temp_roots.truncate(prev_temp);
         Ok(Some("null".to_string()))
     }
 }

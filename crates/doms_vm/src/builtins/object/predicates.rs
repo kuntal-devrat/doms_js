@@ -22,7 +22,8 @@ pub(super) fn register_predicates(vm: &mut Vm, object_proto: JsValue) {
                 }
             }
         }
-        Ok(JsValue::from_boolean(vm.has_own_property_key(this_obj, &key)))
+        let desc = get_own_property_descriptor_internal(vm, this_obj, &key)?;
+        Ok(JsValue::from_boolean(!desc.is_undefined()))
     });
     vm.set_property(object_proto, "hasOwnProperty", has_own_prop);
 

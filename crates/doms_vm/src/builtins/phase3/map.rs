@@ -252,24 +252,49 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
             vm.alloc_map()
         };
 
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(map_val);
+
         if let Some(arg) = args.first() {
             if !arg.is_nullish() {
-                let adder = vm.get_property(map_val, "set");
+                let cur_map = vm.temp_roots[prev_temp];
+                let adder = vm.get_property(cur_map, "set");
                 if !vm.is_callable(adder) {
+                    vm.temp_roots.truncate(prev_temp);
                     return Err(VmError::TypeError("Map.prototype.set is not callable".into()));
                 }
-                let items = iterate_to_vec(vm, *arg)?;
+                vm.temp_roots.push(adder);
+                let arg_val = *arg;
+                let items = iterate_to_vec(vm, arg_val)?;
+                let items_start = vm.temp_roots.len();
                 for item in items {
-                    if !item.is_object() {
+                    vm.temp_roots.push(item);
+                }
+                let num_items = vm.temp_roots.len() - items_start;
+                for i in 0..num_items {
+                    let cur_item = vm.temp_roots[items_start + i];
+                    if !cur_item.is_object() {
+                        vm.temp_roots.truncate(prev_temp);
                         return Err(VmError::TypeError("Iterator value is not an entry object".into()));
                     }
-                    let k = vm.get_property(item, "0");
-                    let v = vm.get_property(item, "1");
-                    vm.call(adder, map_val, &[k, v])?;
+                    let k = vm.get_property(cur_item, "0");
+                    vm.temp_roots.push(k);
+                    let cur_item = vm.temp_roots[items_start + i];
+                    let v = vm.get_property(cur_item, "1");
+                    vm.temp_roots.push(v);
+                    let k_val = vm.temp_roots[vm.temp_roots.len() - 2];
+                    let v_val = vm.temp_roots[vm.temp_roots.len() - 1];
+                    let cur_map = vm.temp_roots[prev_temp];
+                    let cur_adder = vm.temp_roots[prev_temp + 1];
+                    vm.call(cur_adder, cur_map, &[k_val, v_val])?;
+                    vm.temp_roots.truncate(items_start + num_items);
                 }
+                vm.temp_roots.truncate(prev_temp + 1);
             }
         }
-        Ok(map_val)
+        let res = vm.temp_roots[prev_temp];
+        vm.temp_roots.truncate(prev_temp);
+        Ok(res)
     });
     vm.set_property(map_ctor, "groupBy", map_group_by);
     vm.set_property(map_ctor, "prototype", map_proto);

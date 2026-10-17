@@ -3,21 +3,38 @@
 use super::*;
 
 impl Vm {
-    pub fn get_for_in_keys(&self, curr: JsValue) -> Vec<String> {
+    pub fn get_for_in_keys(&mut self, curr: JsValue) -> Result<Vec<String>, VmError> {
         if !curr.is_object() {
             if let Some(ptr) = curr.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::String(ref s) | ObjectKind::StringObject(ref s) = obj.kind {
-                    return (0..s.chars().count()).map(|i| i.to_string()).collect();
+                    return Ok((0..s.chars().count()).map(|i| i.to_string()).collect());
                 }
             }
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let mut visited: Vec<String> = Vec::new();
         let mut current_val = Some(curr);
 
         while let Some(obj_val) = current_val {
             if let Some(ptr) = obj_val.as_object_ptr() {
+                let is_proxy = matches!(unsafe { &*(ptr as *mut JsObject) }.kind, ObjectKind::Proxy { .. });
+                if is_proxy {
+                    let keys = self.proxy_own_property_keys(obj_val)?;
+                    for k in keys {
+                        if let PropertyKeyVal::String(s) = k {
+                            let desc = crate::builtins::object::descriptor::get_own_property_descriptor_internal(self, obj_val, &PropertyKeyVal::String(s.clone()))?;
+                            if !desc.is_undefined() && self.get_property(desc, "enumerable").is_truthy() {
+                                if !visited.contains(&s) {
+                                    visited.push(s);
+                                }
+                            }
+                        }
+                    }
+                    current_val = self.get_prototype_of_val(obj_val).ok().and_then(|p| if p.is_null() || !p.is_object() { None } else { Some(p) });
+                    continue;
+                }
+
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 let mut int_keys: Vec<(usize, String)> = Vec::new();
                 let mut str_keys: Vec<String> = Vec::new();
@@ -96,12 +113,12 @@ impl Vm {
                     visited.push(k);
                 }
 
-                current_val = obj.prototype;
+                current_val = self.get_prototype_of_val(obj_val).ok().and_then(|p| if p.is_null() || !p.is_object() { None } else { Some(p) });
             } else {
                 break;
             }
         }
 
-        visited
+        Ok(visited)
     }
 }

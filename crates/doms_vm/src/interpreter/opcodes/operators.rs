@@ -7,12 +7,32 @@ impl Vm {
         let b = self.pop()?;
         let a = self.pop()?;
 
-        let a_prim = self.to_primitive(a, PreferredType::Default)?;
-        let b_prim = self.to_primitive(b, PreferredType::Default)?;
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(a);
+        self.temp_roots.push(b);
+
+        let a_prim = match self.to_primitive(a, PreferredType::Default) {
+            Ok(v) => v,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                return Err(e);
+            }
+        };
+        self.temp_roots.push(a_prim);
+
+        let b_prim = match self.to_primitive(b, PreferredType::Default) {
+            Ok(v) => v,
+            Err(e) => {
+                self.temp_roots.truncate(prev_temp);
+                return Err(e);
+            }
+        };
+        self.temp_roots.push(b_prim);
 
         let a_is_sym = a_prim.is_symbol() || (a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))));
         let b_is_sym = b_prim.is_symbol() || (b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))));
         if a_is_sym || b_is_sym {
+            self.temp_roots.truncate(prev_temp);
             return Err(VmError::TypeError("Cannot convert a Symbol value to a number or string".into()));
         }
 
@@ -24,15 +44,31 @@ impl Vm {
             let sb = self.to_string_value(b_prim);
             let combined = format!("{}{}", sa, sb);
             let res = self.alloc_string(combined);
+            self.temp_roots.truncate(prev_temp);
             self.push(res);
         } else if let (Some(ba), Some(bb)) = (self.as_bigint_val(a_prim), self.as_bigint_val(b_prim)) {
             let res = self.alloc_bigint(&ba + &bb);
+            self.temp_roots.truncate(prev_temp);
             self.push(res);
         } else if self.as_bigint_val(a_prim).is_some() || self.as_bigint_val(b_prim).is_some() {
+            self.temp_roots.truncate(prev_temp);
             return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
         } else {
-            let na = self.to_number_value(a_prim)?;
-            let nb = self.to_number_value(b_prim)?;
+            let na = match self.to_number_value(a_prim) {
+                Ok(n) => n,
+                Err(e) => {
+                    self.temp_roots.truncate(prev_temp);
+                    return Err(e);
+                }
+            };
+            let nb = match self.to_number_value(b_prim) {
+                Ok(n) => n,
+                Err(e) => {
+                    self.temp_roots.truncate(prev_temp);
+                    return Err(e);
+                }
+            };
+            self.temp_roots.truncate(prev_temp);
             self.push(JsValue::from_double(na + nb));
         }
         Ok(())
@@ -195,6 +231,14 @@ impl Vm {
                 ObjectKind::Symbol(_) => if v.is_symbol() { "symbol" } else { "object" },
                 ObjectKind::BigInt(_) => "bigint",
                 ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => "function",
+                ObjectKind::Proxy { target, .. } => {
+                    let tgt = *target;
+                    if self.is_callable(tgt) {
+                        "function"
+                    } else {
+                        "object"
+                    }
+                }
                 _ => "object",
             }
         } else {
@@ -339,24 +383,15 @@ impl Vm {
         } else if let Some(rhs_ptr) = rhs.as_object_ptr() {
             let _rhs_obj = unsafe { &*(rhs_ptr as *mut JsObject) };
             let proto = self.get_property(rhs, "prototype");
-            let mut curr_obj = Some(lhs);
             let mut is_instance = false;
             if proto.is_object() {
-                while let Some(curr) = curr_obj {
-                    if let Some(ptr) = curr.as_object_ptr() {
-                        let obj = unsafe { &*(ptr as *mut JsObject) };
-                        if let Some(p) = obj.prototype {
-                            if p == proto {
-                                is_instance = true;
-                                break;
-                            }
-                            curr_obj = Some(p);
-                        } else {
-                            break;
-                        }
-                    } else {
+                let mut curr_val = self.get_prototype_of_val(lhs)?;
+                while curr_val.is_object() {
+                    if curr_val == proto {
+                        is_instance = true;
                         break;
                     }
+                    curr_val = self.get_prototype_of_val(curr_val)?;
                 }
             }
             self.push(JsValue::from_boolean(is_instance));
@@ -372,27 +407,8 @@ impl Vm {
         if !rhs.is_js_object() {
             return Err(VmError::TypeError("Cannot use 'in' operator to search for property in non-object".into()));
         }
-        let has = if lhs.is_symbol() {
-            let prop_key = PropertyKeyVal::Symbol(lhs);
-            let mut curr = Some(rhs);
-            let mut found = false;
-            while let Some(c_val) = curr {
-                if self.has_own_property_key(c_val, &prop_key) {
-                    found = true;
-                    break;
-                }
-                if let Some(c_ptr) = c_val.as_object_ptr() {
-                    let c_obj = unsafe { &*(c_ptr as *mut JsObject) };
-                    curr = c_obj.prototype;
-                } else {
-                    break;
-                }
-            }
-            found
-        } else {
-            let key = self.to_string_value(lhs);
-            self.has_property(rhs, &key)?
-        };
+        let prop_key = self.to_property_key(lhs)?;
+        let has = self.has_property_key(rhs, &prop_key)?;
         self.push(JsValue::from_boolean(has));
         Ok(())
     }

@@ -79,8 +79,16 @@ impl Vm {
                         } else if new_len < 100_000 {
                             elements.resize(new_len, JsValue::hole());
                         }
-                        return;
                     }
+                    if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
+                        obj.set_slot(offset, value);
+                    } else {
+                        let (new_shape_id, offset) = self.shapes.transition(obj.shape_id, key);
+                        obj.shape_id = new_shape_id;
+                        obj.set_slot(offset, value);
+                        obj.add_prop_order(key.to_string());
+                    }
+                    return;
                 }
                 if let Ok(idx) = key.parse::<usize>() {
                     if idx < elements.len() {
@@ -155,8 +163,16 @@ impl Vm {
                         } else if new_len < 100_000 {
                             elements.resize(new_len, JsValue::hole());
                         }
-                        return;
                     }
+                    if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
+                        obj.set_slot(offset, value);
+                    } else {
+                        let (new_shape_id, offset) = self.shapes.transition(obj.shape_id, key);
+                        obj.shape_id = new_shape_id;
+                        obj.set_slot(offset, value);
+                        obj.add_prop_order(key.to_string());
+                    }
+                    return;
                 }
                 if let Ok(idx) = key.parse::<usize>() {
                     if idx < elements.len() {

@@ -40,7 +40,7 @@ mod bigint;
 mod console;
 mod function;
 mod globals;
-mod helpers;
+pub(crate) mod helpers;
 mod json;
 mod math;
 pub(crate) mod object;

@@ -193,29 +193,41 @@ impl Vm {
             _ => return Err(VmError::TypeError("Function name must be string".into())),
         };
         let val = self.peek().copied()?;
-        if let Some(ptr) = val.as_object_ptr() {
-            let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::Function(ref mut func) = obj.kind {
+        let is_anon_fn = if let Some(ptr) = val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref func) = obj.kind {
                 let is_anon = func.name.as_deref().unwrap_or("").is_empty();
-                if is_anon {
-                    let has_accessor = if let Some(ref accs) = obj.accessors {
-                        accs.contains_key("name")
-                    } else {
-                        false
-                    };
-                    if !has_accessor {
-                        let cur_name_val = self.get_property(val, "name");
-                        if cur_name_val.is_empty_string() || cur_name_val.is_undefined() {
-                            func.name = Some(name.clone());
-                            let name_val = self.alloc_string(name.clone());
-                            self.set_own_property(val, "name", name_val);
-                            self.non_enumerable_props.insert((val, "name".to_string()));
-                            self.non_writable_props.insert((val, "name".to_string()));
-                            self.non_configurable_props.remove(&(val, "name".to_string()));
-                        }
+                let has_accessor = obj.accessors.as_ref().map_or(false, |a| a.contains_key("name"));
+                is_anon && !has_accessor
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if is_anon_fn {
+            let prev_temp = self.temp_roots.len();
+            self.temp_roots.push(val);
+            let cur_val = self.temp_roots[prev_temp];
+            let cur_name_val = self.get_property(cur_val, "name");
+            if cur_name_val.is_empty_string() || cur_name_val.is_undefined() {
+                let name_val = self.alloc_string(name.clone());
+                self.temp_roots.push(name_val);
+                let cur_val = self.temp_roots[prev_temp];
+                let cur_name = self.temp_roots[prev_temp + 1];
+                if let Some(ptr) = cur_val.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let ObjectKind::Function(ref mut func) = obj.kind {
+                        func.name = Some(name.clone());
                     }
                 }
+                self.set_own_property(cur_val, "name", cur_name);
+                self.non_enumerable_props.insert((cur_val, "name".to_string()));
+                self.non_writable_props.insert((cur_val, "name".to_string()));
+                self.non_configurable_props.remove(&(cur_val, "name".to_string()));
             }
+            self.temp_roots.truncate(prev_temp);
         }
         Ok(())
     }

@@ -78,11 +78,50 @@ impl Vm {
             })),
             "slice" => Some(self.alloc_native_function("slice", 2, |vm, this, args| {
                 let s = vm.to_string_value(this);
-                let len = s.len() as i32;
-                let start = args.first().and_then(|v| v.to_int32()).unwrap_or(0).clamp(0, len) as usize;
-                let end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len).clamp(0, len) as usize;
-                let sub = if start <= end { &s[start..end] } else { "" };
-                Ok(vm.alloc_string(sub.to_string()))
+                let is_ascii = s.is_ascii();
+                let len = if is_ascii {
+                    s.len()
+                } else {
+                    s.encode_utf16().count()
+                };
+                let parse_slice_index = |val_opt: Option<&JsValue>, default: i64, len: usize, vm: &mut Vm| -> Result<usize, VmError> {
+                    match val_opt {
+                        Some(val) if !val.is_undefined() => {
+                            let n = vm.to_number_value(*val)?;
+                            if n.is_nan() {
+                                Ok(0)
+                            } else if n <= -(len as f64) {
+                                Ok(0)
+                            } else if n < 0.0 {
+                                Ok((len as i64 + n.trunc() as i64).max(0) as usize)
+                            } else if n >= len as f64 {
+                                Ok(len)
+                            } else {
+                                Ok(n.trunc() as usize)
+                            }
+                        }
+                        _ => {
+                            if default < 0 {
+                                Ok((len as i64 + default).max(0) as usize)
+                            } else {
+                                Ok((default as usize).min(len))
+                            }
+                        }
+                    }
+                };
+                let start = parse_slice_index(args.first(), 0, len, vm)?;
+                let end = parse_slice_index(args.get(1), len as i64, len, vm)?;
+                let sub = if start < end {
+                    if is_ascii {
+                        s[start..end].to_string()
+                    } else {
+                        let u16_chars: Vec<u16> = s.encode_utf16().collect();
+                        String::from_utf16_lossy(&u16_chars[start..end])
+                    }
+                } else {
+                    String::new()
+                };
+                Ok(vm.alloc_string(sub))
             })),
             "isWellFormed" => Some(self.alloc_native_function("isWellFormed", 0, |vm, this, _args| {
                 let s = vm.to_string_value(this);
@@ -290,14 +329,15 @@ impl Vm {
             })),
             "substring" => Some(self.alloc_native_function("substring", 2, |vm, this, args| {
                 let s = vm.to_string_value(this);
-                let len = s.len() as i32;
+                let u16_chars: Vec<u16> = s.encode_utf16().collect();
+                let len = u16_chars.len() as i32;
                 let mut start = args.first().and_then(|v| v.to_int32()).unwrap_or(0).clamp(0, len);
                 let mut end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len).clamp(0, len);
                 if start > end {
                     std::mem::swap(&mut start, &mut end);
                 }
-                let sub = &s[start as usize..end as usize];
-                Ok(vm.alloc_string(sub.to_string()))
+                let sub = String::from_utf16_lossy(&u16_chars[start as usize..end as usize]);
+                Ok(vm.alloc_string(sub))
             })),
             "concat" => Some(self.alloc_native_function("concat", 1, |vm, this, args| {
                 let mut res = vm.to_string_value(this);
@@ -335,28 +375,43 @@ impl Vm {
             })),
             "padStart" => Some(self.alloc_native_function("padStart", 1, |vm, this, args| {
                 let this_str = vm.to_string_value(this);
+                let this_u16: Vec<u16> = this_str.encode_utf16().collect();
                 let target_len = args.first().and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
                 let pad_str = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_else(|| " ".to_string());
-                if this_str.len() >= target_len || pad_str.is_empty() {
+                if this_u16.len() >= target_len || pad_str.is_empty() {
                     return Ok(vm.alloc_string(this_str));
                 }
-                let diff = target_len - this_str.len();
-                let pad_repeats = pad_str.repeat((diff / pad_str.len()) + 1);
-                let mut res = pad_repeats[..diff].to_string();
-                res.push_str(&this_str);
+                let diff = target_len - this_u16.len();
+                let pad_u16: Vec<u16> = pad_str.encode_utf16().collect();
+                let repeats = (diff / pad_u16.len()) + 1;
+                let mut full_pad_u16 = Vec::with_capacity(repeats * pad_u16.len());
+                for _ in 0..repeats {
+                    full_pad_u16.extend_from_slice(&pad_u16);
+                }
+                full_pad_u16.truncate(diff);
+                full_pad_u16.extend_from_slice(&this_u16);
+                let res = String::from_utf16_lossy(&full_pad_u16);
                 Ok(vm.alloc_string(res))
             })),
             "padEnd" => Some(self.alloc_native_function("padEnd", 1, |vm, this, args| {
-                let mut this_str = vm.to_string_value(this);
+                let this_str = vm.to_string_value(this);
+                let mut this_u16: Vec<u16> = this_str.encode_utf16().collect();
                 let target_len = args.first().and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
                 let pad_str = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_else(|| " ".to_string());
-                if this_str.len() >= target_len || pad_str.is_empty() {
+                if this_u16.len() >= target_len || pad_str.is_empty() {
                     return Ok(vm.alloc_string(this_str));
                 }
-                let diff = target_len - this_str.len();
-                let pad_repeats = pad_str.repeat((diff / pad_str.len()) + 1);
-                this_str.push_str(&pad_repeats[..diff]);
-                Ok(vm.alloc_string(this_str))
+                let diff = target_len - this_u16.len();
+                let pad_u16: Vec<u16> = pad_str.encode_utf16().collect();
+                let repeats = (diff / pad_u16.len()) + 1;
+                let mut full_pad_u16 = Vec::with_capacity(repeats * pad_u16.len());
+                for _ in 0..repeats {
+                    full_pad_u16.extend_from_slice(&pad_u16);
+                }
+                full_pad_u16.truncate(diff);
+                this_u16.extend_from_slice(&full_pad_u16);
+                let res = String::from_utf16_lossy(&this_u16);
+                Ok(vm.alloc_string(res))
             })),
             "localeCompare" => Some(self.alloc_native_function("localeCompare", 1, |vm, this, args| {
                 let a = vm.to_string_value(this);

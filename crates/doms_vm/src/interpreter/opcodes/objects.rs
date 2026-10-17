@@ -101,7 +101,13 @@ impl Vm {
                 }
             }
         }
-        let keys_to_alloc = self.get_for_in_keys(obj_val);
+        let keys_to_alloc = match self.get_for_in_keys(obj_val) {
+            Ok(k) => k,
+            Err(err) => {
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(Some(JsValue::undefined()));
+            }
+        };
         let keys_vec: Vec<JsValue> = keys_to_alloc.into_iter().map(|k| self.alloc_string(k)).collect();
         let arr = self.alloc_array(keys_vec);
         self.push(arr);
@@ -110,7 +116,12 @@ impl Vm {
 
     pub(crate) fn op_get_iterator(&mut self, target_depth: usize) -> Result<Option<JsValue>, VmError> {
         let iterable = self.pop()?;
-        if iterable.is_nullish() {
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(iterable);
+
+        let cur_iterable = self.temp_roots[prev_temp];
+        if cur_iterable.is_nullish() {
+            self.temp_roots.truncate(prev_temp);
             let err = VmError::TypeError("Value is not iterable".into());
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);
@@ -118,27 +129,31 @@ impl Vm {
         let sym_iter = match self.symbol_iterator {
             Some(s) => s,
             None => {
+                self.temp_roots.truncate(prev_temp);
                 let err = VmError::TypeError("No Symbol.iterator".into());
                 self.handle_exception_at_depth(err, target_depth)?;
                 return Ok(None);
             }
         };
-        let method = match self.get_symbol_property_result(iterable, sym_iter) {
+        let cur_iterable = self.temp_roots[prev_temp];
+        let method = match self.get_symbol_property_result(cur_iterable, sym_iter) {
             Ok(m) => m,
             Err(e) => {
+                self.temp_roots.truncate(prev_temp);
                 self.handle_exception_at_depth(e, target_depth)?;
                 return Ok(None);
             }
         };
         if !self.is_callable(method) {
+            self.temp_roots.truncate(prev_temp);
             let err = VmError::TypeError("Value is not iterable".into());
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);
         }
-        let prev_temp = self.temp_roots.len();
-        self.temp_roots.push(iterable);
         self.temp_roots.push(method);
-        let iterator = match self.call(method, iterable, &[]) {
+        let cur_iterable = self.temp_roots[prev_temp];
+        let cur_method = self.temp_roots[prev_temp + 1];
+        let iterator = match self.call(cur_method, cur_iterable, &[]) {
             Ok(it) => it,
             Err(e) => {
                 self.temp_roots.truncate(prev_temp);
@@ -146,35 +161,44 @@ impl Vm {
                 return Ok(None);
             }
         };
-        self.temp_roots.truncate(prev_temp);
-        if !iterator.is_js_object() {
+        self.temp_roots.push(iterator);
+        let cur_iterator = self.temp_roots[prev_temp + 2];
+        if !cur_iterator.is_js_object() {
+            self.temp_roots.truncate(prev_temp);
             let err = VmError::TypeError("Iterator is not an object".into());
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);
         }
-        let next_fn = match self.get_property_result(iterator, "next") {
+        let cur_iterator = self.temp_roots[prev_temp + 2];
+        let next_fn = match self.get_property_result(cur_iterator, "next") {
             Ok(n) => n,
             Err(e) => {
+                self.temp_roots.truncate(prev_temp);
                 self.handle_exception_at_depth(e, target_depth)?;
                 return Ok(None);
             }
         };
         if !self.is_callable(next_fn) {
+            self.temp_roots.truncate(prev_temp);
             let err = VmError::TypeError("Iterator next is not callable".into());
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);
         }
+        self.temp_roots.push(next_fn);
+        let cur_iterator = self.temp_roots[prev_temp + 2];
+        let cur_next = self.temp_roots[prev_temp + 3];
         let rec = JsObject::new_with_kind(
             ShapeRegistry::ROOT_SHAPE_ID,
             None,
             ObjectKind::IteratorRecord {
-                iterator,
-                next_method: next_fn,
+                iterator: cur_iterator,
+                next_method: cur_next,
                 done: false,
             },
         );
         let ptr = self.allocate_js_object(rec);
         let rec_val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
+        self.temp_roots.truncate(prev_temp);
         self.push(rec_val);
         Ok(None)
     }
@@ -237,7 +261,8 @@ impl Vm {
                 frame.ip = target as usize;
             }
         } else {
-            let val = match self.get_property_result(step, "value") {
+            let cur_step = self.temp_roots[prev_temp + 2];
+            let val = match self.get_property_result(cur_step, "value") {
                 Ok(v) => v,
                 Err(e) => {
                     self.temp_roots.truncate(prev_temp);

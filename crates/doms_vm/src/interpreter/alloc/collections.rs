@@ -55,24 +55,31 @@ impl Vm {
             let items = Arc::clone(&items_arc);
             move |vm: &mut Vm, _this: JsValue, _args: &[JsValue]| -> Result<JsValue, VmError> {
                 let mut i = idx.lock().unwrap();
+                let prev = vm.temp_roots.len();
                 let res = vm.alloc_object();
+                vm.temp_roots.push(res);
                 if *i < items.len() {
                     let val = items[*i];
                     *i += 1;
-                    vm.set_property(res, "value", val);
-                    vm.set_property(res, "done", JsValue::from_boolean(false));
+                    vm.temp_roots.push(val);
+                    let r = vm.temp_roots[prev];
+                    let v = vm.temp_roots[prev + 1];
+                    vm.set_property(r, "value", v);
+                    vm.set_property(r, "done", JsValue::from_boolean(false));
                 } else {
-                    vm.set_property(res, "value", JsValue::undefined());
-                    vm.set_property(res, "done", JsValue::from_boolean(true));
+                    let r = vm.temp_roots[prev];
+                    vm.set_property(r, "value", JsValue::undefined());
+                    vm.set_property(r, "done", JsValue::from_boolean(true));
                 }
-                Ok(res)
+                let out = vm.temp_roots[prev];
+                vm.temp_roots.truncate(prev);
+                Ok(out)
             }
         }));
         let cur_iter = self.temp_roots[prev_temp];
         self.set_property(cur_iter, "next", next_fn);
         if let Some(sym_iter) = self.symbol_iterator {
-            let self_val = self.temp_roots[prev_temp];
-            let self_fn = self.alloc_closure_native_function("[Symbol.iterator]", 0, Arc::new(move |_vm, _this, _args| Ok(self_val)));
+            let self_fn = self.alloc_native_function("[Symbol.iterator]", 0, |_vm, this, _args| Ok(this));
             let cur_iter = self.temp_roots[prev_temp];
             self.set_symbol_property(cur_iter, sym_iter, self_fn);
         }

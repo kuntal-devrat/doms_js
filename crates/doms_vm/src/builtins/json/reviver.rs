@@ -3,33 +3,55 @@
 use super::*;
 
 pub(super) fn json_walk(vm: &mut Vm, reviver: JsValue, holder: JsValue, name: &str) -> Result<JsValue, VmError> {
+    let prev_temp = vm.temp_roots.len();
+    vm.temp_roots.push(holder);
+    vm.temp_roots.push(reviver);
+
     let val = vm.get_property(holder, name);
-    if let Some(ptr) = val.as_object_ptr() {
-        let obj = unsafe { &*(ptr as *mut JsObject) };
-        if let ObjectKind::Array(elements) = &obj.kind {
-            let len = elements.len();
-            for i in 0..len {
-                let prop_str = i.to_string();
-                let new_elem = json_walk(vm, reviver, val, &prop_str)?;
-                if new_elem.is_undefined() {
-                    vm.delete_property(val, &prop_str)?;
-                } else {
-                    vm.set_property(val, &prop_str, new_elem);
+    vm.temp_roots.push(val);
+
+    let res = (|| -> Result<JsValue, VmError> {
+        let cur_val = vm.temp_roots[prev_temp + 2];
+        if cur_val.is_js_object() {
+            if vm.is_array(cur_val) {
+                let len_val = vm.get_property(cur_val, "length");
+                let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+                for i in 0..len {
+                    let prop_str = i.to_string();
+                    let cur_v = vm.temp_roots[prev_temp + 2];
+                    let cur_r = vm.temp_roots[prev_temp + 1];
+                    let new_elem = json_walk(vm, cur_r, cur_v, &prop_str)?;
+                    let cur_v = vm.temp_roots[prev_temp + 2];
+                    if new_elem.is_undefined() {
+                        vm.delete_property(cur_v, &prop_str)?;
+                    } else {
+                        vm.create_data_property_or_throw(cur_v, &prop_str, new_elem)?;
+                    }
                 }
-            }
-        } else {
-            let keys = get_enumerable_keys(vm, val);
-            for k in keys {
-                let new_val = json_walk(vm, reviver, val, &k)?;
-                if new_val.is_undefined() {
-                    vm.delete_property(val, &k)?;
-                } else {
-                    vm.set_property(val, &k, new_val);
+            } else {
+                let keys = get_enumerable_keys(vm, cur_val);
+                for k in keys {
+                    let cur_v = vm.temp_roots[prev_temp + 2];
+                    let cur_r = vm.temp_roots[prev_temp + 1];
+                    let new_val = json_walk(vm, cur_r, cur_v, &k)?;
+                    let cur_v = vm.temp_roots[prev_temp + 2];
+                    if new_val.is_undefined() {
+                        vm.delete_property(cur_v, &k)?;
+                    } else {
+                        vm.create_data_property_or_throw(cur_v, &k, new_val)?;
+                    }
                 }
             }
         }
-    }
 
-    let name_val = vm.alloc_string(name.to_string());
-    vm.call(reviver, holder, &[name_val, val])
+        let cur_h = vm.temp_roots[prev_temp];
+        let cur_r = vm.temp_roots[prev_temp + 1];
+        let cur_v = vm.temp_roots[prev_temp + 2];
+
+        let name_val = vm.alloc_string(name.to_string());
+        vm.call(cur_r, cur_h, &[name_val, cur_v])
+    })();
+
+    vm.temp_roots.truncate(prev_temp);
+    res
 }

@@ -77,6 +77,7 @@ impl Vm {
         self.non_enumerable_props.insert((proto, "constructor".to_string()));
         self.set_own_property(current_fn_val, "prototype", proto);
         self.non_enumerable_props.insert((current_fn_val, "prototype".to_string()));
+        self.non_configurable_props.insert((current_fn_val, "prototype".to_string()));
 
         self.temp_roots.pop();
         self.temp_roots.truncate(prev_temp);

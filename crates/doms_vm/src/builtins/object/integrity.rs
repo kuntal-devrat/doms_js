@@ -4,58 +4,11 @@
 use super::*;
 
 pub fn prevent_extensions_internal(vm: &mut Vm, target: JsValue) -> Result<bool, VmError> {
-    if let Some(ptr) = target.as_object_ptr() {
-        let obj = unsafe { &*(ptr as *mut JsObject) };
-        if let ObjectKind::Proxy { target: inner_target, handler } = &obj.kind {
-            let inner_target = *inner_target;
-            let handler = *handler;
-            let trap = vm.get_property(handler, "preventExtensions");
-            if vm.is_callable(trap) {
-                let trap_res = vm.call(trap, handler, &[inner_target])?;
-                let boolean_res = trap_res.is_truthy();
-                if boolean_res {
-                    let inner_ext = is_extensible_internal(vm, inner_target)?;
-                    if inner_ext {
-                        return Err(VmError::TypeError("Proxy preventExtensions trap cannot return true if target is extensible".into()));
-                    }
-                }
-                return Ok(boolean_res);
-            } else {
-                return prevent_extensions_internal(vm, inner_target);
-            }
-        }
-    }
-    if vm.module_namespace_objects.contains(&target) {
-        return Err(VmError::TypeError("Cannot prevent extensions on module namespace object".into()));
-    }
-    vm.non_extensible_objects.insert(target);
-    Ok(true)
+    vm.prevent_extensions_val(target)
 }
 
 pub fn is_extensible_internal(vm: &mut Vm, target: JsValue) -> Result<bool, VmError> {
-    if !target.is_js_object() {
-        return Ok(false);
-    }
-    if let Some(ptr) = target.as_object_ptr() {
-        let obj = unsafe { &*(ptr as *mut JsObject) };
-        if let ObjectKind::Proxy { target: inner_target, handler } = &obj.kind {
-            let inner_target = *inner_target;
-            let handler = *handler;
-            let trap = vm.get_property(handler, "isExtensible");
-            if vm.is_callable(trap) {
-                let trap_res = vm.call(trap, handler, &[inner_target])?;
-                let boolean_res = trap_res.is_truthy();
-                let inner_ext = is_extensible_internal(vm, inner_target)?;
-                if boolean_res != inner_ext {
-                    return Err(VmError::TypeError("Proxy isExtensible trap returned inconsistent result".into()));
-                }
-                return Ok(boolean_res);
-            } else {
-                return is_extensible_internal(vm, inner_target);
-            }
-        }
-    }
-    Ok(!vm.non_extensible_objects.contains(&target))
+    vm.is_extensible_val(target)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

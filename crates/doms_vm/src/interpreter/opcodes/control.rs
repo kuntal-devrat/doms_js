@@ -150,6 +150,7 @@ impl Vm {
             this_val: frame.this_val,
             arguments: frame.arguments,
             mapped_arguments: frame.mapped_arguments,
+            async_queue: Vec::new(),
         };
         let gen_val = self.alloc_generator(generator_instance);
         self.stack.truncate(frame.base_sp);
@@ -158,6 +159,8 @@ impl Vm {
 
     pub(crate) fn op_yield(&mut self, target_depth: usize) -> Result<Option<JsValue>, VmError> {
         let yielded_val = self.pop().unwrap_or_default();
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(yielded_val);
         let gen_frame_idx = self.frames.len() - 1;
         let frame = self.frames.last_mut().unwrap();
         let base_sp = frame.base_sp;
@@ -195,7 +198,9 @@ impl Vm {
             }
         }
         let finished = self.frames.pop().unwrap();
-        let iter_res = self.make_iter_result(yielded_val, false);
+        let cur_yielded = self.temp_roots[prev_temp];
+        let iter_res = self.make_iter_result(cur_yielded, false);
+        self.temp_roots.truncate(prev_temp);
         self.stack.truncate(finished.base_sp);
         if self.frames.len() == target_depth {
             return Ok(Some(iter_res));

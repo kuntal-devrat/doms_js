@@ -8,6 +8,8 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     let num_format_ctor = vm.alloc_native_function("NumberFormat", 0, |vm, _this, _args| {
         let nf_obj = vm.alloc_object();
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(nf_obj);
         let format_fn = vm.alloc_native_function("format", 1, |vm, _this, args| {
             let n = args.first().and_then(|v| v.to_number()).unwrap_or(0.0);
             let s = if n.fract() == 0.0 && n.abs() < 1e16 {
@@ -28,15 +30,24 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
             };
             Ok(vm.alloc_string(s))
         });
+        let cur_nf = vm.temp_roots[prev_temp];
+        vm.set_property(cur_nf, "format", format_fn);
         let resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, _this, _args| {
             let opts = vm.alloc_object();
+            let prev = vm.temp_roots.len();
+            vm.temp_roots.push(opts);
             let loc = vm.alloc_string("en-US".to_string());
-            vm.set_property(opts, "locale", loc);
-            Ok(opts)
+            let cur_opts = vm.temp_roots[prev];
+            vm.set_property(cur_opts, "locale", loc);
+            let res = vm.temp_roots[prev];
+            vm.temp_roots.truncate(prev);
+            Ok(res)
         });
-        vm.set_property(nf_obj, "format", format_fn);
-        vm.set_property(nf_obj, "resolvedOptions", resolved_opts);
-        Ok(nf_obj)
+        let cur_nf = vm.temp_roots[prev_temp];
+        vm.set_property(cur_nf, "resolvedOptions", resolved_opts);
+        let res = vm.temp_roots[prev_temp];
+        vm.temp_roots.truncate(prev_temp);
+        Ok(res)
     });
     let empty_locales_fn = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, _args| {
         Ok(vm.alloc_array(Vec::new()))
@@ -46,19 +57,30 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     let date_format_ctor = vm.alloc_native_function("DateTimeFormat", 0, |vm, _this, _args| {
         let df_obj = vm.alloc_object();
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(df_obj);
         let format_fn = vm.alloc_native_function("format", 1, |vm, _this, args| {
             let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| "2026-10-06T00:00:00Z".to_string());
             Ok(vm.alloc_string(s))
         });
+        let cur_df = vm.temp_roots[prev_temp];
+        vm.set_property(cur_df, "format", format_fn);
         let resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, _this, _args| {
             let opts = vm.alloc_object();
+            let prev = vm.temp_roots.len();
+            vm.temp_roots.push(opts);
             let loc = vm.alloc_string("en-US".to_string());
-            vm.set_property(opts, "locale", loc);
-            Ok(opts)
+            let cur_opts = vm.temp_roots[prev];
+            vm.set_property(cur_opts, "locale", loc);
+            let res = vm.temp_roots[prev];
+            vm.temp_roots.truncate(prev);
+            Ok(res)
         });
-        vm.set_property(df_obj, "format", format_fn);
-        vm.set_property(df_obj, "resolvedOptions", resolved_opts);
-        Ok(df_obj)
+        let cur_df = vm.temp_roots[prev_temp];
+        vm.set_property(cur_df, "resolvedOptions", resolved_opts);
+        let res = vm.temp_roots[prev_temp];
+        vm.temp_roots.truncate(prev_temp);
+        Ok(res)
     });
     let empty_locales_fn2 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, _args| {
         Ok(vm.alloc_array(Vec::new()))
@@ -68,6 +90,8 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     let collator_ctor = vm.alloc_native_function("Collator", 0, |vm, _this, _args| {
         let coll_obj = vm.alloc_object();
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(coll_obj);
         let compare_fn = vm.alloc_native_function("compare", 2, |vm, _this, args| {
             let a = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
             let b = args.get(1).map(|v| vm.to_string_value(*v)).unwrap_or_default();
@@ -78,15 +102,24 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
             };
             Ok(JsValue::from_int32(cmp))
         });
+        let cur_coll = vm.temp_roots[prev_temp];
+        vm.set_property(cur_coll, "compare", compare_fn);
         let resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, _this, _args| {
             let opts = vm.alloc_object();
+            let prev = vm.temp_roots.len();
+            vm.temp_roots.push(opts);
             let loc = vm.alloc_string("en-US".to_string());
-            vm.set_property(opts, "locale", loc);
-            Ok(opts)
+            let cur_opts = vm.temp_roots[prev];
+            vm.set_property(cur_opts, "locale", loc);
+            let res = vm.temp_roots[prev];
+            vm.temp_roots.truncate(prev);
+            Ok(res)
         });
-        vm.set_property(coll_obj, "compare", compare_fn);
-        vm.set_property(coll_obj, "resolvedOptions", resolved_opts);
-        Ok(coll_obj)
+        let cur_coll = vm.temp_roots[prev_temp];
+        vm.set_property(cur_coll, "resolvedOptions", resolved_opts);
+        let res = vm.temp_roots[prev_temp];
+        vm.temp_roots.truncate(prev_temp);
+        Ok(res)
     });
     let empty_locales_fn3 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, _args| {
         Ok(vm.alloc_array(Vec::new()))

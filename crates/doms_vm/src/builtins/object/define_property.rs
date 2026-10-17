@@ -28,26 +28,43 @@ pub fn define_property_internal(
     prop_key: PropertyKeyVal,
     desc: JsValue,
 ) -> Result<JsValue, VmError> {
+    // 1. ToPropertyDescriptor(desc) per ECMAScript 6.2.6.5
+    let has_enum = vm.has_property(desc, "enumerable")?;
+    let enum_val = if has_enum { vm.get_property_result(desc, "enumerable")?.is_truthy() } else { false };
+
+    let has_conf = vm.has_property(desc, "configurable")?;
+    let conf_val = if has_conf { vm.get_property_result(desc, "configurable")?.is_truthy() } else { false };
+
+    let has_val = vm.has_property(desc, "value")?;
+    let val_val = if has_val { vm.get_property_result(desc, "value")? } else { JsValue::undefined() };
+
+    let has_writ = vm.has_property(desc, "writable")?;
+    let writ_val = if has_writ { vm.get_property_result(desc, "writable")?.is_truthy() } else { false };
+
+    let has_get = vm.has_property(desc, "get")?;
+    let get_val = if has_get { vm.get_property_result(desc, "get")? } else { JsValue::undefined() };
+
+    let has_set = vm.has_property(desc, "set")?;
+    let set_val = if has_set { vm.get_property_result(desc, "set")? } else { JsValue::undefined() };
+
+    if (has_get || has_set) && (has_val || has_writ) {
+        return Err(VmError::TypeError("Invalid property descriptor. Cannot both specify accessors and a value or writable attribute".into()));
+    }
+    if has_get && !get_val.is_undefined() && !vm.is_callable(get_val) {
+        return Err(VmError::TypeError("Getter must be a function or undefined".into()));
+    }
+    if has_set && !set_val.is_undefined() && !vm.is_callable(set_val) {
+        return Err(VmError::TypeError("Setter must be a function or undefined".into()));
+    }
+
     if let Some(ptr) = target.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut JsObject) };
-        if let ObjectKind::Proxy { target: inner_target, handler } = &obj.kind {
-            let inner_target = *inner_target;
-            let handler = *handler;
-            let trap = vm.get_property(handler, "defineProperty");
-            if vm.is_callable(trap) {
-                let key_arg = match &prop_key {
-                    PropertyKeyVal::String(s) => vm.alloc_string(s.clone()),
-                    PropertyKeyVal::Symbol(sym) => *sym,
-                };
-                let trap_res = vm.call(trap, handler, &[inner_target, key_arg, desc])?;
-                if !trap_res.is_truthy() {
-                    return Err(VmError::TypeError("Proxy defineProperty trap returned false".into()));
-                }
-                return Ok(target);
-            } else {
-                define_property_internal(vm, inner_target, prop_key, desc)?;
-                return Ok(target);
+        if matches!(obj.kind, ObjectKind::Proxy { .. }) {
+            let ok = vm.proxy_define_own_property(target, &prop_key, desc)?;
+            if !ok {
+                return Err(VmError::TypeError("Proxy defineProperty trap returned false".into()));
             }
+            return Ok(target);
         }
     }
 
@@ -58,26 +75,6 @@ pub fn define_property_internal(
         } else {
             return Err(VmError::TypeError("Cannot redefine property on module namespace object".into()));
         }
-    }
-
-    let has_get = vm.has_property(desc, "get").unwrap_or(false);
-    let has_set = vm.has_property(desc, "set").unwrap_or(false);
-    let has_val = vm.has_property(desc, "value").unwrap_or(false);
-    let has_writ = vm.has_property(desc, "writable").unwrap_or(false);
-    let has_conf = vm.has_property(desc, "configurable").unwrap_or(false);
-    let has_enum = vm.has_property(desc, "enumerable").unwrap_or(false);
-
-    let get_val = if has_get { vm.get_property(desc, "get") } else { JsValue::undefined() };
-    let set_val = if has_set { vm.get_property(desc, "set") } else { JsValue::undefined() };
-
-    if (has_get || has_set) && (has_val || has_writ) {
-        return Err(VmError::TypeError("Invalid property descriptor. Cannot both specify accessors and a value or writable attribute".into()));
-    }
-    if has_get && !get_val.is_undefined() && !vm.is_callable(get_val) {
-        return Err(VmError::TypeError("Getter must be a function or undefined".into()));
-    }
-    if has_set && !set_val.is_undefined() && !vm.is_callable(set_val) {
-        return Err(VmError::TypeError("Setter must be a function or undefined".into()));
     }
 
     let key_name = match &prop_key {
@@ -91,6 +88,9 @@ pub fn define_property_internal(
         if let ObjectKind::Array(elements) = &mut obj.kind {
             if let PropertyKeyVal::String(s) = &prop_key {
                 if s == "length" {
+                    if has_get || has_set {
+                        return Err(VmError::TypeError("Cannot make array length an accessor".into()));
+                    }
                     if has_conf && vm.get_property(desc, "configurable").is_truthy() {
                         return Err(VmError::TypeError("Cannot make array length configurable".into()));
                     }
@@ -112,6 +112,8 @@ pub fn define_property_internal(
                         if new_len >= old_len {
                             if new_len < 100_000 {
                                 elements.resize(new_len, JsValue::hole());
+                            } else {
+                                vm.set_own_property(target, "length", JsValue::from_double(num));
                             }
                         } else {
                             for i in (new_len..old_len).rev() {
@@ -256,7 +258,7 @@ pub fn define_property_internal(
                 }
             } else {
                 if has_val || !current_exists {
-                    let val = if has_val { vm.get_property(desc, "value") } else { JsValue::undefined() };
+                    let val = if has_val { val_val } else { JsValue::undefined() };
                     if let Some(ptr) = target.as_object_ptr() {
                         let obj = unsafe { &mut *(ptr as *mut JsObject) };
                         if let Some(accs) = &mut obj.accessors {
@@ -269,8 +271,12 @@ pub fn define_property_internal(
                             if let Ok(idx) = prop_name.parse::<u32>() {
                                 if idx.to_string() == *prop_name {
                                     let idx = idx as usize;
-                                    if idx >= elements.len() && idx < 100_000 {
-                                        elements.resize(idx + 1, JsValue::hole());
+                                    if idx >= elements.len() {
+                                        if idx < 100_000 {
+                                            elements.resize(idx + 1, JsValue::hole());
+                                        } else {
+                                            vm.set_own_property(target, "length", JsValue::from_double((idx as f64) + 1.0));
+                                        }
                                     }
                                     if idx < elements.len() {
                                         elements[idx] = val;
@@ -283,14 +289,14 @@ pub fn define_property_internal(
                     if target == vm.global_object {
                         vm.globals.insert(prop_name.clone(), val);
                     }
+                    vm.sync_mapped_arguments_write(target, prop_name, val);
                 }
             }
         }
     }
 
     if has_conf {
-        let is_conf = vm.get_property(desc, "configurable").is_truthy();
-        if !is_conf {
+        if !conf_val {
             vm.non_configurable_props.insert((target, key_name.clone()));
         } else {
             vm.non_configurable_props.remove(&(target, key_name.clone()));
@@ -300,8 +306,7 @@ pub fn define_property_internal(
     }
 
     if has_enum {
-        let is_enum = vm.get_property(desc, "enumerable").is_truthy();
-        if !is_enum {
+        if !enum_val {
             vm.non_enumerable_props.insert((target, key_name.clone()));
         } else {
             vm.non_enumerable_props.remove(&(target, key_name.clone()));
@@ -312,8 +317,7 @@ pub fn define_property_internal(
 
     if !is_accessor {
         if has_writ {
-            let is_writ = vm.get_property(desc, "writable").is_truthy();
-            if !is_writ {
+            if !writ_val {
                 vm.non_writable_props.insert((target, key_name.clone()));
                 if let PropertyKeyVal::String(prop_name) = &prop_key {
                     vm.sync_mapped_arguments_delete(target, prop_name);
@@ -337,7 +341,11 @@ pub fn define_property_internal(
                     if idx.to_string() == *s {
                         let idx = idx as usize;
                         if idx >= elements.len() {
-                            elements.resize(idx + 1, JsValue::hole());
+                            if idx < 100_000 {
+                                elements.resize(idx + 1, JsValue::hole());
+                            } else {
+                                vm.set_own_property(target, "length", JsValue::from_double((idx as f64) + 1.0));
+                            }
                         }
                     }
                 }

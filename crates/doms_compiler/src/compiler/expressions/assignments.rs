@@ -61,13 +61,9 @@ impl Compiler {
         value: &Expression,
     ) -> Result<(), CompileError> {
         if matches!(object, Expression::Super) {
-            self.chunk.emit(OpCode::This, 0);
-            self.chunk.emit(OpCode::Dup, 0);
-            let prop_idx = self.chunk.add_constant(Constant::String(property.to_string()));
-            self.chunk.emit(OpCode::GetProp(prop_idx), 0);
-            self.chunk.emit(OpCode::Pop, 0);
             self.compile_expression(value)?;
-            self.chunk.emit(OpCode::SetProp(prop_idx), 0);
+            let prop_idx = self.chunk.add_constant(Constant::String(property.to_string()));
+            self.chunk.emit(OpCode::SetSuperProp(prop_idx), 0);
         } else {
             self.compile_expression(object)?;
             self.compile_expression(value)?;
@@ -84,14 +80,9 @@ impl Compiler {
         value: &Expression,
     ) -> Result<(), CompileError> {
         if matches!(object, Expression::Super) {
-            self.chunk.emit(OpCode::This, 0);
-            self.chunk.emit(OpCode::Dup, 0);
-            self.compile_expression(index)?;
-            self.chunk.emit(OpCode::GetElem, 0);
-            self.chunk.emit(OpCode::Pop, 0);
             self.compile_expression(index)?;
             self.compile_expression(value)?;
-            self.chunk.emit(OpCode::SetElem, 0);
+            self.chunk.emit(OpCode::SetSuperElem, 0);
         } else {
             self.compile_expression(object)?;
             self.compile_expression(index)?;
@@ -171,27 +162,52 @@ impl Compiler {
                 }
             }
             Expression::Member { object, property } => {
-                self.compile_expression(object)?;
-                self.chunk.emit(OpCode::Dup, 0);
                 let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
-                self.chunk.emit(OpCode::GetProp(prop_idx), 0);
-                self.chunk.emit(OpCode::Pos, 0);
-                if is_prefix {
-                    self.chunk.emit(OpCode::LoadConst(one_idx), 0);
-                    if delta_is_pos {
-                        self.chunk.emit(OpCode::Add, 0);
+                if matches!(object.as_ref(), Expression::Super) {
+                    self.chunk.emit(OpCode::LoadSuper, 0);
+                    self.chunk.emit(OpCode::GetProp(prop_idx), 0);
+                    self.chunk.emit(OpCode::Pos, 0);
+                    if is_prefix {
+                        self.chunk.emit(OpCode::LoadConst(one_idx), 0);
+                        if delta_is_pos {
+                            self.chunk.emit(OpCode::Add, 0);
+                        } else {
+                            self.chunk.emit(OpCode::Sub, 0);
+                        }
+                        self.chunk.emit(OpCode::SetSuperProp(prop_idx), 0);
                     } else {
-                        self.chunk.emit(OpCode::Sub, 0);
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.chunk.emit(OpCode::LoadConst(one_idx), 0);
+                        if delta_is_pos {
+                            self.chunk.emit(OpCode::Add, 0);
+                        } else {
+                            self.chunk.emit(OpCode::Sub, 0);
+                        }
+                        self.chunk.emit(OpCode::SetSuperProp(prop_idx), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
                     }
-                    self.chunk.emit(OpCode::SetProp(prop_idx), 0);
                 } else {
-                    self.chunk.emit(OpCode::LoadConst(one_idx), 0);
-                    if delta_is_pos {
-                        self.chunk.emit(OpCode::Add, 0);
+                    self.compile_expression(object)?;
+                    self.chunk.emit(OpCode::Dup, 0);
+                    self.chunk.emit(OpCode::GetProp(prop_idx), 0);
+                    self.chunk.emit(OpCode::Pos, 0);
+                    if is_prefix {
+                        self.chunk.emit(OpCode::LoadConst(one_idx), 0);
+                        if delta_is_pos {
+                            self.chunk.emit(OpCode::Add, 0);
+                        } else {
+                            self.chunk.emit(OpCode::Sub, 0);
+                        }
+                        self.chunk.emit(OpCode::SetProp(prop_idx), 0);
                     } else {
-                        self.chunk.emit(OpCode::Sub, 0);
+                        self.chunk.emit(OpCode::LoadConst(one_idx), 0);
+                        if delta_is_pos {
+                            self.chunk.emit(OpCode::Add, 0);
+                        } else {
+                            self.chunk.emit(OpCode::Sub, 0);
+                        }
+                        self.chunk.emit(OpCode::SetProp(prop_idx), 0);
                     }
-                    self.chunk.emit(OpCode::SetProp(prop_idx), 0);
                 }
             }
             _ => return Err(CompileError::General("Invalid assignment target in update expression".into())),

@@ -14,56 +14,76 @@ pub(super) fn register_json(vm: &mut Vm) {
     let json_obj = vm.alloc_object();
 
     let stringify_fn = vm.alloc_native_function("stringify", 3, |vm, _this, args| {
+        let prev_temp = vm.temp_roots.len();
         let value = args.first().copied().unwrap_or(JsValue::undefined());
+        vm.temp_roots.push(value);
         let replacer = args.get(1).copied().filter(|v| v.is_object());
+        vm.temp_roots.push(replacer.unwrap_or(JsValue::undefined()));
         let space_val = args.get(2).copied().unwrap_or(JsValue::undefined());
+        vm.temp_roots.push(space_val);
 
-        let replacer_fn = replacer.filter(|r| vm.is_callable(*r));
-        let replacer_arr: Option<Vec<String>> = replacer
-            .filter(|r| !vm.is_callable(*r))
-            .and_then(|r| {
-                if let Some(ptr) = r.as_object_ptr() {
-                    let obj = unsafe { &*(ptr as *mut JsObject) };
-                    if let ObjectKind::Array(elements) = &obj.kind {
-                        let mut keys = Vec::new();
-                        for elem in elements {
-                            if elem.is_string() || elem.is_number() {
-                                keys.push(vm.to_string_value(*elem));
-                            }
+        let cur_replacer = vm.temp_roots[prev_temp + 1];
+        let replacer_fn = if cur_replacer.is_object() && vm.is_callable(cur_replacer) {
+            Some(cur_replacer)
+        } else {
+            None
+        };
+        let replacer_arr: Option<Vec<String>> = if cur_replacer.is_object() && !vm.is_callable(cur_replacer) {
+            if let Some(ptr) = cur_replacer.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Array(elements) = &obj.kind {
+                    let mut keys = Vec::new();
+                    for elem in elements {
+                        if elem.is_string() || elem.is_number() {
+                            keys.push(vm.to_string_value(*elem));
                         }
-                        return Some(keys);
                     }
+                    Some(keys)
+                } else {
+                    None
                 }
+            } else {
                 None
-            });
+            }
+        } else {
+            None
+        };
 
-        let gap = if space_val.is_number() {
-            let n = space_val.to_number().unwrap_or(0.0).max(0.0).min(10.0) as usize;
+        let cur_space = vm.temp_roots[prev_temp + 2];
+        let gap = if cur_space.is_number() {
+            let n = cur_space.to_number().unwrap_or(0.0).max(0.0).min(10.0) as usize;
             " ".repeat(n)
-        } else if space_val.is_string() {
-            let s = vm.to_string_value(space_val);
+        } else if cur_space.is_string() {
+            let s = vm.to_string_value(cur_space);
             s[..s.len().min(10)].to_string()
         } else {
             String::new()
         };
 
-        let mut stack = Vec::new();
         let wrapper = vm.alloc_object();
-        vm.set_property(wrapper, "", value);
+        vm.temp_roots.push(wrapper);
+        let cur_val = vm.temp_roots[prev_temp];
+        let cur_wrapper = vm.temp_roots[prev_temp + 3];
+        vm.set_property(cur_wrapper, "", cur_val);
 
+        let mut stack = Vec::new();
+        let cur_val = vm.temp_roots[prev_temp];
+        let cur_wrapper = vm.temp_roots[prev_temp + 3];
         let res = json_stringify_walk(
             vm,
-            wrapper,
+            cur_wrapper,
             "",
-            value,
+            cur_val,
             &mut stack,
             replacer_fn,
             replacer_arr.as_deref(),
             &gap,
             "",
-        )?;
+        );
 
-        match res {
+        vm.temp_roots.truncate(prev_temp);
+        let s = res?;
+        match s {
             Some(s) => Ok(vm.alloc_string(s)),
             None => Ok(JsValue::undefined()),
         }

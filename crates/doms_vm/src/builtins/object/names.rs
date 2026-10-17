@@ -10,45 +10,8 @@ use super::*;
 pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<PropertyKeyVal>, VmError> {
     if let Some(ptr) = target.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut JsObject) };
-        if let ObjectKind::Proxy { target: inner_target, handler } = &obj.kind {
-            let inner_target = *inner_target;
-            let handler = *handler;
-            let trap = vm.get_property(handler, "ownKeys");
-            if vm.is_callable(trap) {
-                let trap_res = vm.call(trap, handler, &[inner_target])?;
-                if !trap_res.is_object() {
-                    return Err(VmError::TypeError("Proxy ownKeys trap must return an object".into()));
-                }
-                let len = vm.get_property(trap_res, "length").to_number().unwrap_or(0.0) as usize;
-                let mut keys = Vec::with_capacity(len);
-                for i in 0..len {
-                    let elem = vm.get_element(trap_res, i);
-                    let key = vm.to_property_key(elem)?;
-                    keys.push(key);
-                }
-                for (t, prop) in &vm.non_configurable_props {
-                    if *t == inner_target && !prop.starts_with("[Symbol:") {
-                        let prop_key = PropertyKeyVal::String(prop.clone());
-                        if !keys.contains(&prop_key) {
-                            return Err(VmError::TypeError("Proxy ownKeys must include all non-configurable properties of the target".into()));
-                        }
-                    }
-                }
-                if vm.non_extensible_objects.contains(&inner_target) {
-                    let target_keys = get_own_property_keys(vm, inner_target)?;
-                    for tk in &target_keys {
-                        if !keys.contains(tk) {
-                            return Err(VmError::TypeError("Proxy ownKeys on non-extensible target must report all properties".into()));
-                        }
-                    }
-                    if keys.len() != target_keys.len() {
-                        return Err(VmError::TypeError("Proxy ownKeys on non-extensible target cannot report extra properties".into()));
-                    }
-                }
-                return Ok(keys);
-            } else {
-                return get_own_property_keys(vm, inner_target);
-            }
+        if matches!(obj.kind, ObjectKind::Proxy { .. }) {
+            return vm.proxy_own_property_keys(target);
         }
     }
 

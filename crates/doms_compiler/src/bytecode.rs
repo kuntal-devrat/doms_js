@@ -64,6 +64,8 @@ pub enum OpCode {
     InheritClass,
     GetElem,
     SetElem,
+    SetSuperProp(u16),
+    SetSuperElem,
     ObjectSpread,
     ObjectRest(u16),
     DefinePrivateField(u16),

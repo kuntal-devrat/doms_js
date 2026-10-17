@@ -95,8 +95,34 @@ impl JsValue {
     }
 
     #[inline]
+    pub fn is_js_string(&self) -> bool {
+        if self.is_string() {
+            return true;
+        }
+        if let Some(ptr) = self.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
+            matches!(obj.kind, crate::object::ObjectKind::String(_))
+        } else {
+            false
+        }
+    }
+
+    #[inline]
     pub fn is_symbol(&self) -> bool {
         (self.0 & TAG_MASK) == TAG_SYMBOL
+    }
+
+    #[inline]
+    pub fn is_js_symbol(&self) -> bool {
+        if self.is_symbol() {
+            return true;
+        }
+        if let Some(ptr) = self.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
+            matches!(obj.kind, crate::object::ObjectKind::Symbol(_))
+        } else {
+            false
+        }
     }
 
     #[inline]

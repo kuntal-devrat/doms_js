@@ -12,26 +12,8 @@ pub fn get_own_property_descriptor_internal(
 ) -> Result<JsValue, VmError> {
     if let Some(ptr) = target.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut JsObject) };
-        if let ObjectKind::Proxy { target: inner_target, handler } = &obj.kind {
-            let inner_target = *inner_target;
-            let handler = *handler;
-            let trap = vm.get_property(handler, "getOwnPropertyDescriptor");
-            if vm.is_callable(trap) {
-                let key_arg = match prop_key {
-                    PropertyKeyVal::String(s) => vm.alloc_string(s.clone()),
-                    PropertyKeyVal::Symbol(sym) => *sym,
-                };
-                let trap_res = vm.call(trap, handler, &[inner_target, key_arg])?;
-                if trap_res.is_undefined() {
-                    return Ok(JsValue::undefined());
-                }
-                if !trap_res.is_object() {
-                    return Err(VmError::TypeError("Proxy getOwnPropertyDescriptor trap must return an object or undefined".into()));
-                }
-                return Ok(trap_res);
-            } else {
-                return get_own_property_descriptor_internal(vm, inner_target, prop_key);
-            }
+        if matches!(obj.kind, ObjectKind::Proxy { .. }) {
+            return vm.proxy_get_own_property_descriptor(target, prop_key);
         }
     }
 
@@ -69,7 +51,7 @@ pub fn get_own_property_descriptor_internal(
                         } else {
                             !is_tag && !is_iter
                         };
-                        let is_conf = if vm.module_namespace_objects.contains(&target) || is_tag || vm.non_configurable_props.contains(&(target, key_name)) {
+                        let is_conf = if vm.module_namespace_objects.contains(&target) || vm.non_configurable_props.contains(&(target, key_name)) {
                             false
                         } else {
                             true
@@ -102,7 +84,21 @@ pub fn get_own_property_descriptor_internal(
                         if prop_name == "length" {
                             let desc = vm.alloc_object();
                             let is_writ = !vm.non_writable_props.contains(&(target, "length".to_string()));
-                            vm.set_property(desc, "value", JsValue::from_int32(elements.len() as i32));
+                            let len_val = if let Some(info) = vm.shapes.get_property_info(obj.shape_id, "length") {
+                                if let Some(val) = obj.slots.get(info.offset as usize) {
+                                    *val
+                                } else {
+                                    JsValue::from_double(elements.len() as f64)
+                                }
+                            } else {
+                                let len = elements.len();
+                                if len <= i32::MAX as usize {
+                                    JsValue::from_int32(len as i32)
+                                } else {
+                                    JsValue::from_double(len as f64)
+                                }
+                            };
+                            vm.set_property(desc, "value", len_val);
                             vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
                             vm.set_property(desc, "enumerable", JsValue::from_boolean(false));
                             vm.set_property(desc, "configurable", JsValue::from_boolean(false));

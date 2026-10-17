@@ -84,7 +84,10 @@ impl Vm {
             }
         }
 
-        let val = match self.get_property_result(obj, &name) {
+        self.temp_roots.push(obj);
+        let val_res = self.get_property_result(self.temp_roots.last().copied().unwrap(), &name);
+        let rooted_obj = self.temp_roots.pop().unwrap();
+        let val = match val_res {
             Ok(v) => v,
             Err(err) => {
                 self.handle_exception_at_depth(err, target_depth)?;
@@ -92,7 +95,7 @@ impl Vm {
             }
         };
 
-        if let Some(ptr) = obj.as_object_ptr() {
+        if let Some(ptr) = rooted_obj.as_object_ptr() {
             let jsobj = unsafe { &*(ptr as *mut JsObject) };
             let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(&name));
             if !has_acc {
@@ -228,12 +231,17 @@ impl Vm {
             }
         }
 
-        if let Err(err) = self.set_property_result(obj, &name, val) {
+        self.temp_roots.push(obj);
+        self.temp_roots.push(val);
+        let res = self.set_property_result(self.temp_roots[self.temp_roots.len() - 2], &name, self.temp_roots[self.temp_roots.len() - 1]);
+        let _rooted_val = self.temp_roots.pop().unwrap();
+        let rooted_obj = self.temp_roots.pop().unwrap();
+        if let Err(err) = res {
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(());
         }
 
-        if let Some(ptr) = obj.as_object_ptr() {
+        if let Some(ptr) = rooted_obj.as_object_ptr() {
             let jsobj = unsafe { &*(ptr as *mut JsObject) };
             let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(&name));
             if !has_acc && jsobj.prototype.is_none() {
@@ -338,7 +346,9 @@ impl Vm {
                             if let Some(i) = key.to_int32() {
                                 if i >= 0 {
                                     let idx = i as usize;
-                                    if idx < 65536 && idx <= elements.len() + 1024 {
+                                    let is_existing = idx < elements.len() && !elements[idx].is_hole();
+                                    let is_standard_proto = jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
+                                    if (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 {
                                         if idx >= elements.len() {
                                             elements.resize(idx + 1, JsValue::hole());
                                         }
@@ -382,6 +392,159 @@ impl Vm {
                         }
                     }
                     self.push(val);
+        Ok(())
+    }
+
+    pub(crate) fn op_set_super_prop(
+        &mut self,
+        name_idx: u16,
+        chunk: &BytecodeChunk,
+        target_depth: usize,
+    ) -> Result<(), VmError> {
+        let name = match &chunk.constants[name_idx as usize] {
+            Constant::String(s) => s.clone(),
+            _ => return Err(VmError::TypeError("Property name must be string".into())),
+        };
+        let val = self.pop()?;
+
+        let (receiver, base) = {
+            let frame = match self.frames.last() {
+                Some(f) => f,
+                None => {
+                    self.push(val);
+                    return Ok(());
+                }
+            };
+            if frame.this_val == JsValue::uninitialized() {
+                self.handle_exception_at_depth(
+                    VmError::ReferenceError("Must call super constructor in derived class before accessing 'this'".into()),
+                    target_depth,
+                )?;
+                return Ok(());
+            }
+            let receiver = frame.this_val;
+            let base = if let Some(home_obj) = frame.home_object {
+                if let Some(ptr) = home_obj.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    obj.prototype.unwrap_or(JsValue::null())
+                } else {
+                    JsValue::null()
+                }
+            } else if let Some(ptr) = frame.this_val.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                obj.prototype.unwrap_or(JsValue::null())
+            } else {
+                JsValue::null()
+            };
+            (receiver, base)
+        };
+
+        if base.is_null() || base.is_undefined() {
+            let err = VmError::TypeError(format!(
+                "Cannot set property '{}' of {}",
+                name,
+                if base.is_null() { "null" } else { "undefined" }
+            ));
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(());
+        }
+
+        self.temp_roots.push(base);
+        self.temp_roots.push(receiver);
+        self.temp_roots.push(val);
+        let res = self.set_property_with_receiver_result(base, &name, val, receiver);
+        let rooted_val = self.temp_roots.pop().unwrap();
+        let _rooted_receiver = self.temp_roots.pop().unwrap();
+        let _rooted_base = self.temp_roots.pop().unwrap();
+        if let Err(err) = res {
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(());
+        }
+
+        self.push(rooted_val);
+        Ok(())
+    }
+
+    pub(crate) fn op_set_super_elem(
+        &mut self,
+        target_depth: usize,
+    ) -> Result<(), VmError> {
+        let val = self.pop()?;
+        let key = self.pop()?;
+
+        self.temp_roots.push(val);
+        let prop_key = match self.to_property_key(key) {
+            Ok(k) => k,
+            Err(err) => {
+                self.temp_roots.pop();
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            }
+        };
+        let val = self.temp_roots.pop().unwrap();
+
+        let (receiver, base) = {
+            let frame = match self.frames.last() {
+                Some(f) => f,
+                None => {
+                    self.push(val);
+                    return Ok(());
+                }
+            };
+            if frame.this_val == JsValue::uninitialized() {
+                self.handle_exception_at_depth(
+                    VmError::ReferenceError("Must call super constructor in derived class before accessing 'this'".into()),
+                    target_depth,
+                )?;
+                return Ok(());
+            }
+            let receiver = frame.this_val;
+            let base = if let Some(home_obj) = frame.home_object {
+                if let Some(ptr) = home_obj.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    obj.prototype.unwrap_or(JsValue::null())
+                } else {
+                    JsValue::null()
+                }
+            } else if let Some(ptr) = frame.this_val.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                obj.prototype.unwrap_or(JsValue::null())
+            } else {
+                JsValue::null()
+            };
+            (receiver, base)
+        };
+
+        if base.is_null() || base.is_undefined() {
+            let err = VmError::TypeError(format!(
+                "Cannot set property of {}",
+                if base.is_null() { "null" } else { "undefined" }
+            ));
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(());
+        }
+
+        self.temp_roots.push(base);
+        self.temp_roots.push(receiver);
+        self.temp_roots.push(val);
+        let res = match prop_key {
+            PropertyKeyVal::Symbol(sym) => {
+                self.set_symbol_property_with_receiver_result(base, sym, val, receiver)
+            }
+            PropertyKeyVal::String(key_str) => {
+                self.set_property_with_receiver_result(base, &key_str, val, receiver)
+            }
+        };
+        let rooted_val = self.temp_roots.pop().unwrap();
+        let _rooted_receiver = self.temp_roots.pop().unwrap();
+        let _rooted_base = self.temp_roots.pop().unwrap();
+
+        if let Err(err) = res {
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(());
+        }
+
+        self.push(rooted_val);
         Ok(())
     }
 }

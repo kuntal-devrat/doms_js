@@ -22,6 +22,19 @@ pub struct SavedCatchHandler {
 }
 
 #[derive(Debug, Clone)]
+pub enum AsyncGenRequestKind {
+    Next(JsValue),
+    Return(JsValue),
+    Throw(JsValue),
+}
+
+#[derive(Debug, Clone)]
+pub struct AsyncGenRequest {
+    pub kind: AsyncGenRequestKind,
+    pub promise: JsValue,
+}
+
+#[derive(Debug, Clone)]
 pub struct JsGenerator {
     pub function: JsFunction,
     pub ip: usize,
@@ -34,4 +47,5 @@ pub struct JsGenerator {
     pub this_val: JsValue,
     pub arguments: Option<JsValue>,
     pub mapped_arguments: Option<Vec<bool>>,
+    pub async_queue: Vec<AsyncGenRequest>,
 }

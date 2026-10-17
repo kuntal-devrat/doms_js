@@ -3,15 +3,15 @@
 use super::*;
 
 mod constructor;
-mod define_property;
+pub(crate) mod define_property;
 pub(crate) mod descriptor;
 mod group_by;
-mod integrity;
+pub(crate) mod integrity;
 mod legacy_accessors;
 pub(crate) mod names;
 mod predicates;
-mod prototype;
-mod statics;
+pub(crate) mod prototype;
+pub(crate) mod statics;
 
 use constructor::register_constructor;
 use define_property::register_define_property;

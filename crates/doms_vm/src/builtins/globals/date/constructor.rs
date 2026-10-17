@@ -32,7 +32,8 @@ pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue)
         }
     });
 
-    let date_ctor = vm.alloc_closure_native_function("Date", 7, Arc::new(move |vm, _this, args| {
+    vm.date_proto = Some(date_proto);
+    let date_ctor = vm.alloc_native_function("Date", 7, |vm, _this, args| {
         if !vm.is_constructing {
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -75,8 +76,9 @@ pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue)
             let final_y = if (0..=99).contains(&y) { y + 1900 } else { y };
             utc_to_ms(final_y, m, d, h, min, s, ms)
         };
-        Ok(vm.alloc_date(Some(date_proto), time_ms))
-    }));
+        let proto = vm.date_proto.or(vm.object_proto);
+        Ok(vm.alloc_date(proto, time_ms))
+    });
     vm.set_property(date_proto, "constructor", date_ctor);
     vm.non_enumerable_props.insert((date_proto, "constructor".to_string()));
     vm.set_property(date_ctor, "prototype", date_proto);

@@ -6,7 +6,11 @@ impl Vm {
     pub fn is_callable(&self, val: JsValue) -> bool {
         if let Some(ptr) = val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            matches!(obj.kind, ObjectKind::Function(_) | ObjectKind::NativeFunction(_))
+            match &obj.kind {
+                ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => true,
+                ObjectKind::Proxy { target, .. } => self.is_callable(*target),
+                _ => false,
+            }
         } else {
             false
         }
@@ -34,6 +38,9 @@ impl Vm {
                         return false;
                     }
                     if self.shapes.has_property(obj.shape_id, "prototype") {
+                        return true;
+                    }
+                    if n.name.starts_with("bound ") {
                         return true;
                     }
                     n.name.chars().next().map_or(false, |c| c.is_ascii_uppercase())

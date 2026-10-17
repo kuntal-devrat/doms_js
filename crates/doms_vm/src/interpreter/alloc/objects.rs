@@ -59,41 +59,48 @@ impl Vm {
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
     pub fn alloc_arguments(&mut self, callee: JsValue, args: Vec<JsValue>, is_strict: bool) -> JsValue {
-        let args_obj = self.alloc_object();
         let prev_temp = self.temp_roots.len();
-        self.temp_roots.push(args_obj);
         self.temp_roots.push(callee);
+        let args_start = self.temp_roots.len();
+        self.temp_roots.extend_from_slice(&args);
+        let args_len = args.len();
 
-        let len = args.len();
-        for (i, val) in args.into_iter().enumerate() {
-            self.set_own_property(self.temp_roots[prev_temp], &i.to_string(), val);
+        let args_obj = self.alloc_object();
+        self.temp_roots.push(args_obj);
+        let args_obj_idx = args_start + args_len;
+
+        for i in 0..args_len {
+            let val = self.temp_roots[args_start + i];
+            self.set_own_property(self.temp_roots[args_obj_idx], &i.to_string(), val);
         }
-        self.set_own_property(self.temp_roots[prev_temp], "length", JsValue::from_int32(len as i32));
-        self.non_enumerable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
+        self.set_own_property(self.temp_roots[args_obj_idx], "length", JsValue::from_int32(args_len as i32));
+        self.non_enumerable_props.insert((self.temp_roots[args_obj_idx], "length".to_string()));
 
-        if let Some(sym_tag) = self.symbol_to_string_tag {
+        if self.symbol_to_string_tag.is_some() {
             let tag_val = self.alloc_string("Arguments".to_string());
-            self.set_symbol_property(self.temp_roots[prev_temp], sym_tag, tag_val);
-            self.non_enumerable_props.insert((self.temp_roots[prev_temp], "[Symbol.toStringTag]".to_string()));
+            if let Some(sym_tag) = self.symbol_to_string_tag {
+                self.set_symbol_property(self.temp_roots[args_obj_idx], sym_tag, tag_val);
+                self.non_enumerable_props.insert((self.temp_roots[args_obj_idx], "[Symbol.toStringTag]".to_string()));
+            }
         }
-        if let Some(sym_iter) = self.symbol_iterator {
-            if let Some(arr_proto) = self.array_proto {
-                let iter_fn = self.get_property(arr_proto, "values");
-                if iter_fn.is_object() {
-                    self.set_symbol_property(self.temp_roots[prev_temp], sym_iter, iter_fn);
+        if let Some(arr_proto) = self.array_proto {
+            let iter_fn = self.get_property(arr_proto, "values");
+            if iter_fn.is_object() {
+                if let Some(sym_iter) = self.symbol_iterator {
+                    self.set_symbol_property(self.temp_roots[args_obj_idx], sym_iter, iter_fn);
                 }
             }
         }
 
         if !is_strict {
-            let cur_callee = self.temp_roots[prev_temp + 1];
-            self.set_own_property(self.temp_roots[prev_temp], "callee", cur_callee);
-            self.non_enumerable_props.insert((self.temp_roots[prev_temp], "callee".to_string()));
+            let cur_callee = self.temp_roots[prev_temp];
+            self.set_own_property(self.temp_roots[args_obj_idx], "callee", cur_callee);
+            self.non_enumerable_props.insert((self.temp_roots[args_obj_idx], "callee".to_string()));
         } else {
             let thrower = self.alloc_native_function("thrower", 0, |_vm, _this, _args| {
                 Err(VmError::TypeError("'arguments.callee' cannot be accessed in strict mode".into()))
             });
-            let cur_args = self.temp_roots[prev_temp];
+            let cur_args = self.temp_roots[args_obj_idx];
             if let Some(ptr) = cur_args.as_object_ptr() {
                 let obj = unsafe { &mut *(ptr as *mut JsObject) };
                 obj.define_getter("callee".into(), thrower);
@@ -102,7 +109,7 @@ impl Vm {
             self.non_configurable_props.insert((cur_args, "callee".to_string()));
             self.non_enumerable_props.insert((cur_args, "callee".to_string()));
         }
-        let res = self.temp_roots[prev_temp];
+        let res = self.temp_roots[args_obj_idx];
         self.temp_roots.truncate(prev_temp);
         res
     }

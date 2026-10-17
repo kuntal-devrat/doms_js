@@ -109,13 +109,18 @@ impl Vm {
                         JsValue::undefined()
                     };
                     if let Some(g_val) = finished.gen_val {
-                        if let Some(g_ptr) = g_val.as_object_ptr() {
+                        let prev_temp = self.temp_roots.len();
+                        self.temp_roots.push(ret_val);
+                        self.temp_roots.push(g_val);
+                        if let Some(g_ptr) = self.temp_roots[prev_temp + 1].as_object_ptr() {
                             let g_obj = unsafe { &mut *(g_ptr as *mut JsObject) };
                             if let ObjectKind::Generator(ref mut g) = g_obj.kind {
                                 g.state = crate::object::GeneratorState::Completed;
                             }
                         }
-                        let iter_res = self.make_iter_result(ret_val, true);
+                        let cur_ret = self.temp_roots[prev_temp];
+                        let iter_res = self.make_iter_result(cur_ret, true);
+                        self.temp_roots.truncate(prev_temp);
                         self.stack.truncate(finished.base_sp);
                         if self.frames.len() == target_depth {
                             return Ok(iter_res);
@@ -256,6 +261,12 @@ impl Vm {
                 }
                 OpCode::SetElem => {
                     self.op_set_elem(target_depth)?;
+                }
+                OpCode::SetSuperProp(name_idx) => {
+                    self.op_set_super_prop(name_idx, &chunk, target_depth)?;
+                }
+                OpCode::SetSuperElem => {
+                    self.op_set_super_elem(target_depth)?;
                 }
                 OpCode::ObjectSpread => {
                     let source = self.pop()?;

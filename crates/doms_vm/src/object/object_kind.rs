@@ -65,6 +65,18 @@ pub enum ObjectKind {
         index: usize,
         kind: SetIterationKind,
     },
+    ArrayIterator {
+        target: JsValue,
+        index: usize,
+        kind: ArrayIterationKind,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrayIterationKind {
+    Keys,
+    Values,
+    Entries,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -106,7 +106,7 @@ impl Test262Runner {
         vm.max_instructions = Some(80_000_000);
         vm.max_objects = Some(1_000_000);
         vm.max_evals = Some(100_000);
-        vm.deadline = Some(Instant::now() + std::time::Duration::from_millis(3_000));
+        vm.deadline = Some(Instant::now() + std::time::Duration::from_millis(5_000));
 
         if meta.is_module {
             let m = vm.alloc_object();

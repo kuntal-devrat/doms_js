@@ -19,7 +19,10 @@ impl Vm {
                         return Err(VmError::TypeError("Symbol.iterator is not callable".into()));
                     }
                     let it = self.call(method, val, &[])?;
-                    let next_fn = self.get_property(it, "next");
+                    let next_fn = match self.get_property_result(it, "next") {
+                        Ok(n) => n,
+                        Err(e) => return Err(e),
+                    };
                     if !self.is_callable(next_fn) {
                         return Err(VmError::TypeError("iterator.next is not callable".into()));
                     }
@@ -28,6 +31,16 @@ impl Vm {
                     self.temp_roots.push(next_fn);
                     let mut res = Vec::new();
                     loop {
+                        if let Some(d) = self.deadline {
+                            if Instant::now() > d {
+                                self.temp_roots.truncate(prev_temp);
+                                return Err(VmError::RuntimeError("Execution timeout exceeded".into()));
+                            }
+                        }
+                        if res.len() >= 1_000_000 {
+                            self.temp_roots.truncate(prev_temp);
+                            return Err(VmError::RangeError("Spread iterable exceeds maximum size".into()));
+                        }
                         let cur_it = self.temp_roots[prev_temp];
                         let cur_next = self.temp_roots[prev_temp + 1];
                         let step = match self.call(cur_next, cur_it, &[]) {
@@ -37,11 +50,32 @@ impl Vm {
                                 return Err(e);
                             }
                         };
-                        let done = self.get_property(step, "done");
+                        if !step.is_js_object() {
+                            self.temp_roots.truncate(prev_temp);
+                            return Err(VmError::TypeError("Iterator result is not an object".into()));
+                        }
+                        self.temp_roots.push(step);
+                        let cur_step = self.temp_roots[self.temp_roots.len() - 1];
+                        let done = match self.get_property_result(cur_step, "done") {
+                            Ok(d) => d,
+                            Err(e) => {
+                                self.temp_roots.truncate(prev_temp);
+                                return Err(e);
+                            }
+                        };
                         if done.is_truthy() {
+                            self.temp_roots.pop();
                             break;
                         }
-                        let v = self.get_property(step, "value");
+                        let cur_step = self.temp_roots[self.temp_roots.len() - 1];
+                        let v = match self.get_property_result(cur_step, "value") {
+                            Ok(v) => v,
+                            Err(e) => {
+                                self.temp_roots.truncate(prev_temp);
+                                return Err(e);
+                            }
+                        };
+                        self.temp_roots.pop();
                         self.temp_roots.push(v);
                         res.push(v);
                     }

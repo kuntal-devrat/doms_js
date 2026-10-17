@@ -169,19 +169,37 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
             vm.alloc_set()
         };
 
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(set_val);
+
         if let Some(arg) = args.first() {
             if !arg.is_nullish() {
-                let adder = vm.get_property(set_val, "add");
+                let cur_set = vm.temp_roots[prev_temp];
+                let adder = vm.get_property(cur_set, "add");
                 if !vm.is_callable(adder) {
+                    vm.temp_roots.truncate(prev_temp);
                     return Err(VmError::TypeError("Set.prototype.add is not callable".into()));
                 }
-                let items = iterate_to_vec(vm, *arg)?;
-                for el in items {
-                    vm.call(adder, set_val, &[el])?;
+                vm.temp_roots.push(adder);
+                let arg_val = *arg;
+                let items = iterate_to_vec(vm, arg_val)?;
+                let items_start = vm.temp_roots.len();
+                for item in items {
+                    vm.temp_roots.push(item);
                 }
+                let num_items = vm.temp_roots.len() - items_start;
+                for i in 0..num_items {
+                    let cur_item = vm.temp_roots[items_start + i];
+                    let cur_set = vm.temp_roots[prev_temp];
+                    let cur_adder = vm.temp_roots[prev_temp + 1];
+                    vm.call(cur_adder, cur_set, &[cur_item])?;
+                }
+                vm.temp_roots.truncate(prev_temp + 1);
             }
         }
-        Ok(set_val)
+        let res = vm.temp_roots[prev_temp];
+        vm.temp_roots.truncate(prev_temp);
+        Ok(res)
     });
     vm.set_property(set_ctor, "prototype", set_proto);
     vm.non_enumerable_props.insert((set_ctor, "prototype".to_string()));

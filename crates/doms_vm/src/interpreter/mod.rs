@@ -62,6 +62,7 @@ mod operators;
 mod promises;
 mod properties;
 mod property_access;
+mod proxy;
 mod run;
 mod symbols;
 mod types;

@@ -22,8 +22,14 @@ impl Vm {
         let mut live = HashSet::new();
         let mut worklist = Vec::new();
 
+        let to_start = self.heap.nursery.to_start() as usize;
+        let space_size = self.heap.nursery.space_size();
         let mark_val = |val: JsValue, worklist: &mut Vec<*mut JsObject>, live: &mut HashSet<*mut JsObject>| {
             if let Some(ptr) = val.as_heap_ptr() {
+                let addr = ptr as usize;
+                if addr >= to_start && addr < to_start + space_size {
+                    panic!("Corrupted reference in GC: pointer {:p} is in old from-space (to-space)!", ptr);
+                }
                 let obj_ptr = ptr as *mut JsObject;
                 if live.insert(obj_ptr) {
                     worklist.push(obj_ptr);
@@ -64,8 +70,29 @@ impl Vm {
         if let Some(proto) = self.promise_proto {
             mark_val(proto, &mut worklist, &mut live);
         }
+        if let Some(proto) = self.date_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_iterator {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_async_iterator {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_to_string_tag {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_is_concat_spreadable {
+            mark_val(s, &mut worklist, &mut live);
+        }
         if let Some(s) = self.symbol_species {
             mark_val(s, &mut worklist, &mut live);
+        }
+        if let Some(s) = self.symbol_to_primitive {
+            mark_val(s, &mut worklist, &mut live);
+        }
+        for s in self.symbol_registry.values() {
+            mark_val(*s, &mut worklist, &mut live);
         }
         for val in self.global_lexicals.values() {
             mark_val(*val, &mut worklist, &mut live);
@@ -163,138 +190,10 @@ impl Vm {
 
         // 2. Trace transitively
         while let Some(ptr) = worklist.pop() {
-            let obj = unsafe { &*ptr };
-            if let Some(proto) = obj.prototype {
-                mark_val(proto, &mut worklist, &mut live);
-            }
-            for slot in &obj.slots {
-                mark_val(*slot, &mut worklist, &mut live);
-            }
-            if let Some(accs) = &obj.accessors {
-                for acc in accs.values() {
-                    if let Some(g) = acc.getter {
-                        mark_val(g, &mut worklist, &mut live);
-                    }
-                    if let Some(s) = acc.setter {
-                        mark_val(s, &mut worklist, &mut live);
-                    }
-                }
-            }
-            if let Some(syms) = &obj.symbol_properties {
-                for (sym_key, val) in syms.iter() {
-                    mark_val(*sym_key, &mut worklist, &mut live);
-                    mark_val(*val, &mut worklist, &mut live);
-                }
-            }
-            if let Some(sym_accs) = &obj.symbol_accessors {
-                for (sym_key, acc) in sym_accs.iter() {
-                    mark_val(*sym_key, &mut worklist, &mut live);
-                    if let Some(g) = acc.getter {
-                        mark_val(g, &mut worklist, &mut live);
-                    }
-                    if let Some(s) = acc.setter {
-                        mark_val(s, &mut worklist, &mut live);
-                    }
-                }
-            }
-            match &obj.kind {
-                ObjectKind::Array(elements) => {
-                    for el in elements {
-                        mark_val(*el, &mut worklist, &mut live);
-                    }
-                }
-                ObjectKind::Proxy { target, handler } => {
-                    mark_val(*target, &mut worklist, &mut live);
-                    mark_val(*handler, &mut worklist, &mut live);
-                }
-                ObjectKind::WeakRef(target) => {
-                    mark_val(*target, &mut worklist, &mut live);
-                }
-                ObjectKind::Function(f) => {
-                    for uv in &f.upvalues {
-                        mark_val(*uv, &mut worklist, &mut live);
-                    }
-                    if let Some(ho) = f.home_object {
-                        mark_val(ho, &mut worklist, &mut live);
-                    }
-                }
-                ObjectKind::Promise(p) => {
-                    mark_val(p.result, &mut worklist, &mut live);
-                    for r in &p.fulfill_reactions {
-                        mark_val(*r, &mut worklist, &mut live);
-                    }
-                    for r in &p.reject_reactions {
-                        mark_val(*r, &mut worklist, &mut live);
-                    }
-                }
-                ObjectKind::Generator(g) => {
-                    for v in &g.stack {
-                        mark_val(*v, &mut worklist, &mut live);
-                    }
-                    for v in &g.locals {
-                        mark_val(*v, &mut worklist, &mut live);
-                    }
-                    for sc in &g.scopes {
-                        mark_val(*sc, &mut worklist, &mut live);
-                    }
-                    if let Some(env) = g.env_obj {
-                        mark_val(env, &mut worklist, &mut live);
-                    }
-                    for uv in &g.function.upvalues {
-                        mark_val(*uv, &mut worklist, &mut live);
-                    }
-                    if let Some(ho) = g.function.home_object {
-                        mark_val(ho, &mut worklist, &mut live);
-                    }
-                    mark_val(g.this_val, &mut worklist, &mut live);
-                    if let Some(args) = g.arguments {
-                        mark_val(args, &mut worklist, &mut live);
-                    }
-                }
-                ObjectKind::Map(entries) => {
-                    for entry in entries {
-                        if let Some((k, v)) = entry {
-                            mark_val(*k, &mut worklist, &mut live);
-                            mark_val(*v, &mut worklist, &mut live);
-                        }
-                    }
-                }
-                ObjectKind::Set(entries) => {
-                    for v in entries {
-                        if let Some(v) = v {
-                            mark_val(*v, &mut worklist, &mut live);
-                        }
-                    }
-                }
-                ObjectKind::MapIterator { map, .. } => {
-                    mark_val(*map, &mut worklist, &mut live);
-                }
-                ObjectKind::SetIterator { set, .. } => {
-                    mark_val(*set, &mut worklist, &mut live);
-                }
-                ObjectKind::WeakMap(entries) => {
-                    for (k, v) in entries {
-                        mark_val(*k, &mut worklist, &mut live);
-                        mark_val(*v, &mut worklist, &mut live);
-                    }
-                }
-                ObjectKind::WeakSet(entries) => {
-                    for v in entries {
-                        mark_val(*v, &mut worklist, &mut live);
-                    }
-                }
-                ObjectKind::FinalizationRegistry { callback, entries } => {
-                    mark_val(*callback, &mut worklist, &mut live);
-                    for (t, h, unreg) in entries {
-                        mark_val(*t, &mut worklist, &mut live);
-                        mark_val(*h, &mut worklist, &mut live);
-                        if let Some(u) = unreg {
-                            mark_val(*u, &mut worklist, &mut live);
-                        }
-                    }
-                }
-                _ => {}
-            }
+            let obj = unsafe { &mut *ptr };
+            obj.visit_values_mut(|val| {
+                mark_val(*val, &mut worklist, &mut live);
+            });
         }
 
         // 3. Sweep dead objects
@@ -380,9 +279,36 @@ impl Vm {
             copy_val(&mut proto, &mut to_cursor);
             self.promise_proto = Some(proto);
         }
+        if let Some(mut proto) = self.date_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.date_proto = Some(proto);
+        }
+        if let Some(mut s) = self.symbol_iterator {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_iterator = Some(s);
+        }
+        if let Some(mut s) = self.symbol_async_iterator {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_async_iterator = Some(s);
+        }
+        if let Some(mut s) = self.symbol_to_string_tag {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_to_string_tag = Some(s);
+        }
+        if let Some(mut s) = self.symbol_is_concat_spreadable {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_is_concat_spreadable = Some(s);
+        }
         if let Some(mut s) = self.symbol_species {
             copy_val(&mut s, &mut to_cursor);
             self.symbol_species = Some(s);
+        }
+        if let Some(mut s) = self.symbol_to_primitive {
+            copy_val(&mut s, &mut to_cursor);
+            self.symbol_to_primitive = Some(s);
+        }
+        for s in self.symbol_registry.values_mut() {
+            copy_val(s, &mut to_cursor);
         }
         for val in self.global_lexicals.values_mut() {
             copy_val(val, &mut to_cursor);
@@ -526,6 +452,14 @@ impl Vm {
             updated_reexports.insert((k_tgt, k_str), (v_tgt, v_str));
         }
         self.module_reexports = updated_reexports;
+
+        // Evacuate references from objects outside the nursery (e.g. OldGen or large objects)
+        for &ptr in &self.objects {
+            if !self.heap.nursery.contains(ptr as *const u8) {
+                let obj = unsafe { &mut *ptr };
+                obj.visit_values_mut(|val| copy_val(val, &mut to_cursor));
+            }
+        }
 
         // ── Phase 2: Cheney scan of to-space (transitive closure) ──
         let mut scan = to_start;

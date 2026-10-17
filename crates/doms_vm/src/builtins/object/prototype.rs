@@ -11,12 +11,12 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
             Some(t) if t.is_object() => *t,
             _ => return Ok(JsValue::from_boolean(false)),
         };
-        let mut current = vm.get_prototype_of(target);
-        while let Some(proto) = current {
-            if proto == this {
+        let mut current = vm.get_prototype_of_val(target)?;
+        while current.is_object() {
+            if current == this {
                 return Ok(JsValue::from_boolean(true));
             }
-            current = vm.get_prototype_of(proto);
+            current = vm.get_prototype_of_val(current)?;
         }
         Ok(JsValue::from_boolean(false))
     });
@@ -53,6 +53,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
                 ObjectKind::Set(_) => "Set",
                 ObjectKind::MapIterator { .. } => "Map Iterator",
                 ObjectKind::SetIterator { .. } => "Set Iterator",
+                ObjectKind::ArrayIterator { .. } => "Array Iterator",
                 ObjectKind::WeakMap(_) => "WeakMap",
                 ObjectKind::WeakSet(_) => "WeakSet",
                 ObjectKind::BigInt(_) => "BigInt",
@@ -98,12 +99,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
         } else {
             vm.to_object_value(this)?
         };
-        if let Some(ptr) = o.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            Ok(obj.prototype.unwrap_or(JsValue::null()))
-        } else {
-            Ok(JsValue::null())
-        }
+        vm.get_prototype_of_val(o)
     });
 
     let proto_setter = vm.alloc_native_function("set __proto__", 1, |vm, this, args| {
@@ -117,16 +113,10 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
         if !this.is_object() {
             return Ok(JsValue::undefined());
         }
-        let ptr = this.as_object_ptr().unwrap();
-        let obj = unsafe { &mut *(ptr as *mut JsObject) };
-        let new_proto = if proto.is_null() { None } else { Some(proto) };
-        if obj.prototype == new_proto {
-            return Ok(JsValue::undefined());
-        }
-        if vm.non_extensible_objects.contains(&this) {
+        let success = vm.set_prototype_of_val(this, proto)?;
+        if !success {
             return Err(VmError::TypeError("Cannot set prototype of non-extensible object".into()));
         }
-        obj.prototype = new_proto;
         Ok(JsValue::undefined())
     });
 

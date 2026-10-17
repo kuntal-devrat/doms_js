@@ -1,6 +1,7 @@
 //! Shared helpers used by several builtin registrars.
 
 use super::*;
+use std::time::Instant;
 
 pub(super) fn get_enumerable_keys(vm: &Vm, arg: JsValue) -> Vec<String> {
     let mut raw_names: Vec<String> = Vec::new();
@@ -88,7 +89,7 @@ pub(crate) fn add_species_getter(vm: &mut Vm, ctor: JsValue) {
     }
 }
 
-pub(super) fn iterate_to_vec(vm: &mut Vm, iterable: JsValue) -> Result<Vec<JsValue>, VmError> {
+pub(crate) fn iterate_to_vec(vm: &mut Vm, iterable: JsValue) -> Result<Vec<JsValue>, VmError> {
     if iterable.is_nullish() {
         return Err(VmError::TypeError("Value is not iterable".into()));
     }
@@ -105,23 +106,57 @@ pub(super) fn iterate_to_vec(vm: &mut Vm, iterable: JsValue) -> Result<Vec<JsVal
     }
 
     let sym_iter = vm.symbol_iterator.ok_or_else(|| VmError::TypeError("No Symbol.iterator".into()))?;
-    let method = vm.get_symbol_property(iterable, sym_iter);
+    let prev_temp = vm.temp_roots.len();
+    vm.temp_roots.push(iterable);
+    let cur_iterable = vm.temp_roots[prev_temp];
+    let method = vm.get_symbol_property(cur_iterable, sym_iter);
     if !vm.is_callable(method) {
+        vm.temp_roots.truncate(prev_temp);
         return Err(VmError::TypeError("Value is not iterable".into()));
     }
-    let it = vm.call(method, iterable, &[])?;
-    let next_fn = vm.get_property(it, "next");
+    vm.temp_roots.push(method);
+    let cur_iterable = vm.temp_roots[prev_temp];
+    let cur_method = vm.temp_roots[prev_temp + 1];
+    let it = match vm.call(cur_method, cur_iterable, &[]) {
+        Ok(it) => it,
+        Err(e) => {
+            vm.temp_roots.truncate(prev_temp);
+            return Err(e);
+        }
+    };
+    if !it.is_object() {
+        vm.temp_roots.truncate(prev_temp);
+        return Err(VmError::TypeError("Iterator must return an object".into()));
+    }
+    vm.temp_roots.push(it);
+    let cur_it = vm.temp_roots[prev_temp + 2];
+    let next_fn = match vm.get_property_result(cur_it, "next") {
+        Ok(n) => n,
+        Err(e) => {
+            vm.temp_roots.truncate(prev_temp);
+            return Err(e);
+        }
+    };
     if !vm.is_callable(next_fn) {
+        vm.temp_roots.truncate(prev_temp);
         return Err(VmError::TypeError("Iterator next is not callable".into()));
     }
-    let prev_temp = vm.temp_roots.len();
-    vm.temp_roots.push(it);
     vm.temp_roots.push(next_fn);
 
-    let mut res = Vec::new();
+    let items_start = vm.temp_roots.len();
     loop {
-        let cur_it = vm.temp_roots[prev_temp];
-        let cur_next = vm.temp_roots[prev_temp + 1];
+        if let Some(d) = vm.deadline {
+            if Instant::now() > d {
+                vm.temp_roots.truncate(prev_temp);
+                return Err(VmError::RuntimeError("Execution timeout exceeded".into()));
+            }
+        }
+        if vm.temp_roots.len() - items_start >= 1_000_000 {
+            vm.temp_roots.truncate(prev_temp);
+            return Err(VmError::RangeError("Iterable exceeds maximum size".into()));
+        }
+        let cur_it = vm.temp_roots[prev_temp + 2];
+        let cur_next = vm.temp_roots[prev_temp + 3];
         let step = match vm.call(cur_next, cur_it, &[]) {
             Ok(s) => s,
             Err(e) => {
@@ -129,17 +164,35 @@ pub(super) fn iterate_to_vec(vm: &mut Vm, iterable: JsValue) -> Result<Vec<JsVal
                 return Err(e);
             }
         };
-        let done = vm.get_property(step, "done");
+        if !step.is_object() {
+            vm.temp_roots.truncate(prev_temp);
+            return Err(VmError::TypeError("Iterator result is not an object".into()));
+        }
+        vm.temp_roots.push(step);
+        let cur_step = vm.temp_roots.last().copied().unwrap();
+        let done = match vm.get_property_result(cur_step, "done") {
+            Ok(d) => d,
+            Err(e) => {
+                vm.temp_roots.truncate(prev_temp);
+                return Err(e);
+            }
+        };
         if done.is_truthy() {
+            vm.temp_roots.pop();
             break;
         }
-        let val = vm.get_property(step, "value");
+        let cur_step = vm.temp_roots.last().copied().unwrap();
+        let val = match vm.get_property_result(cur_step, "value") {
+            Ok(v) => v,
+            Err(e) => {
+                vm.temp_roots.truncate(prev_temp);
+                return Err(e);
+            }
+        };
+        vm.temp_roots.pop();
         vm.temp_roots.push(val);
-        res.push(val);
     }
-    for (i, val) in vm.temp_roots[prev_temp + 2..].iter().enumerate() {
-        res[i] = *val;
-    }
+    let res = vm.temp_roots[items_start..].to_vec();
     vm.temp_roots.truncate(prev_temp);
     Ok(res)
 }

@@ -9,21 +9,7 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
             Some(t) if !t.is_nullish() => *t,
             _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
         };
-        if let Some(ptr) = target.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            Ok(obj.prototype.unwrap_or(JsValue::null()))
-        } else if target.is_string() {
-            let string_ctor = vm.globals.get("String").copied().unwrap_or(JsValue::undefined());
-            Ok(vm.get_property(string_ctor, "prototype"))
-        } else if target.is_number() {
-            let num_ctor = vm.globals.get("Number").copied().unwrap_or(JsValue::undefined());
-            Ok(vm.get_property(num_ctor, "prototype"))
-        } else if target.is_boolean() {
-            let bool_ctor = vm.globals.get("Boolean").copied().unwrap_or(JsValue::undefined());
-            Ok(vm.get_property(bool_ctor, "prototype"))
-        } else {
-            Ok(JsValue::null())
-        }
+        vm.get_prototype_of_val(target)
     });
 
     let set_prototype_of_fn = vm.alloc_native_function("setPrototypeOf", 2, |vm, _this, args| {
@@ -35,18 +21,18 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
         if !proto.is_object() && !proto.is_null() {
             return Err(VmError::TypeError("Object prototype may only be an Object or null".into()));
         }
-        if let Some(ptr) = target.as_object_ptr() {
-            let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if vm.module_namespace_objects.contains(&target) {
-                if proto.is_null() {
-                    return Ok(target);
-                }
-                return Err(VmError::TypeError("Cannot set prototype of module namespace object".into()));
+        if !target.is_object() {
+            return Ok(target);
+        }
+        if vm.module_namespace_objects.contains(&target) {
+            if proto.is_null() {
+                return Ok(target);
             }
-            if vm.non_extensible_objects.contains(&target) {
-                return Err(VmError::TypeError("Cannot set prototype of non-extensible object".into()));
-            }
-            obj.prototype = if proto.is_null() { None } else { Some(proto) };
+            return Err(VmError::TypeError("Cannot set prototype of module namespace object".into()));
+        }
+        let success = vm.set_prototype_of_val(target, proto)?;
+        if !success {
+            return Err(VmError::TypeError("Cannot set prototype of object".into()));
         }
         Ok(target)
     });
@@ -66,21 +52,40 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
         if iterable.is_nullish() {
             return Err(VmError::TypeError("Object.fromEntries requires an iterable".into()));
         }
-        let items = iterate_to_vec(vm, iterable)?;
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(iterable);
+        let items = iterate_to_vec(vm, vm.temp_roots[prev_temp])?;
         let obj = vm.alloc_object();
+        vm.temp_roots[prev_temp] = obj;
+        let items_start = vm.temp_roots.len();
         for item in items {
-            if !item.is_object() {
+            vm.temp_roots.push(item);
+        }
+        let num_items = vm.temp_roots.len() - items_start;
+        for i in 0..num_items {
+            let cur_item = vm.temp_roots[items_start + i];
+            if !cur_item.is_object() {
+                vm.temp_roots.truncate(prev_temp);
                 return Err(VmError::TypeError("Iterator value is not an entry object".into()));
             }
-            let k = vm.get_property(item, "0");
-            let v = vm.get_property(item, "1");
-            let key = vm.to_property_key(k)?;
+            let k = vm.get_property(cur_item, "0");
+            vm.temp_roots.push(k);
+            let cur_item = vm.temp_roots[items_start + i];
+            let v = vm.get_property(cur_item, "1");
+            vm.temp_roots.push(v);
+            let k_val = vm.temp_roots[vm.temp_roots.len() - 2];
+            let v_val = vm.temp_roots[vm.temp_roots.len() - 1];
+            let key = vm.to_property_key(k_val)?;
+            let cur_obj = vm.temp_roots[prev_temp];
             match key {
-                PropertyKeyVal::String(s) => vm.set_property(obj, &s, v),
-                PropertyKeyVal::Symbol(sym) => vm.set_symbol_property(obj, sym, v),
+                PropertyKeyVal::String(s) => vm.set_property(cur_obj, &s, v_val),
+                PropertyKeyVal::Symbol(sym) => vm.set_symbol_property(cur_obj, sym, v_val),
             }
+            vm.temp_roots.truncate(items_start + num_items);
         }
-        Ok(obj)
+        let res = vm.temp_roots[prev_temp];
+        vm.temp_roots.truncate(prev_temp);
+        Ok(res)
     });
 
     let is_fn = vm.alloc_native_function("is", 2, |vm, _this, args| {

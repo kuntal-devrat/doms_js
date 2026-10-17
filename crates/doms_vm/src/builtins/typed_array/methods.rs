@@ -30,35 +30,78 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
     let set_fn = vm.alloc_native_function("set", 1, |vm, this, args| {
         let src = args.first().copied().unwrap_or(JsValue::undefined());
         let offset = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
-        if let Some(ptr) = this.as_object_ptr() {
-            let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::TypedArray(dst_ta) = &mut obj.kind {
-                if let Some(src_ptr) = src.as_object_ptr() {
-                    let src_obj = unsafe { &*(src_ptr as *mut JsObject) };
-                    if let ObjectKind::TypedArray(src_ta) = &src_obj.kind {
-                        if offset + src_ta.length > dst_ta.length {
-                            return Err(VmError::RangeError("Source is too large for target array".into()));
-                        }
-                        for i in 0..src_ta.length {
-                            if let Some(val) = Vm::read_typed_array_element(src_ta, i) {
-                                Vm::write_typed_array_element(dst_ta, offset + i, val);
-                            }
-                        }
-                        return Ok(JsValue::undefined());
-                    }
-                }
-                let len = vm.get_property(src, "length").to_number().unwrap_or(0.0) as usize;
-                if offset + len > dst_ta.length {
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(this);
+        vm.temp_roots.push(src);
+
+        let dst_len = if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ref ta) = obj.kind {
+                ta.length
+            } else {
+                vm.temp_roots.truncate(prev_temp);
+                return Err(VmError::TypeError("Method called on non-TypedArray".into()));
+            }
+        } else {
+            vm.temp_roots.truncate(prev_temp);
+            return Err(VmError::TypeError("Method called on non-TypedArray".into()));
+        };
+
+        let cur_src = vm.temp_roots[prev_temp + 1];
+        if let Some(src_ptr) = cur_src.as_object_ptr() {
+            let src_obj = unsafe { &*(src_ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(src_ta) = &src_obj.kind {
+                let src_len = src_ta.length;
+                if offset + src_len > dst_len {
+                    vm.temp_roots.truncate(prev_temp);
                     return Err(VmError::RangeError("Source is too large for target array".into()));
                 }
-                for i in 0..len {
-                    let val = vm.get_element(src, i);
-                    Vm::write_typed_array_element(dst_ta, offset + i, val);
+                let mut vals = Vec::with_capacity(src_len);
+                for i in 0..src_len {
+                    if let Some(val) = Vm::read_typed_array_element(src_ta, i) {
+                        vals.push(val);
+                    }
                 }
+                let cur_this = vm.temp_roots[prev_temp];
+                if let Some(this_ptr) = cur_this.as_object_ptr() {
+                    let this_obj = unsafe { &mut *(this_ptr as *mut JsObject) };
+                    if let ObjectKind::TypedArray(dst_ta) = &mut this_obj.kind {
+                        for (i, val) in vals.into_iter().enumerate() {
+                            Vm::write_typed_array_element(dst_ta, offset + i, val);
+                        }
+                    }
+                }
+                vm.temp_roots.truncate(prev_temp);
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method called on non-TypedArray".into()))
+
+        let cur_src = vm.temp_roots[prev_temp + 1];
+        let len = vm.get_property(cur_src, "length").to_number().unwrap_or(0.0) as usize;
+        if offset + len > dst_len {
+            vm.temp_roots.truncate(prev_temp);
+            return Err(VmError::RangeError("Source is too large for target array".into()));
+        }
+
+        let vals_start = vm.temp_roots.len();
+        for i in 0..len {
+            let cur_src = vm.temp_roots[prev_temp + 1];
+            let val = vm.get_element(cur_src, i);
+            vm.temp_roots.push(val);
+        }
+
+        let cur_this = vm.temp_roots[prev_temp];
+        if let Some(this_ptr) = cur_this.as_object_ptr() {
+            let this_obj = unsafe { &mut *(this_ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(dst_ta) = &mut this_obj.kind {
+                for i in 0..len {
+                    let val = vm.temp_roots[vals_start + i];
+                    Vm::write_typed_array_element(dst_ta, offset + i, val);
+                }
+            }
+        }
+        vm.temp_roots.truncate(prev_temp);
+        Ok(JsValue::undefined())
     });
     vm.set_property(proto, "set", set_fn);
 

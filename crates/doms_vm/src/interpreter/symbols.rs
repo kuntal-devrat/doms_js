@@ -55,6 +55,14 @@ impl Vm {
             }
         }
 
+        if let Some(ptr) = target.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if matches!(obj.kind, ObjectKind::Proxy { .. }) {
+                let prop_key = PropertyKeyVal::Symbol(key);
+                return self.proxy_get(target, &prop_key, target);
+            }
+        }
+
         let mut curr_proto = if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
 
@@ -96,6 +104,10 @@ impl Vm {
         while let Some(proto_val) = curr_proto {
             if let Some(proto_ptr) = proto_val.as_object_ptr() {
                 let proto_obj = unsafe { &*(proto_ptr as *mut JsObject) };
+                if matches!(proto_obj.kind, ObjectKind::Proxy { .. }) {
+                    let prop_key = PropertyKeyVal::Symbol(key);
+                    return self.proxy_get(proto_val, &prop_key, target);
+                }
                 if let Some(accs) = &proto_obj.symbol_accessors {
                     if let Some(acc) = accs.get(&key) {
                         if let Some(getter) = acc.getter {
@@ -122,71 +134,123 @@ impl Vm {
         self.get_symbol_property_result(target, key).unwrap_or(JsValue::undefined())
     }
 
-    pub fn set_symbol_property_result(&mut self, target: JsValue, key: JsValue, value: JsValue) -> Result<(), VmError> {
-        let is_strict = self.is_strict || self.frames.last().map(|f| f.is_strict).unwrap_or(false);
+    pub fn set_symbol_property_with_receiver(
+        &mut self,
+        target: JsValue,
+        key: JsValue,
+        value: JsValue,
+        receiver: JsValue,
+    ) -> Result<bool, VmError> {
         if self.module_namespace_objects.contains(&target) {
-            if is_strict {
-                return Err(VmError::TypeError("Cannot assign to read only property on module namespace object".into()));
-            }
-            return Ok(());
+            return Ok(false);
         }
         let key_name = format!("[Symbol:{:x}]", key.raw_bits());
-        if self.non_writable_props.contains(&(target, key_name)) {
-            if is_strict {
-                return Err(VmError::TypeError("Cannot assign to read only property".into()));
-            }
-            return Ok(());
+        if self.non_writable_props.contains(&(target, key_name.clone())) {
+            return Ok(false);
         }
-        if !target.is_object() {
-            if is_strict {
-                return Err(VmError::TypeError("Cannot create property on primitive".into()));
-            }
-            return Ok(());
+        if !target.is_js_object() {
+            return Ok(false);
         }
-        if let Some(ptr) = target.as_object_ptr() {
-            let obj = unsafe { &mut *(ptr as *mut JsObject) };
 
-            let has_sym = obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false)
-                || obj.symbol_accessors.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
-            if self.non_extensible_objects.contains(&target) && !has_sym {
-                if is_strict {
-                    return Err(VmError::TypeError("Cannot add property, object is not extensible".into()));
-                }
-                return Ok(());
+        if let Some(ptr) = target.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+
+            if matches!(obj.kind, ObjectKind::Proxy { .. }) {
+                let prop_key = PropertyKeyVal::Symbol(key);
+                return self.proxy_set(target, &prop_key, value, receiver);
             }
 
             if let Some(accs) = &obj.symbol_accessors {
                 if let Some(acc) = accs.get(&key) {
                     if let Some(setter) = acc.setter {
-                        let _ = self.call(setter, target, &[value])?;
-                    } else if is_strict {
-                        return Err(VmError::TypeError("Cannot set property of object which has only a getter".into()));
+                        self.call(setter, receiver, &[value])?;
+                        return Ok(true);
+                    } else {
+                        return Ok(false);
                     }
-                    return Ok(());
                 }
             }
 
-            let mut curr_proto = obj.prototype;
-            while let Some(proto_val) = curr_proto {
-                if let Some(proto_ptr) = proto_val.as_object_ptr() {
-                    let proto_obj = unsafe { &*(proto_ptr as *mut JsObject) };
-                    if let Some(accs) = &proto_obj.symbol_accessors {
-                        if let Some(acc) = accs.get(&key) {
-                            if let Some(setter) = acc.setter {
-                                let _ = self.call(setter, target, &[value])?;
-                            } else if is_strict {
-                                return Err(VmError::TypeError("Cannot set property of object which has only a getter".into()));
-                            }
-                            return Ok(());
+            let has_own_data = obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
+            if !has_own_data {
+                let mut curr_proto = obj.prototype;
+                while let Some(proto_val) = curr_proto {
+                    if let Some(proto_ptr) = proto_val.as_object_ptr() {
+                        let proto_obj = unsafe { &*(proto_ptr as *mut JsObject) };
+                        if matches!(proto_obj.kind, ObjectKind::Proxy { .. }) {
+                            let prop_key = PropertyKeyVal::Symbol(key);
+                            return self.proxy_set(proto_val, &prop_key, value, receiver);
                         }
+                        if let Some(accs) = &proto_obj.symbol_accessors {
+                            if let Some(acc) = accs.get(&key) {
+                                if let Some(setter) = acc.setter {
+                                    self.call(setter, receiver, &[value])?;
+                                    return Ok(true);
+                                } else {
+                                    return Ok(false);
+                                }
+                            }
+                        }
+                        if self.non_writable_props.contains(&(proto_val, key_name.clone())) {
+                            return Ok(false);
+                        }
+                        curr_proto = proto_obj.prototype;
+                    } else {
+                        break;
                     }
-                    curr_proto = proto_obj.prototype;
-                } else {
-                    break;
                 }
             }
+        }
 
-            obj.insert_symbol_property(key, value);
+        if !receiver.is_js_object() {
+            return Ok(false);
+        }
+
+        if let Some(r_ptr) = receiver.as_object_ptr() {
+            let r_obj = unsafe { &mut *(r_ptr as *mut JsObject) };
+            if matches!(r_obj.kind, ObjectKind::Proxy { .. }) {
+                let desc = self.alloc_object();
+                self.set_property(desc, "value", value);
+                self.set_property(desc, "writable", JsValue::from_boolean(true));
+                self.set_property(desc, "enumerable", JsValue::from_boolean(true));
+                self.set_property(desc, "configurable", JsValue::from_boolean(true));
+                let prop_key = PropertyKeyVal::Symbol(key);
+                return self.proxy_define_own_property(receiver, &prop_key, desc);
+            }
+            if let Some(accs) = &r_obj.symbol_accessors {
+                if accs.contains_key(&key) {
+                    return Ok(false);
+                }
+            }
+            if self.non_writable_props.contains(&(receiver, key_name.clone())) {
+                return Ok(false);
+            }
+            let has_sym = r_obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
+            if self.non_extensible_objects.contains(&receiver) && !has_sym {
+                return Ok(false);
+            }
+            r_obj.insert_symbol_property(key, value);
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    pub fn set_symbol_property_result(&mut self, target: JsValue, key: JsValue, value: JsValue) -> Result<(), VmError> {
+        self.set_symbol_property_with_receiver_result(target, key, value, target)
+    }
+
+    pub fn set_symbol_property_with_receiver_result(
+        &mut self,
+        target: JsValue,
+        key: JsValue,
+        value: JsValue,
+        receiver: JsValue,
+    ) -> Result<(), VmError> {
+        let is_strict = self.is_strict || self.frames.last().map(|f| f.is_strict).unwrap_or(false);
+        let ok = self.set_symbol_property_with_receiver(target, key, value, receiver)?;
+        if !ok && is_strict {
+            return Err(VmError::TypeError("Cannot assign to property".into()));
         }
         Ok(())
     }
@@ -195,32 +259,26 @@ impl Vm {
         let _ = self.set_symbol_property_result(target, key, value);
     }
 
-    pub fn has_property(&mut self, target: JsValue, key: &str) -> Result<bool, VmError> {
+    pub fn has_property_key(&mut self, target: JsValue, key: &PropertyKeyVal) -> Result<bool, VmError> {
         if !target.is_object() {
             return Ok(false);
         }
-        if self.deleted_props.contains(&(target, key.to_string())) {
-            return Ok(false);
-        }
-        if self.module_reexports.contains_key(&(target, key.to_string())) {
-            return Ok(true);
+        if let PropertyKeyVal::String(s) = key {
+            if self.deleted_props.contains(&(target, s.clone())) {
+                return Ok(false);
+            }
+            if self.module_reexports.contains_key(&(target, s.clone())) {
+                return Ok(true);
+            }
         }
         let mut curr = Some(target);
         while let Some(c_val) = curr {
             if let Some(c_ptr) = c_val.as_object_ptr() {
                 let c_obj = unsafe { &*(c_ptr as *mut JsObject) };
-                if let ObjectKind::Proxy { target: tgt, handler: hdl } = &c_obj.kind {
-                    let tgt = *tgt;
-                    let hdl = *hdl;
-                    let trap = self.get_property(hdl, "has");
-                    if self.is_callable(trap) {
-                        let key_val = self.alloc_string(key.to_string());
-                        let res = self.call(trap, hdl, &[tgt, key_val])?;
-                        return Ok(res.is_truthy());
-                    }
-                    return self.has_property(tgt, key);
+                if matches!(c_obj.kind, ObjectKind::Proxy { .. }) {
+                    return self.proxy_has(c_val, key);
                 }
-                if self.has_own_property_key(c_val, &PropertyKeyVal::String(key.to_string())) {
+                if self.has_own_property_key(c_val, key) {
                     return Ok(true);
                 }
                 curr = c_obj.prototype;
@@ -229,6 +287,10 @@ impl Vm {
             }
         }
         Ok(false)
+    }
+
+    pub fn has_property(&mut self, target: JsValue, key: &str) -> Result<bool, VmError> {
+        self.has_property_key(target, &PropertyKeyVal::String(key.to_string()))
     }
 
     pub fn has_own_property_key(&self, target: JsValue, prop_key: &PropertyKeyVal) -> bool {

@@ -2,46 +2,104 @@ use super::*;
 
 impl Vm {
     pub fn construct(&mut self, callee: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
+        self.construct_with_new_target(callee, args, callee)
+    }
+
+    pub fn construct_with_new_target(
+        &mut self,
+        callee: JsValue,
+        args: &[JsValue],
+        new_target: JsValue,
+    ) -> Result<JsValue, VmError> {
         if !self.is_constructor(callee) {
             return Err(VmError::TypeError(format!("{} is not a constructor", self.to_string_value(callee))));
         }
+        if !new_target.is_undefined() && !self.is_constructor(new_target) {
+            return Err(VmError::TypeError(format!("{} is not a constructor", self.to_string_value(new_target))));
+        }
 
-        if let Some(ptr) = callee.as_object_ptr() {
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(callee);
+        self.temp_roots.push(new_target);
+        let args_start = self.temp_roots.len();
+        self.temp_roots.extend_from_slice(args);
+        let args_len = args.len();
+
+        let cur_callee = self.temp_roots[prev_temp];
+        if let Some(ptr) = cur_callee.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
+                ObjectKind::Proxy { .. } => {
+                    let cur_callee = self.temp_roots[prev_temp];
+                    let cur_nt = self.temp_roots[prev_temp + 1];
+                    let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
+                    self.temp_roots.truncate(prev_temp);
+                    self.proxy_construct(cur_callee, &cur_args, cur_nt)
+                }
                 ObjectKind::NativeFunction(native) => {
-                    let proto = self.get_property(callee, "prototype");
+                    let native = native.clone();
+                    let cur_callee = self.temp_roots[prev_temp];
+                    let cur_nt = self.temp_roots[prev_temp + 1];
+                    let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
+                    let proto = self.get_property(new_target_val, "prototype");
+                    self.temp_roots.push(proto);
                     let this_obj = self.alloc_object();
-                    if proto.is_object() {
-                        let this_ptr = this_obj.as_object_ptr().unwrap();
-                        let jsobj = unsafe { &mut *(this_ptr as *mut JsObject) };
-                        jsobj.prototype = Some(proto);
+                    self.temp_roots.push(this_obj);
+                    let cur_proto = self.temp_roots[args_start + args_len];
+                    let cur_this = self.temp_roots[args_start + args_len + 1];
+                    if cur_proto.is_object() {
+                        if let Some(this_ptr) = cur_this.as_object_ptr() {
+                            let jsobj = unsafe { &mut *(this_ptr as *mut JsObject) };
+                            jsobj.prototype = Some(cur_proto);
+                        }
                     }
-                    let prev_temp = self.temp_roots.len();
-                    self.temp_roots.extend_from_slice(args);
+                    let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
                     let prev_constructing = self.is_constructing;
                     self.is_constructing = true;
-                    let res = native.call(self, this_obj, args);
+                    let res = native.call(self, cur_this, &cur_args);
                     self.is_constructing = prev_constructing;
-                    self.temp_roots.truncate(prev_temp);
                     let val = res?;
-                    if val.is_object() {
-                        Ok(val)
+                    let cur_proto = self.temp_roots[args_start + args_len];
+                    let cur_this = self.temp_roots[args_start + args_len + 1];
+                    let cur_callee = self.temp_roots[prev_temp];
+                    let cur_nt = self.temp_roots[prev_temp + 1];
+                    let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
+                    let ret = if val.is_object() {
+                        if cur_proto.is_object() && new_target_val != cur_callee {
+                            if let Some(val_ptr) = val.as_object_ptr() {
+                                let jsobj = unsafe { &mut *(val_ptr as *mut JsObject) };
+                                jsobj.prototype = Some(cur_proto);
+                            }
+                        }
+                        val
                     } else {
-                        Ok(this_obj)
-                    }
+                        cur_this
+                    };
+                    self.temp_roots.truncate(prev_temp);
+                    Ok(ret)
                 }
                 ObjectKind::Function(_) => {
+                    let cur_callee = self.temp_roots[prev_temp];
+                    let cur_nt = self.temp_roots[prev_temp + 1];
+                    let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
+                    let proto = self.get_property(new_target_val, "prototype");
+                    self.temp_roots.push(proto);
                     let this_obj = self.alloc_object();
-                    let proto = self.get_property(callee, "prototype");
-                    if proto.is_object() {
-                        let this_ptr = this_obj.as_object_ptr().unwrap();
-                        let jsobj = unsafe { &mut *(this_ptr as *mut JsObject) };
-                        jsobj.prototype = Some(proto);
+                    self.temp_roots.push(this_obj);
+                    let cur_proto = self.temp_roots[args_start + args_len];
+                    let cur_this = self.temp_roots[args_start + args_len + 1];
+                    if cur_proto.is_object() {
+                        if let Some(this_ptr) = cur_this.as_object_ptr() {
+                            let jsobj = unsafe { &mut *(this_ptr as *mut JsObject) };
+                            jsobj.prototype = Some(cur_proto);
+                        }
                     }
+                    let cur_callee = self.temp_roots[prev_temp];
+                    let cur_this = self.temp_roots[args_start + args_len + 1];
+                    let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
                     let prev_constructing = self.is_constructing;
                     self.is_constructing = true;
-                    let call_res = self.execute_call_internal(callee, this_obj, args.to_vec());
+                    let call_res = self.execute_call_internal(cur_callee, cur_this, cur_args);
                     self.is_constructing = prev_constructing;
                     let res_opt = call_res?;
                     let val = if let Some(res) = res_opt {
@@ -50,15 +108,22 @@ impl Vm {
                         let target_depth = self.frames.len() - 1;
                         self.run_until_depth(target_depth)?
                     };
+                    let cur_this = self.temp_roots[args_start + args_len + 1];
+                    self.temp_roots.truncate(prev_temp);
                     if val.is_object() {
                         Ok(val)
                     } else {
-                        Ok(this_obj)
+                        Ok(cur_this)
                     }
                 }
-                _ => Err(VmError::TypeError(format!("{} is not a constructor", self.to_string_value(callee)))),
+                _ => {
+                    let cur_callee = self.temp_roots[prev_temp];
+                    self.temp_roots.truncate(prev_temp);
+                    Err(VmError::TypeError(format!("{} is not a constructor", self.to_string_value(cur_callee))))
+                }
             }
         } else {
+            self.temp_roots.truncate(prev_temp);
             Err(VmError::TypeError("Target is not a constructor".into()))
         }
     }
@@ -116,7 +181,11 @@ impl Vm {
 
     pub fn array_species_create(&mut self, original: JsValue, length: usize) -> Result<JsValue, VmError> {
         if !self.is_array(original) {
-            return Ok(self.alloc_array(Vec::with_capacity(length)));
+            if length > 4294967295 {
+                return Err(VmError::RangeError("Invalid array length".into()));
+            }
+            let cap = length.min(100_000);
+            return Ok(self.alloc_array(Vec::with_capacity(cap)));
         }
         let mut ctor = self.get_property_result(original, "constructor")?;
         if self.is_constructor(ctor) {
@@ -139,12 +208,21 @@ impl Vm {
             }
         }
         if ctor.is_undefined() {
-            return Ok(self.alloc_array(Vec::with_capacity(length)));
+            if length > 4294967295 {
+                return Err(VmError::RangeError("Invalid array length".into()));
+            }
+            let cap = length.min(100_000);
+            return Ok(self.alloc_array(Vec::with_capacity(cap)));
         }
         if !self.is_constructor(ctor) {
             return Err(VmError::TypeError("Species is not a constructor".into()));
         }
-        self.construct(ctor, &[JsValue::from_int32(length as i32)])
+        let len_val = if length <= i32::MAX as usize {
+            JsValue::from_int32(length as i32)
+        } else {
+            JsValue::from_double(length as f64)
+        };
+        self.construct(ctor, &[len_val])
     }
 }
 

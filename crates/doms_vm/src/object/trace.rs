@@ -151,6 +151,26 @@ impl Trace for JsObject {
                         tracer.trace_ref(r);
                     }
                 }
+                if let Some(r) = g.this_val.as_heap_ptr() {
+                    tracer.trace_ref(r);
+                }
+                if let Some(args) = g.arguments {
+                    if let Some(r) = args.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                }
+                for req in &g.async_queue {
+                    if let Some(r) = req.promise.as_heap_ptr() {
+                        tracer.trace_ref(r);
+                    }
+                    match req.kind {
+                        AsyncGenRequestKind::Next(v) | AsyncGenRequestKind::Return(v) | AsyncGenRequestKind::Throw(v) => {
+                            if let Some(r) = v.as_heap_ptr() {
+                                tracer.trace_ref(r);
+                            }
+                        }
+                    }
+                }
             }
             ObjectKind::Map(entries) => {
                 for entry in entries {
@@ -229,6 +249,11 @@ impl Trace for JsObject {
             }
             ObjectKind::SetIterator { set, .. } => {
                 if let Some(p) = set.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
+            ObjectKind::ArrayIterator { target, .. } => {
+                if let Some(p) = target.as_heap_ptr() {
                     tracer.trace_ref(p);
                 }
             }
@@ -342,6 +367,14 @@ impl JsObject {
                 if let Some(args) = &mut g.arguments {
                     visitor(args);
                 }
+                for req in &mut g.async_queue {
+                    visitor(&mut req.promise);
+                    match &mut req.kind {
+                        AsyncGenRequestKind::Next(v) | AsyncGenRequestKind::Return(v) | AsyncGenRequestKind::Throw(v) => {
+                            visitor(v);
+                        }
+                    }
+                }
             }
             ObjectKind::Map(entries) => {
                 for entry in entries {
@@ -389,6 +422,9 @@ impl JsObject {
             }
             ObjectKind::SetIterator { set, .. } => {
                 visitor(set);
+            }
+            ObjectKind::ArrayIterator { target, .. } => {
+                visitor(target);
             }
             _ => {}
         }

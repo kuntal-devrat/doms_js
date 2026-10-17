@@ -7,9 +7,16 @@ use super::*;
 pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
     let array_proto = vm.alloc_object();
     vm.array_proto = Some(array_proto);
+    vm.set_property(array_proto, "length", JsValue::from_int32(0));
+    vm.non_enumerable_props.insert((array_proto, "length".to_string()));
+    vm.non_configurable_props.insert((array_proto, "length".to_string()));
 
     let map_fn = vm.alloc_native_function("map", 1, |vm, this, args| {
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
+        if !vm.is_callable(cb) {
+            return Err(VmError::TypeError("map callback must be callable".into()));
+        }
+        let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
         let len_val = vm.get_property(this, "length");
         let raw_len = len_val.to_number().unwrap_or(0.0);
         if raw_len > 4_294_967_295.0 || raw_len < 0.0 || raw_len.is_infinite() {
@@ -19,12 +26,56 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
         if len > 100_000 {
             return Err(VmError::RangeError("Invalid array length".into()));
         }
-        let mut mapped = Vec::with_capacity(len.min(65536));
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(this);
+        vm.temp_roots.push(cb);
+        vm.temp_roots.push(this_arg);
+        let mapped_start = vm.temp_roots.len();
         for i in 0..len {
-            let el = vm.get_element(this, i);
-            let res = vm.call(cb, JsValue::undefined(), &[el, JsValue::from_int32(i as i32), this])?;
-            mapped.push(res);
+            let cur_this = vm.temp_roots[prev_temp];
+            let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Array(elements) = &obj.kind {
+                    if i < elements.len() && !elements[i].is_hole() {
+                        true
+                    } else {
+                        let key = i.to_string();
+                        vm.has_property(cur_this, &key).unwrap_or(false)
+                    }
+                } else {
+                    let key = i.to_string();
+                    vm.has_property(cur_this, &key).unwrap_or(false)
+                }
+            } else {
+                let key = i.to_string();
+                vm.has_property(cur_this, &key).unwrap_or(false)
+            };
+
+            if is_present {
+                let cur_this = vm.temp_roots[prev_temp];
+                let el = vm.get_element(cur_this, i);
+                vm.temp_roots.push(el);
+                let cur_this = vm.temp_roots[prev_temp];
+                let cur_cb = vm.temp_roots[prev_temp + 1];
+                let cur_this_arg = vm.temp_roots[prev_temp + 2];
+                let cur_el = vm.temp_roots.pop().unwrap();
+                let res = match vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        vm.temp_roots.truncate(prev_temp);
+                        return Err(e);
+                    }
+                };
+                vm.temp_roots.push(res);
+            } else {
+                vm.temp_roots.push(JsValue::hole());
+            }
         }
+        let mut mapped = Vec::with_capacity(vm.temp_roots.len() - mapped_start);
+        for k in mapped_start..vm.temp_roots.len() {
+            mapped.push(vm.temp_roots[k]);
+        }
+        vm.temp_roots.truncate(prev_temp);
         Ok(vm.alloc_array(mapped))
     });
     vm.set_property(array_proto, "map", map_fn);
@@ -258,69 +309,168 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
 
     let splice_fn = vm.alloc_native_function("splice", 2, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
-        let len_val = vm.get_property(obj, "length");
-        let len = len_val.to_number().unwrap_or(0.0).max(0.0) as i64;
+        let len_val = vm.get_property_result(obj, "length")?;
+        let len_num = vm.to_number_value(len_val)?;
+        let len = if len_num.is_nan() || len_num <= 0.0 {
+            0i64
+        } else if len_num >= 9007199254740991.0 {
+            9007199254740991i64
+        } else {
+            len_num.trunc() as i64
+        };
 
         let relative_start = if let Some(arg) = args.first() {
-            match vm.to_number_value(*arg) {
-                Ok(n) if n.is_nan() => 0i64,
-                Ok(n) => n.trunc() as i64,
-                Err(e) => return Err(e),
+            let n = vm.to_number_value(*arg)?;
+            if n.is_nan() {
+                0i64
+            } else if n == f64::NEG_INFINITY {
+                -9007199254740991i64
+            } else if n == f64::INFINITY {
+                len
+            } else {
+                n.trunc() as i64
             }
         } else {
             0i64
         };
 
-        let actual_start = if relative_start < 0 {
+        let actual_start = if args.is_empty() {
+            0i64
+        } else if relative_start < 0 {
             (len + relative_start).max(0)
         } else {
             relative_start.min(len)
         };
+
+        let insert_items = if args.len() > 2 { &args[2..] } else { &[] };
+        let insert_count = insert_items.len() as i64;
 
         let actual_delete_count = if args.is_empty() {
             0i64
         } else if args.len() == 1 {
             len - actual_start
         } else {
-            let dc = match vm.to_number_value(args[1]) {
-                Ok(n) if n.is_nan() => 0i64,
-                Ok(n) => n.trunc() as i64,
-                Err(e) => return Err(e),
+            let dc_num = vm.to_number_value(args[1])?;
+            let dc = if dc_num.is_nan() || dc_num <= 0.0 {
+                0i64
+            } else if dc_num >= 9007199254740991.0 {
+                9007199254740991i64
+            } else {
+                dc_num.trunc() as i64
             };
             dc.clamp(0, len - actual_start)
         };
 
-        let insert_items = if args.len() > 2 { &args[2..] } else { &[] };
-        let start_idx = actual_start as usize;
-        let delete_count = actual_delete_count as usize;
+        if len + insert_count - actual_delete_count > 9007199254740991 {
+            return Err(VmError::TypeError("Invalid array length".into()));
+        }
 
-        if let Some(ptr) = obj.as_object_ptr() {
+        // Fast path for plain dense arrays:
+        let is_plain_array = if let Some(ptr) = obj.as_object_ptr() {
+            let jsobj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Array(_) = &jsobj.kind {
+                let ctor = vm.get_property(obj, "constructor");
+                match vm.globals.get("Array") {
+                    Some(&arr_ctor) => ctor == arr_ctor || ctor.is_undefined(),
+                    None => true,
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if is_plain_array {
+            let start_idx = actual_start as usize;
+            let delete_count = actual_delete_count as usize;
+            let ptr = obj.as_object_ptr().unwrap();
             let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Array(elements) = &mut jsobj.kind {
+                let clamped_start = start_idx.min(elements.len());
+                let clamped_delete = delete_count.min(elements.len() - clamped_start);
                 let removed_elements: Vec<JsValue> = elements.splice(
-                    start_idx..start_idx + delete_count,
+                    clamped_start..clamped_start + clamped_delete,
                     insert_items.iter().copied(),
                 ).collect();
                 return Ok(vm.alloc_array(removed_elements));
             }
         }
 
-        let mut removed = Vec::with_capacity(delete_count);
-        for i in 0..delete_count {
-            removed.push(vm.get_element(obj, start_idx + i));
+        let ret_arr = vm.array_species_create(obj, actual_delete_count as usize)?;
+
+        // Copy deleted elements
+        let mut k = 0i64;
+        while k < actual_delete_count {
+            let from_key = (actual_start + k).to_string();
+            let from_present = vm.has_property(obj, &from_key)?;
+            if from_present {
+                let from_val = vm.get_property_result(obj, &from_key)?;
+                let to_key = k.to_string();
+                vm.create_data_property_or_throw(ret_arr, &to_key, from_val)?;
+            }
+            k += 1;
         }
-        let old_len = len as usize;
-        let mut all = Vec::with_capacity(old_len);
-        for i in 0..old_len {
-            all.push(vm.get_element(obj, i));
+        let del_count_js = if actual_delete_count <= i32::MAX as i64 {
+            JsValue::from_int32(actual_delete_count as i32)
+        } else {
+            JsValue::from_double(actual_delete_count as f64)
+        };
+        vm.set_property_result(ret_arr, "length", del_count_js)?;
+
+        // Shift elements
+        if insert_count < actual_delete_count {
+            let mut k = actual_start;
+            while k < len - actual_delete_count {
+                let from_key = (k + actual_delete_count).to_string();
+                let to_key = (k + insert_count).to_string();
+                let from_present = vm.has_property(obj, &from_key)?;
+                if from_present {
+                    let from_val = vm.get_property_result(obj, &from_key)?;
+                    vm.set_property_result(obj, &to_key, from_val)?;
+                } else {
+                    let _ = vm.delete_property(obj, &to_key);
+                }
+                k += 1;
+            }
+            let mut k = len;
+            while k > len - actual_delete_count + insert_count {
+                let to_key = (k - 1).to_string();
+                let _ = vm.delete_property(obj, &to_key);
+                k -= 1;
+            }
+        } else if insert_count > actual_delete_count {
+            let mut k = len - actual_delete_count;
+            while k > actual_start {
+                let from_key = (k + actual_delete_count - 1).to_string();
+                let to_key = (k + insert_count - 1).to_string();
+                let from_present = vm.has_property(obj, &from_key)?;
+                if from_present {
+                    let from_val = vm.get_property_result(obj, &from_key)?;
+                    vm.set_property_result(obj, &to_key, from_val)?;
+                } else {
+                    let _ = vm.delete_property(obj, &to_key);
+                }
+                k -= 1;
+            }
         }
-        all.splice(start_idx..start_idx + delete_count, insert_items.iter().copied());
-        for (i, v) in all.into_iter().enumerate() {
-            vm.set_element(obj, i, v);
+
+        // Insert items
+        for (idx, item) in insert_items.iter().enumerate() {
+            let to_key = (actual_start + idx as i64).to_string();
+            vm.set_property_result(obj, &to_key, *item)?;
         }
-        let new_len = (len - actual_delete_count + insert_items.len() as i64).max(0);
-        vm.set_property(obj, "length", JsValue::from_int32(new_len as i32));
-        Ok(vm.alloc_array(removed))
+
+        // Set length
+        let new_len = len - actual_delete_count + insert_count;
+        let new_len_js = if new_len <= i32::MAX as i64 {
+            JsValue::from_int32(new_len as i32)
+        } else {
+            JsValue::from_double(new_len as f64)
+        };
+        vm.set_property_result(obj, "length", new_len_js)?;
+
+        Ok(ret_arr)
     });
     vm.set_property(array_proto, "splice", splice_fn);
 

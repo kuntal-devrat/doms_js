@@ -56,6 +56,9 @@ impl Test262Runner {
                 .stack_size(4 * 1024 * 1024)
                 .spawn(move || {
                 for path in chunk {
+                    if runner_copy.config.verbose {
+                        eprintln!("[START] {}", path.display());
+                    }
                     let cat = Self::extract_category(&base_dir, &path);
                     let status = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runner_copy.execute_file(&path))) {
                         Ok(s) => s,
@@ -88,8 +91,7 @@ impl Test262Runner {
                             entry.passed += 1;
                             entry.total += 1;
                         }
-                        TestStatus::Fail(ref reason) => {
-                            eprintln!("FAIL: {} -> {}", path.display(), reason);
+                        TestStatus::Fail(_) => {
                             failed_c.fetch_add(1, Ordering::Relaxed);
                             entry.failed += 1;
                             entry.total += 1;
