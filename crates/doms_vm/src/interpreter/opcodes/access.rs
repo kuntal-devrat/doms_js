@@ -266,38 +266,80 @@ impl Vm {
     ) -> Result<(), VmError> {
                     let key = self.pop()?;
                     let obj = self.pop()?;
+                    if obj.is_sso_string() {
+                        let i = if key.is_int32() {
+                            key.as_int32().unwrap()
+                        } else {
+                            key.to_int32().unwrap_or(-1)
+                        };
+                        if i >= 0 {
+                            let idx = i as usize;
+                            let len = ((obj.0 >> 40) & 0x7) as usize;
+                            if idx < len {
+                                let payload = obj.0 & 0x0000_00FF_FFFF_FFFF;
+                                let byte = ((payload >> (idx * 8)) & 0xFF) as u8;
+                                let ch_str = self.alloc_string((byte as char).to_string());
+                                self.push(ch_str);
+                                return Ok(());
+                            }
+                        }
+                    }
                     if let Some(ptr) = obj.as_object_ptr() {
                         let jsobj = unsafe { &*(ptr as *mut JsObject) };
                         if let ObjectKind::Array(elements) = &jsobj.kind {
-                            if let Some(i) = key.to_int32() {
-                                if i >= 0 && (i as usize) < elements.len() {
-                                    let el = elements[i as usize];
-                                    if !el.is_hole() {
-                                        self.push(el);
-                                        return Ok(());
-                                    }
+                            let i = if key.is_int32() {
+                                key.as_int32().unwrap()
+                            } else {
+                                key.to_int32().unwrap_or(-1)
+                            };
+                            if i >= 0 && (i as usize) < elements.len() {
+                                let el = elements[i as usize];
+                                if !el.is_hole() {
+                                    self.push(el);
+                                    return Ok(());
                                 }
                             }
                         }
                         if let ObjectKind::String(s) = &jsobj.kind {
-                            if let Some(i) = key.to_int32() {
-                                if i >= 0 {
-                                    let idx = i as usize;
-                                    if let Some(ch) = s.chars().nth(idx) {
-                                        let ch_str = self.alloc_string(ch.to_string());
-                                        self.push(ch_str);
-                                        return Ok(());
-                                    }
+                            let i = if key.is_int32() {
+                                key.as_int32().unwrap()
+                            } else {
+                                key.to_int32().unwrap_or(-1)
+                            };
+                            if i >= 0 {
+                                let idx = i as usize;
+                                if let Some(ch) = s.chars().nth(idx) {
+                                    let ch_str = self.alloc_string(ch.to_string());
+                                    self.push(ch_str);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        if let ObjectKind::ConsString { length, .. } = &jsobj.kind {
+                            let i = if key.is_int32() {
+                                key.as_int32().unwrap()
+                            } else {
+                                key.to_int32().unwrap_or(-1)
+                            };
+                            if i >= 0 && (i as usize) < *length {
+                                let s = self.to_string_value(obj);
+                                if let Some(ch) = s.chars().nth(i as usize) {
+                                    let ch_str = self.alloc_string(ch.to_string());
+                                    self.push(ch_str);
+                                    return Ok(());
                                 }
                             }
                         }
                         if let ObjectKind::TypedArray(ta) = &jsobj.kind {
-                            if let Some(i) = key.to_int32() {
-                                if i >= 0 {
-                                    if let Some(val) = Self::read_typed_array_element(ta, i as usize) {
-                                        self.push(val);
-                                        return Ok(());
-                                    }
+                            let i = if key.is_int32() {
+                                key.as_int32().unwrap()
+                            } else {
+                                key.to_int32().unwrap_or(-1)
+                            };
+                            if i >= 0 {
+                                if let Some(val) = Self::read_typed_array_element(ta, i as usize) {
+                                    self.push(val);
+                                    return Ok(());
                                 }
                             }
                         }
@@ -343,19 +385,26 @@ impl Vm {
                     if let Some(ptr) = obj.as_object_ptr() {
                         let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
                         if let ObjectKind::Array(elements) = &mut jsobj.kind {
-                            if let Some(i) = key.to_int32() {
-                                if i >= 0 {
-                                    let idx = i as usize;
-                                    let is_existing = idx < elements.len() && !elements[idx].is_hole();
-                                    let is_standard_proto = jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
-                                    if (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 {
-                                        if idx >= elements.len() {
-                                            elements.resize(idx + 1, JsValue::hole());
-                                        }
+                            let i = if key.is_int32() {
+                                key.as_int32().unwrap()
+                            } else {
+                                key.to_int32().unwrap_or(-1)
+                            };
+                            if i >= 0 {
+                                let idx = i as usize;
+                                let is_existing = idx < elements.len() && !elements[idx].is_hole();
+                                let is_standard_proto = jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
+                                if (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 && !self.non_extensible_objects.contains(&obj) {
+                                    if idx < elements.len() {
                                         elements[idx] = val;
-                                        self.push(val);
-                                        return Ok(());
+                                    } else if idx == elements.len() {
+                                        elements.push(val);
+                                    } else {
+                                        elements.resize(idx + 1, JsValue::hole());
+                                        elements[idx] = val;
                                     }
+                                    self.push(val);
+                                    return Ok(());
                                 }
                             }
                         }

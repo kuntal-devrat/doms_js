@@ -4,6 +4,19 @@ use super::*;
 
 impl Vm {
     pub fn get_element(&mut self, obj: JsValue, index: usize) -> JsValue {
+        if obj.is_sso_string() {
+            let len = ((obj.0 >> 40) & 0x7) as usize;
+            if index < len {
+                let payload = obj.0 & 0x0000_00FF_FFFF_FFFF;
+                let byte = ((payload >> (index * 8)) & 0xFF) as u8;
+                return self.alloc_string((byte as char).to_string());
+            }
+            if let Some(proto) = self.string_proto {
+                let key = index.to_string();
+                return self.get_property_with_receiver(proto, &key, obj);
+            }
+            return JsValue::undefined();
+        }
         if let Some(ptr) = obj.as_object_ptr() {
             let jsobj = unsafe { &*(ptr as *mut JsObject) };
             if jsobj.accessors.is_some() || matches!(jsobj.kind, ObjectKind::Proxy { .. }) {
@@ -25,12 +38,38 @@ impl Vm {
                     return v;
                 }
             }
+            if let ObjectKind::String(s) = &jsobj.kind {
+                if let Some(ch) = s.chars().nth(index) {
+                    return self.alloc_string(ch.to_string());
+                }
+            }
+            if let ObjectKind::ConsString { length, .. } = &jsobj.kind {
+                if index < *length {
+                    let s = self.to_string_value(obj);
+                    if let Some(ch) = s.chars().nth(index) {
+                        return self.alloc_string(ch.to_string());
+                    }
+                }
+            }
         }
         let key = index.to_string();
         self.get_property(obj, &key)
     }
 
     pub fn get_element_result(&mut self, obj: JsValue, index: usize) -> Result<JsValue, VmError> {
+        if obj.is_sso_string() {
+            let len = ((obj.0 >> 40) & 0x7) as usize;
+            if index < len {
+                let payload = obj.0 & 0x0000_00FF_FFFF_FFFF;
+                let byte = ((payload >> (index * 8)) & 0xFF) as u8;
+                return Ok(self.alloc_string((byte as char).to_string()));
+            }
+            if let Some(proto) = self.string_proto {
+                let key = index.to_string();
+                return Ok(self.get_property_with_receiver(proto, &key, obj));
+            }
+            return Ok(JsValue::undefined());
+        }
         if let Some(ptr) = obj.as_object_ptr() {
             let jsobj = unsafe { &*(ptr as *mut JsObject) };
             if jsobj.accessors.is_some() || matches!(jsobj.kind, ObjectKind::Proxy { .. }) {
@@ -52,6 +91,19 @@ impl Vm {
                     return Ok(v);
                 }
             }
+            if let ObjectKind::String(s) = &jsobj.kind {
+                if let Some(ch) = s.chars().nth(index) {
+                    return Ok(self.alloc_string(ch.to_string()));
+                }
+            }
+            if let ObjectKind::ConsString { length, .. } = &jsobj.kind {
+                if index < *length {
+                    let s = self.to_string_value(obj);
+                    if let Some(ch) = s.chars().nth(index) {
+                        return Ok(self.alloc_string(ch.to_string()));
+                    }
+                }
+            }
         }
         let key = index.to_string();
         self.get_property_result(obj, &key)
@@ -69,6 +121,15 @@ impl Vm {
                 if index < elements.len() {
                     elements[index] = val;
                     return;
+                } else if !self.non_extensible_objects.contains(&obj) {
+                    if index == elements.len() {
+                        elements.push(val);
+                        return;
+                    } else if index < elements.len() + 1024 {
+                        elements.resize(index, JsValue::hole());
+                        elements.push(val);
+                        return;
+                    }
                 }
             }
             if let ObjectKind::TypedArray(ta) = &mut jsobj.kind {

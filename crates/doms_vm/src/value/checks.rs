@@ -47,7 +47,11 @@ impl JsValue {
 
     #[inline]
     pub fn is_empty_string(&self) -> bool {
-        if self.is_string() {
+        if self.is_sso_string() {
+            let len = ((self.0 >> 40) & 0x7) as usize;
+            return len == 0;
+        }
+        if (self.0 & TAG_MASK) == TAG_STRING {
             if let Some(ptr) = self.as_string_ptr() {
                 let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
                 if let crate::object::ObjectKind::String(ref s) = obj.kind {
@@ -91,7 +95,13 @@ impl JsValue {
 
     #[inline]
     pub fn is_string(&self) -> bool {
-        (self.0 & TAG_MASK) == TAG_STRING
+        let tag = self.0 & TAG_MASK;
+        tag == TAG_STRING || tag == TAG_SSO_STRING
+    }
+
+    #[inline]
+    pub fn is_sso_string(&self) -> bool {
+        (self.0 & TAG_MASK) == TAG_SSO_STRING
     }
 
     #[inline]
@@ -127,7 +137,7 @@ impl JsValue {
 
     #[inline]
     pub fn is_heap_ptr(&self) -> bool {
-        self.is_object() || self.is_string() || self.is_symbol()
+        self.is_object() || ((self.0 & TAG_MASK) == TAG_STRING) || self.is_symbol()
     }
 
     #[inline]
@@ -171,6 +181,10 @@ impl JsValue {
         if self.is_double() {
             let d = self.as_double().unwrap();
             return d != 0.0 && !d.is_nan();
+        }
+        if self.is_sso_string() {
+            let len = ((self.0 >> 40) & 0x7) as usize;
+            return len != 0;
         }
         if self.is_string() {
             if let Some(ptr) = self.as_string_ptr() {

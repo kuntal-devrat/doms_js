@@ -9,7 +9,14 @@ impl Trace for JsObject {
                 tracer.trace_ref(p);
             }
         }
-        for slot in &self.slots {
+        for slot in &self.in_object_slots {
+            if !slot.is_hole() {
+                if let Some(p) = slot.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
+        }
+        for slot in &self.extra_slots {
             if let Some(p) = slot.as_heap_ptr() {
                 tracer.trace_ref(p);
             }
@@ -86,6 +93,14 @@ impl Trace for JsObject {
             }
         }
         match &self.kind {
+            ObjectKind::ConsString { left, right, .. } => {
+                if let Some(p) = left.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+                if let Some(p) = right.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
             ObjectKind::Array(elements) => {
                 for el in elements {
                     if let Some(p) = el.as_heap_ptr() {
@@ -273,7 +288,12 @@ impl JsObject {
         if let Some(proto) = &mut self.prototype {
             visitor(proto);
         }
-        for slot in &mut self.slots {
+        for slot in &mut self.in_object_slots {
+            if !slot.is_hole() {
+                visitor(slot);
+            }
+        }
+        for slot in &mut self.extra_slots {
             visitor(slot);
         }
         if let Some(accs) = &mut self.accessors {
@@ -315,6 +335,10 @@ impl JsObject {
             }
         }
         match &mut self.kind {
+            ObjectKind::ConsString { left, right, .. } => {
+                visitor(left);
+                visitor(right);
+            }
             ObjectKind::Array(elements) => {
                 for el in elements {
                     visitor(el);

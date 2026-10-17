@@ -85,8 +85,8 @@ pub fn get_own_property_descriptor_internal(
                             let desc = vm.alloc_object();
                             let is_writ = !vm.non_writable_props.contains(&(target, "length".to_string()));
                             let len_val = if let Some(info) = vm.shapes.get_property_info(obj.shape_id, "length") {
-                                if let Some(val) = obj.slots.get(info.offset as usize) {
-                                    *val
+                                if let Some(val) = obj.get_slot(info.offset) {
+                                    val
                                 } else {
                                     JsValue::from_double(elements.len() as f64)
                                 }

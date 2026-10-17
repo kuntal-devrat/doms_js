@@ -1,5 +1,7 @@
 //! Nursery scavenging: Cheney copying collection and object forwarding.
 
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use super::*;
 
 impl Nursery {

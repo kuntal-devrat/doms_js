@@ -59,7 +59,47 @@ impl JsValue {
 
     #[inline]
     pub fn as_string_ptr(&self) -> Option<*mut u8> {
-        if self.is_string() { Some((self.0 & PAYLOAD_MASK) as *mut u8) } else { None }
+        if (self.0 & TAG_MASK) == TAG_STRING { Some((self.0 & PAYLOAD_MASK) as *mut u8) } else { None }
+    }
+
+    #[inline]
+    pub fn as_sso_string(&self) -> Option<String> {
+        self.with_sso_str(|s| s.to_string())
+    }
+
+    #[inline]
+    pub fn with_sso_str<R>(&self, f: impl FnOnce(&str) -> R) -> Option<R> {
+        if self.is_sso_string() {
+            let len = ((self.0 >> 40) & 0x7) as usize;
+            let mut bytes = [0u8; 5];
+            let payload = self.0 & 0x0000_00FF_FFFF_FFFF;
+            for i in 0..len {
+                bytes[i] = ((payload >> (i * 8)) & 0xFF) as u8;
+            }
+            let s = unsafe { std::str::from_utf8_unchecked(&bytes[..len]) };
+            Some(f(s))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn sso_equals_str(&self, other: &str) -> bool {
+        if !self.is_sso_string() {
+            return false;
+        }
+        let len = ((self.0 >> 40) & 0x7) as usize;
+        if other.len() != len {
+            return false;
+        }
+        let other_bytes = other.as_bytes();
+        let payload = self.0 & 0x0000_00FF_FFFF_FFFF;
+        for i in 0..len {
+            if ((payload >> (i * 8)) & 0xFF) as u8 != other_bytes[i] {
+                return false;
+            }
+        }
+        true
     }
 
     #[inline]

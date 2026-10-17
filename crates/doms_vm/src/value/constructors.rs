@@ -94,4 +94,20 @@ impl JsValue {
         let tag = self.0 & TAG_MASK;
         self.0 = tag | (new_ptr as u64 & PAYLOAD_MASK);
     }
+
+    /// Create an SSO (Small String Optimization) inline string if len <= 5 and ASCII.
+    #[inline]
+    pub fn try_from_sso_string(s: &str) -> Option<Self> {
+        let bytes = s.as_bytes();
+        if bytes.len() <= 5 && bytes.iter().all(|&b| b.is_ascii()) {
+            let mut payload = 0u64;
+            for (i, &b) in bytes.iter().enumerate() {
+                payload |= (b as u64) << (i * 8);
+            }
+            let len_bits = (bytes.len() as u64) << 40;
+            Some(Self(TAG_SSO_STRING | len_bits | payload))
+        } else {
+            None
+        }
+    }
 }

@@ -36,14 +36,42 @@ impl Vm {
             return Err(VmError::TypeError("Cannot convert a Symbol value to a number or string".into()));
         }
 
-        let a_is_str = a_prim.is_string() || (a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))));
-        let b_is_str = b_prim.is_string() || (b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))));
+        let a_is_str = a_prim.is_string() || (a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_) | ObjectKind::ConsString { .. })));
+        let b_is_str = b_prim.is_string() || (b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_) | ObjectKind::ConsString { .. })));
 
         if a_is_str || b_is_str {
-            let sa = self.to_string_value(a_prim);
-            let sb = self.to_string_value(b_prim);
-            let combined = format!("{}{}", sa, sb);
-            let res = self.alloc_string(combined);
+            let left_str_val = if a_is_str {
+                a_prim
+            } else {
+                let sa = self.to_string_value(a_prim);
+                self.alloc_string(sa)
+            };
+            self.temp_roots.push(left_str_val);
+
+            let right_str_val = if b_is_str {
+                b_prim
+            } else {
+                let sb = self.to_string_value(b_prim);
+                self.alloc_string(sb)
+            };
+            self.temp_roots.push(right_str_val);
+
+            let len_a = self.js_string_len(left_str_val);
+            let len_b = self.js_string_len(right_str_val);
+            let total_len = len_a + len_b;
+
+            let res = if len_a == 0 {
+                right_str_val
+            } else if len_b == 0 {
+                left_str_val
+            } else if total_len > 32 {
+                self.alloc_cons_string(left_str_val, right_str_val, total_len)
+            } else {
+                let sa = self.to_string_value(left_str_val);
+                let sb = self.to_string_value(right_str_val);
+                self.alloc_string(format!("{}{}", sa, sb))
+            };
+
             self.temp_roots.truncate(prev_temp);
             self.push(res);
         } else if let (Some(ba), Some(bb)) = (self.as_bigint_val(a_prim), self.as_bigint_val(b_prim)) {

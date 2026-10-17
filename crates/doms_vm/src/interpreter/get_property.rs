@@ -89,10 +89,10 @@ impl Vm {
                 if key == "length" {
                     let prop_info = self.shapes.get_property_info(obj.shape_id, "length");
                     if let Some(info) = prop_info {
-                        if let Some(val) = obj.slots.get(info.offset as usize) {
+                        if let Some(val) = obj.get_slot(info.offset) {
                             if let Some(n) = val.to_number() {
                                 if (n as usize) >= elements.len() {
-                                    return *val;
+                                    return val;
                                 }
                             }
                         }

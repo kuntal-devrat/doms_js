@@ -9,6 +9,11 @@ pub enum ObjectKind {
     Function(JsFunction),
     NativeFunction(NativeFunction),
     String(String),
+    ConsString {
+        left: JsValue,
+        right: JsValue,
+        length: usize,
+    },
     Error { name: String, message: String },
     Promise(JsPromise),
     Generator(JsGenerator),

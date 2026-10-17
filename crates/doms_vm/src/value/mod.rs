@@ -37,7 +37,8 @@ mod formatting;
 
 // ── Tag constants (upper 16 bits) ──
 
-pub const DOUBLE_LIMIT: u64 = 0xFFF9_0000_0000_0000;
+pub const TAG_SSO_STRING: u64 = 0xFFF8_0000_0000_0000;
+pub const DOUBLE_LIMIT: u64 = 0xFFF8_0000_0000_0000;
 
 pub const TAG_INT32: u64 = 0xFFF9_0000_0000_0000;
 pub const TAG_BOOLEAN: u64 = 0xFFFA_0000_0000_0000;

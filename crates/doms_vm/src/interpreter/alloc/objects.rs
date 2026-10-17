@@ -18,7 +18,16 @@ impl Vm {
     }
 
     pub fn alloc_string(&mut self, s: String) -> JsValue {
+        if let Some(sso) = JsValue::try_from_sso_string(&s) {
+            return sso;
+        }
         let obj = JsObject::new_string(ShapeRegistry::ROOT_SHAPE_ID, self.string_proto, s);
+        let ptr = self.allocate_js_object(obj);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_cons_string(&mut self, left: JsValue, right: JsValue, length: usize) -> JsValue {
+        let obj = JsObject::new_cons_string(ShapeRegistry::ROOT_SHAPE_ID, self.string_proto, left, right, length);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }

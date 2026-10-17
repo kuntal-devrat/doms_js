@@ -126,12 +126,19 @@ mod tests {
         let r2 = jit_fn.call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(42), JsValue::from_int32(43)]).unwrap();
         assert_eq!(r2.as_boolean(), Some(false));
 
-        // Strings with distinct allocations
+        // SSO strings: identical representation
         let s1 = vm.alloc_string("hello".to_string());
         let s2 = vm.alloc_string("hello".to_string());
-        assert_ne!(s1.0, s2.0); // Distinct heap pointers
+        assert_eq!(s1.0, s2.0); // Identical NaN-boxed SSO bits
         let r3 = jit_fn.call(&mut vm, JsValue::undefined(), &[s1, s2]).unwrap();
         assert_eq!(r3.as_boolean(), Some(true));
+
+        // Distinct heap allocations (> 5 bytes)
+        let h1 = vm.alloc_string("hello world".to_string());
+        let h2 = vm.alloc_string("hello world".to_string());
+        assert_ne!(h1.0, h2.0); // Distinct heap pointers
+        let r_heap = jit_fn.call(&mut vm, JsValue::undefined(), &[h1, h2]).unwrap();
+        assert_eq!(r_heap.as_boolean(), Some(true));
 
         let s3 = vm.alloc_string("world".to_string());
         let r4 = jit_fn.call(&mut vm, JsValue::undefined(), &[s1, s3]).unwrap();

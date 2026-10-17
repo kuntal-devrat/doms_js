@@ -2,11 +2,14 @@
 
 use super::*;
 
+pub const IN_OBJECT_SLOTS: usize = 4;
+
 #[derive(Debug, Clone)]
 pub struct JsObject {
     pub shape_id: ShapeId,
     pub prototype: Option<JsValue>,
-    pub slots: Vec<JsValue>,
+    pub in_object_slots: [JsValue; IN_OBJECT_SLOTS],
+    pub extra_slots: Vec<JsValue>,
     pub kind: ObjectKind,
     pub accessors: Option<Box<std::collections::HashMap<String, Accessor>>>,
     pub accessor_order: Option<Vec<String>>,
@@ -22,7 +25,8 @@ impl JsObject {
         Self {
             shape_id,
             prototype,
-            slots: Vec::new(),
+            in_object_slots: [JsValue::hole(); IN_OBJECT_SLOTS],
+            extra_slots: Vec::new(),
             kind,
             accessors: None,
             accessor_order: None,
@@ -122,6 +126,16 @@ impl JsObject {
         content: String,
     ) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::String(content))
+    }
+
+    pub fn new_cons_string(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        left: JsValue,
+        right: JsValue,
+        length: usize,
+    ) -> Self {
+        Self::new_with_kind(shape_id, prototype, ObjectKind::ConsString { left, right, length })
     }
 
     pub fn new_proxy(
@@ -323,15 +337,30 @@ impl JsObject {
 
     #[inline]
     pub fn get_slot(&self, offset: u32) -> Option<JsValue> {
-        self.slots.get(offset as usize).copied()
+        let idx = offset as usize;
+        if idx < IN_OBJECT_SLOTS {
+            let v = self.in_object_slots[idx];
+            if !v.is_hole() {
+                Some(v)
+            } else {
+                None
+            }
+        } else {
+            self.extra_slots.get(idx - IN_OBJECT_SLOTS).copied()
+        }
     }
 
     #[inline]
     pub fn set_slot(&mut self, offset: u32, val: JsValue) {
         let idx = offset as usize;
-        if idx >= self.slots.len() {
-            self.slots.resize(idx + 1, JsValue::undefined());
+        if idx < IN_OBJECT_SLOTS {
+            self.in_object_slots[idx] = val;
+        } else {
+            let extra_idx = idx - IN_OBJECT_SLOTS;
+            if extra_idx >= self.extra_slots.len() {
+                self.extra_slots.resize(extra_idx + 1, JsValue::undefined());
+            }
+            self.extra_slots[extra_idx] = val;
         }
-        self.slots[idx] = val;
     }
 }

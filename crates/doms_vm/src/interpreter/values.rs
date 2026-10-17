@@ -64,6 +64,9 @@ impl Vm {
     // ── String Coercion and JSON ──
 
     pub fn to_string_value(&self, val: JsValue) -> String {
+        if val.is_sso_string() {
+            return val.as_sso_string().unwrap_or_default();
+        }
         if val.is_undefined() {
             "undefined".to_string()
         } else if val.is_null() {
@@ -108,12 +111,41 @@ impl Vm {
                 }
             }
             "Symbol()".to_string()
-        } else if let Some(ptr) = val.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            match &obj.kind {
-                ObjectKind::String(s) | ObjectKind::StringObject(s) => s.clone(),
-                ObjectKind::NumberObject(n) => self.to_string_value(JsValue::from_double(*n)),
-                ObjectKind::BooleanObject(b) => self.to_string_value(JsValue::from_boolean(*b)),
+        } else if let Some(ptr) = val.as_heap_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            match &mut obj.kind {
+                ObjectKind::String(s) | ObjectKind::StringObject(s) => return s.clone(),
+                ObjectKind::ConsString { left, right, length } => {
+                    let mut result = String::with_capacity(*length);
+                    let mut stack = vec![*right, *left];
+                    while let Some(node) = stack.pop() {
+                        if node.is_sso_string() {
+                            if let Some(s) = node.as_sso_string() {
+                                result.push_str(&s);
+                            }
+                        } else if let Some(nptr) = node.as_heap_ptr() {
+                            let nobj = unsafe { &*(nptr as *mut JsObject) };
+                            match &nobj.kind {
+                                ObjectKind::String(s) | ObjectKind::StringObject(s) => {
+                                    result.push_str(s);
+                                }
+                                ObjectKind::ConsString { left: l, right: r, .. } => {
+                                    stack.push(*r);
+                                    stack.push(*l);
+                                }
+                                _ => {
+                                    result.push_str(&self.to_string_value(node));
+                                }
+                            }
+                        } else {
+                            result.push_str(&self.to_string_value(node));
+                        }
+                    }
+                    obj.kind = ObjectKind::String(result.clone());
+                    return result;
+                }
+                ObjectKind::NumberObject(n) => return self.to_string_value(JsValue::from_double(*n)),
+                ObjectKind::BooleanObject(b) => return self.to_string_value(JsValue::from_boolean(*b)),
                 ObjectKind::Array(elements) => {
                     let parts: Vec<String> = elements.iter().map(|e| self.to_string_value(*e)).collect();
                     parts.join(",")
@@ -214,5 +246,20 @@ impl Vm {
         } else {
             "null".to_string()
         }
+    }
+
+    pub fn js_string_len(&self, val: JsValue) -> usize {
+        if val.is_sso_string() {
+            return ((val.0 >> 40) & 0x7) as usize;
+        }
+        if let Some(ptr) = val.as_heap_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            match &obj.kind {
+                ObjectKind::ConsString { length, .. } => return *length,
+                ObjectKind::String(s) | ObjectKind::StringObject(s) => return s.encode_utf16().count(),
+                _ => {}
+            }
+        }
+        self.to_string_value(val).encode_utf16().count()
     }
 }

@@ -18,8 +18,14 @@ impl fmt::Debug for JsValue {
             write!(f, "{}f", self.as_double().unwrap())
         } else if self.is_object() {
             write!(f, "Object({:p})", self.as_object_ptr().unwrap())
+        } else if self.is_sso_string() {
+            write!(f, "SSOString(\"{}\")", self.as_sso_string().unwrap_or_default())
         } else if self.is_string() {
-            write!(f, "String({:p})", self.as_string_ptr().unwrap())
+            if let Some(ptr) = self.as_string_ptr() {
+                write!(f, "String({:p})", ptr)
+            } else {
+                write!(f, "String(?)")
+            }
         } else if self.is_symbol() {
             write!(f, "Symbol({:p})", self.as_heap_ptr().unwrap())
         } else {
@@ -47,8 +53,14 @@ impl fmt::Display for JsValue {
             }
         } else if self.is_object() {
             write!(f, "[object Object]")
+        } else if self.is_sso_string() {
+            write!(f, "{}", self.as_sso_string().unwrap_or_default())
         } else if self.is_string() {
-            write!(f, "<string@{:p}>", self.as_string_ptr().unwrap())
+            if let Some(ptr) = self.as_string_ptr() {
+                write!(f, "<string@{:p}>", ptr)
+            } else {
+                write!(f, "<string>")
+            }
         } else {
             write!(f, "<unknown>")
         }
