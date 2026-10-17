@@ -252,15 +252,25 @@ impl Vm {
                     }
                 }
                 ObjectKind::Map(entries) => {
-                    for (k, v) in entries {
-                        mark_val(*k, &mut worklist, &mut live);
-                        mark_val(*v, &mut worklist, &mut live);
+                    for entry in entries {
+                        if let Some((k, v)) = entry {
+                            mark_val(*k, &mut worklist, &mut live);
+                            mark_val(*v, &mut worklist, &mut live);
+                        }
                     }
                 }
                 ObjectKind::Set(entries) => {
                     for v in entries {
-                        mark_val(*v, &mut worklist, &mut live);
+                        if let Some(v) = v {
+                            mark_val(*v, &mut worklist, &mut live);
+                        }
                     }
+                }
+                ObjectKind::MapIterator { map, .. } => {
+                    mark_val(*map, &mut worklist, &mut live);
+                }
+                ObjectKind::SetIterator { set, .. } => {
+                    mark_val(*set, &mut worklist, &mut live);
                 }
                 ObjectKind::WeakMap(entries) => {
                     for (k, v) in entries {

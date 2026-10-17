@@ -1,5 +1,6 @@
 use super::{ParseError, Parser};
 use crate::ast::*;
+use crate::TokenKind;
 
 impl<'a> Parser<'a> {
     pub(crate) fn check_sub_statement(&self, stmt: &Statement, allow_sloppy_func: bool) -> Result<(), ParseError> {
@@ -433,7 +434,13 @@ impl<'a> Parser<'a> {
 
     fn validate_assignment_pattern_inner(&self, expr: &Expression) -> Result<(), ParseError> {
         match expr {
-            Expression::Identifier(_) | Expression::Member { .. } | Expression::Index { .. } => Ok(()),
+            Expression::Identifier(name) => {
+                if self.is_strict && (name == "eval" || name == "arguments") {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(name.clone()), self.current.line, self.current.col));
+                }
+                Ok(())
+            }
+            Expression::Member { .. } | Expression::Index { .. } => Ok(()),
             Expression::Grouping(inner) => self.validate_assignment_pattern_inner(inner),
             Expression::Array(elements) => {
                 let mut has_rest = false;
@@ -445,12 +452,20 @@ impl<'a> Parser<'a> {
                         Expression::Literal(Literal::Hole) => {}
                         Expression::Spread(inner) => {
                             has_rest = true;
-                            if matches!(&**inner, Expression::Assignment { .. }) {
+                            if matches!(&**inner, Expression::Assignment { .. } | Expression::MemberAssignment { .. } | Expression::IndexAssignment { .. } | Expression::DestructuringAssignment { .. }) {
                                 return Err(ParseError::General("Rest element cannot have an initializer".into()));
                             }
                             self.validate_assignment_pattern_inner(inner)?;
                         }
-                        Expression::Assignment { .. } => {}
+                        Expression::Assignment { target, .. } => {
+                            if self.is_strict && (target == "eval" || target == "arguments") {
+                                return Err(ParseError::UnexpectedToken(TokenKind::Ident(target.clone()), self.current.line, self.current.col));
+                            }
+                        }
+                        Expression::MemberAssignment { .. } | Expression::IndexAssignment { .. } => {}
+                        Expression::DestructuringAssignment { pattern, .. } => {
+                            self.validate_assignment_pattern_inner(pattern)?;
+                        }
                         other => {
                             self.validate_assignment_pattern_inner(other)?;
                         }
@@ -459,14 +474,24 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             Expression::Object(props) => {
+                let mut has_rest = false;
                 for prop in props {
+                    if has_rest {
+                        return Err(ParseError::General("Elements cannot follow rest element".into()));
+                    }
                     match prop {
                         ObjectProperty::KeyValue(_key, val) => {
                             if matches!(val, Expression::MethodExpr { .. }) {
                                 return Err(ParseError::General("Object pattern cannot contain methods".into()));
                             }
-                            if let Expression::Assignment { .. } = val {
+                            if let Expression::Assignment { target, .. } = val {
+                                if self.is_strict && (target == "eval" || target == "arguments") {
+                                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(target.clone()), self.current.line, self.current.col));
+                                }
+                            } else if matches!(val, Expression::MemberAssignment { .. } | Expression::IndexAssignment { .. }) {
                                 // Default initializer allowed in object pattern
+                            } else if let Expression::DestructuringAssignment { pattern, .. } = val {
+                                self.validate_assignment_pattern_inner(pattern)?;
                             } else {
                                 self.validate_assignment_pattern_inner(val)?;
                             }
@@ -475,6 +500,7 @@ impl<'a> Parser<'a> {
                             return Err(ParseError::General("Object pattern cannot contain getters or setters".into()));
                         }
                         ObjectProperty::Spread(expr) => {
+                            has_rest = true;
                             self.validate_assignment_pattern_inner(expr)?;
                         }
                     }

@@ -51,6 +51,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
                 ObjectKind::Date(_) => "Date",
                 ObjectKind::Map(_) => "Map",
                 ObjectKind::Set(_) => "Set",
+                ObjectKind::MapIterator { .. } => "Map Iterator",
+                ObjectKind::SetIterator { .. } => "Set Iterator",
                 ObjectKind::WeakMap(_) => "WeakMap",
                 ObjectKind::WeakSet(_) => "WeakSet",
                 ObjectKind::BigInt(_) => "BigInt",

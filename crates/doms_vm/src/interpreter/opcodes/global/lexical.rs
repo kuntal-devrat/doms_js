@@ -22,7 +22,7 @@ impl Vm {
                 VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)),
                 target_depth,
             )?;
-            return Ok(Some(JsValue::undefined()));
+            return Ok(None);
         }
         self.global_lexicals.insert(name, JsValue::undefined());
         Ok(None)
@@ -47,7 +47,7 @@ impl Vm {
                 VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)),
                 target_depth,
             )?;
-            return Ok(Some(JsValue::undefined()));
+            return Ok(None);
         }
         self.global_lexicals.insert(name.clone(), JsValue::undefined());
         self.const_bindings.insert(name);
@@ -64,7 +64,18 @@ impl Vm {
             _ => return Err(VmError::TypeError("Global name must be string".into())),
         };
         let val = *self.peek()?;
-        self.global_lexicals.insert(name.clone(), val);
+        let mut in_scope = false;
+        let scopes = self.frames.last().map(|f| f.scopes.clone()).unwrap_or_default();
+        for scope_val in scopes.iter().rev() {
+            if scope_val.is_object() && self.has_property(*scope_val, &name).unwrap_or(false) {
+                self.set_property(*scope_val, &name, val);
+                in_scope = true;
+                break;
+            }
+        }
+        if !in_scope {
+            self.global_lexicals.insert(name.clone(), val);
+        }
         self.const_bindings.insert(name);
         Ok(())
     }

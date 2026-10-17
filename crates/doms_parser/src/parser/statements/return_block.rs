@@ -22,11 +22,14 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_block_statement(&mut self) -> Result<Statement, ParseError> {
         self.expect(TokenKind::LBrace)?;
+        let prev_single = self.in_single_statement_context;
+        self.in_single_statement_context = false;
         let mut stmts = Vec::new();
         while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
             stmts.push(self.parse_statement()?);
         }
         self.expect(TokenKind::RBrace)?;
+        self.in_single_statement_context = prev_single;
         self.validate_block_declarations(&stmts)?;
         Ok(Statement::Block(stmts))
     }

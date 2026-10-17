@@ -11,8 +11,8 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Set(elements) = &mut obj.kind {
-                if !elements.iter().any(|el| crate::object::js_values_equal(*el, val)) {
-                    elements.push(val);
+                if !elements.iter().any(|el| el.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, val))) {
+                    elements.push(Some(val));
                 }
                 return Ok(this);
             }
@@ -25,7 +25,7 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Set(elements) = &obj.kind {
-                return Ok(JsValue::from_boolean(elements.iter().any(|el| crate::object::js_values_equal(*el, val))));
+                return Ok(JsValue::from_boolean(elements.iter().any(|el| el.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, val)))));
             }
         }
         Err(VmError::TypeError("Method Set.prototype.has called on incompatible receiver".into()))
@@ -36,9 +36,13 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Set(elements) = &mut obj.kind {
-                if let Some(idx) = elements.iter().position(|el| crate::object::js_values_equal(*el, val)) {
-                    elements.remove(idx);
-                    return Ok(JsValue::from_boolean(true));
+                for el in elements.iter_mut() {
+                    if let Some(e) = el {
+                        if crate::object::js_values_equal(*e, val) {
+                            *el = None;
+                            return Ok(JsValue::from_boolean(true));
+                        }
+                    }
                 }
                 return Ok(JsValue::from_boolean(false));
             }
@@ -50,7 +54,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Set(elements) = &mut obj.kind {
-                elements.clear();
+                for el in elements.iter_mut() {
+                    *el = None;
+                }
                 return Ok(JsValue::undefined());
             }
         }
@@ -63,18 +69,26 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
             return Err(VmError::TypeError("Callback is not a function".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let elements = if let Some(ptr) = this.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Set(elements) = &obj.kind {
-                elements.clone()
+        let mut idx = 0;
+        loop {
+            let el = if let Some(ptr) = this.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Set(elements) = &obj.kind {
+                    if idx < elements.len() {
+                        elements[idx]
+                    } else {
+                        break;
+                    }
+                } else {
+                    return Err(VmError::TypeError("Method Set.prototype.forEach called on incompatible receiver".into()));
+                }
             } else {
                 return Err(VmError::TypeError("Method Set.prototype.forEach called on incompatible receiver".into()));
+            };
+            idx += 1;
+            if let Some(el) = el {
+                let _ = vm.call(cb, this_arg, &[el, el, this])?;
             }
-        } else {
-            return Err(VmError::TypeError("Method Set.prototype.forEach called on incompatible receiver".into()));
-        };
-        for el in elements {
-            let _ = vm.call(cb, this_arg, &[el, el, this])?;
         }
         Ok(JsValue::undefined())
     });
@@ -82,8 +96,8 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
     let set_values = vm.alloc_native_function("values", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Set(elements) = &obj.kind {
-                return Ok(vm.alloc_iterator(elements.clone()));
+            if let ObjectKind::Set(_) = &obj.kind {
+                return Ok(vm.alloc_set_iterator(this, SetIterationKind::Value));
             }
         }
         Err(VmError::TypeError("Method Set.prototype.values called on incompatible receiver".into()))
@@ -92,9 +106,8 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
     let set_entries = vm.alloc_native_function("entries", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Set(elements) = &obj.kind {
-                let items: Vec<JsValue> = elements.iter().map(|el| vm.alloc_array(vec![*el, *el])).collect();
-                return Ok(vm.alloc_iterator(items));
+            if let ObjectKind::Set(_) = &obj.kind {
+                return Ok(vm.alloc_set_iterator(this, SetIterationKind::KeyValue));
             }
         }
         Err(VmError::TypeError("Method Set.prototype.entries called on incompatible receiver".into()))
@@ -104,7 +117,8 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Set(elements) = &obj.kind {
-                return Ok(JsValue::from_int32(elements.len() as i32));
+                let count = elements.iter().filter(|el| el.is_some()).count();
+                return Ok(JsValue::from_int32(count as i32));
             }
         }
         Err(VmError::TypeError("Method get Set.prototype.size called on incompatible receiver".into()))

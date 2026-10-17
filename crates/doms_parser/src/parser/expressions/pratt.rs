@@ -177,6 +177,7 @@ impl<'a> Parser<'a> {
                         lhs = Expression::IndexAssignment { object, index, value: Box::new(value) };
                     }
                     p @ Expression::Array(_) | p @ Expression::Object(_) if opt_bin_op.is_none() => {
+                        self.validate_assignment_pattern(&p)?;
                         lhs = Expression::DestructuringAssignment {
                             pattern: Box::new(p),
                             value: Box::new(value),

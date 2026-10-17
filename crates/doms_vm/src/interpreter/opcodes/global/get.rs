@@ -19,7 +19,7 @@ impl Vm {
                     VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
                     target_depth,
                 )?;
-                return Ok(Some(JsValue::undefined()));
+                return Ok(None);
             }
             self.push(val);
         } else {
@@ -44,7 +44,7 @@ impl Vm {
                     VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
                     target_depth,
                 )?;
-                return Ok(Some(JsValue::undefined()));
+                return Ok(None);
             }
             self.push(val);
         } else {

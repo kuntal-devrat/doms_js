@@ -21,9 +21,9 @@ pub(crate) fn create_array_iterator(vm: &mut Vm, target: JsValue, kind: IterKind
             *i += 1;
             let val = match kind {
                 IterKind::Keys => JsValue::from_int32(curr as i32),
-                IterKind::Values => vm.get_element(target, curr),
+                IterKind::Values => vm.get_element_result(target, curr)?,
                 IterKind::Entries => {
-                    let el = vm.get_element(target, curr);
+                    let el = vm.get_element_result(target, curr)?;
                     vm.alloc_array(vec![JsValue::from_int32(curr as i32), el])
                 }
             };

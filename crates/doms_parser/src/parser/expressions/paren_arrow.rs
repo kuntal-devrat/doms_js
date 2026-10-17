@@ -23,6 +23,8 @@ impl<'a> Parser<'a> {
                     }
                     return Err(ParseError::UnexpectedToken(TokenKind::RParen, line, col));
                 }
+                let old_in = self.allow_in;
+                self.allow_in = true;
                 let mut exprs = Vec::new();
                 let mut rest_param = None;
                 if self.match_token(&TokenKind::DotDotDot)? {
@@ -43,6 +45,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(TokenKind::RParen)?;
+                self.allow_in = old_in;
                 if !self.current.has_preceding_line_terminator && self.match_token(&TokenKind::FatArrow)? {
                     let mut params = Vec::new();
                     let mut defaults = Vec::new();

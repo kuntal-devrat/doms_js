@@ -19,7 +19,7 @@ impl Vm {
                             VmError::TypeError(format!("Assignment to constant variable {}", name)),
                             target_depth,
                         )?;
-                        return Ok(Some(JsValue::undefined()));
+                        return Ok(None);
                     }
                     let aliases_opt = self.frames.iter().rev().find_map(|f| f.chunk.export_aliases.get(&name).cloned());
                     if let Some(aliases) = aliases_opt {
@@ -55,21 +55,32 @@ impl Vm {
                             }
                         }
                     }
-                    if !self.is_strict && !self.global_lexicals.contains_key(&name) {
-                        if self.globals.contains_key(&name) {
-                            self.globals.insert(name.clone(), val);
+                    let mut in_scope = false;
+                    let scopes = self.frames.last().map(|f| f.scopes.clone()).unwrap_or_default();
+                    for scope_val in scopes.iter().rev() {
+                        if scope_val.is_object() && self.has_property(*scope_val, &name).unwrap_or(false) {
+                            self.set_property(*scope_val, &name, val);
+                            in_scope = true;
+                            break;
                         }
-                        if !self.is_module {
-                            self.set_property(self.global_object, &name, val);
-                        }
-                    } else if let Some(lex) = self.global_lexicals.get_mut(&name) {
-                        *lex = val;
-                    } else {
-                        if self.globals.contains_key(&name) {
-                            self.globals.insert(name.clone(), val);
-                        }
-                        if !self.is_module {
-                            self.set_property(self.global_object, &name, val);
+                    }
+                    if !in_scope {
+                        if !self.is_strict && !self.global_lexicals.contains_key(&name) {
+                            if self.globals.contains_key(&name) {
+                                self.globals.insert(name.clone(), val);
+                            }
+                            if !self.is_module {
+                                self.set_property(self.global_object, &name, val);
+                            }
+                        } else if let Some(lex) = self.global_lexicals.get_mut(&name) {
+                            *lex = val;
+                        } else {
+                            if self.globals.contains_key(&name) {
+                                self.globals.insert(name.clone(), val);
+                            }
+                            if !self.is_module {
+                                self.set_property(self.global_object, &name, val);
+                            }
                         }
                     }
         Ok(None)

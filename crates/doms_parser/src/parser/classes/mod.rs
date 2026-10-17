@@ -1,4 +1,4 @@
-use super::{ParseError, Parser};
+use super::{is_strict_reserved_word, ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::TokenKind;
 use std::collections::HashSet;

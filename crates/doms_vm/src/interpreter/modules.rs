@@ -82,11 +82,7 @@ impl Vm {
 
         // All validations passed! Instantiate bindings:
         for name in &chunk.top_lex_names {
-            if self.is_module {
-                self.global_lexicals.insert(name.clone(), JsValue::uninitialized());
-            } else {
-                self.global_lexicals.insert(name.clone(), JsValue::undefined());
-            }
+            self.global_lexicals.insert(name.clone(), JsValue::uninitialized());
         }
 
         let in_eval = self.in_eval;

@@ -15,7 +15,7 @@ impl Compiler {
     pub(crate) fn compile_statement(&mut self, stmt: &Statement, is_last: bool) -> Result<(), CompileError> {
         match stmt {
             Statement::Expression(expr) => {
-                if !self.is_in_function {
+                if !self.is_in_function && !self.internal_statements {
                     self.chunk.emit(OpCode::Pop, 0);
                     self.compile_expression(expr)?;
                 } else {
@@ -94,7 +94,7 @@ impl Compiler {
                 let def = Self::compile_function(Some(name.clone()), params.clone(), body, self.is_strict)?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
-                if self.symbols.scope_depth > 0 {
+                if self.is_in_function && self.symbols.scope_depth > 0 {
                     let slot = self.symbols.define_local(name.clone());
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
@@ -108,7 +108,7 @@ impl Compiler {
                 let def = Self::compile_function(Some(name.clone()), params.clone(), body, self.is_strict)?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateAsyncFunction(const_idx), 0);
-                if self.symbols.scope_depth > 0 {
+                if self.is_in_function && self.symbols.scope_depth > 0 {
                     let slot = self.symbols.define_local(name.clone());
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
@@ -122,7 +122,7 @@ impl Compiler {
                 let def = Self::compile_function_full(Some(name.clone()), params.clone(), body, self.is_strict, true, false, false)?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateGenerator(const_idx), 0);
-                if self.symbols.scope_depth > 0 {
+                if self.is_in_function && self.symbols.scope_depth > 0 {
                     let slot = self.symbols.define_local(name.clone());
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
@@ -136,7 +136,7 @@ impl Compiler {
                 let def = Self::compile_function_full(Some(name.clone()), params.clone(), body, self.is_strict, true, false, false)?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateAsyncGenerator(const_idx), 0);
-                if self.symbols.scope_depth > 0 {
+                if self.is_in_function && self.symbols.scope_depth > 0 {
                     let slot = self.symbols.define_local(name.clone());
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);

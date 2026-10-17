@@ -82,7 +82,7 @@ impl Vm {
                             match vm.call(on_fulfilled, JsValue::undefined(), &[val]) {
                                 Ok(res) => vm.resolve_promise(next_p, res),
                                 Err(e) => {
-                                    let err_val = vm.alloc_string(e.to_string());
+                                    let err_val = vm.vm_error_to_js_value(&e);
                                     vm.reject_promise(next_p, err_val);
                                 }
                             }
@@ -105,7 +105,7 @@ impl Vm {
                             match vm.call(on_rejected, JsValue::undefined(), &[err]) {
                                 Ok(res) => vm.resolve_promise(next_p, res),
                                 Err(e) => {
-                                    let err_val = vm.alloc_string(e.to_string());
+                                    let err_val = vm.vm_error_to_js_value(&e);
                                     vm.reject_promise(next_p, err_val);
                                 }
                             }
@@ -128,7 +128,7 @@ impl Vm {
                             match vm.call(on_fulfilled, JsValue::undefined(), &[val]) {
                                 Ok(res) => vm.resolve_promise(next_p, res),
                                 Err(e) => {
-                                    let err_val = vm.alloc_string(e.to_string());
+                                    let err_val = vm.vm_error_to_js_value(&e);
                                     vm.reject_promise(next_p, err_val);
                                 }
                             }
@@ -150,7 +150,7 @@ impl Vm {
                             match vm.call(on_rejected, JsValue::undefined(), &[err]) {
                                 Ok(res) => vm.resolve_promise(next_p, res),
                                 Err(e) => {
-                                    let err_val = vm.alloc_string(e.to_string());
+                                    let err_val = vm.vm_error_to_js_value(&e);
                                     vm.reject_promise(next_p, err_val);
                                 }
                             }

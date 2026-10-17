@@ -8,15 +8,17 @@ impl<'a> Parser<'a> {
             TokenKind::Class => self.parse_class_decl(),
             TokenKind::Let => {
                 if !self.is_strict {
-                    if self.in_single_statement_context {
-                        if self.peeked.kind == TokenKind::LBracket {
-                            self.parse_var_decl(VarKind::Let)
-                        } else {
-                            let expr = self.parse_expression(0)?;
-                            self.consume_semicolon()?;
-                            Ok(Statement::Expression(expr))
-                        }
-                    } else if matches!(self.peeked.kind, TokenKind::Ident(_) | TokenKind::LBracket | TokenKind::LBrace | TokenKind::Async | TokenKind::Await | TokenKind::Yield) {
+                    if self.peeked.kind == TokenKind::LBracket {
+                        self.parse_var_decl(VarKind::Let)
+                    } else if self.peeked.has_preceding_line_terminator {
+                        let expr = self.parse_expression(0)?;
+                        self.consume_semicolon()?;
+                        Ok(Statement::Expression(expr))
+                    } else if self.in_single_statement_context {
+                        let expr = self.parse_expression(0)?;
+                        self.consume_semicolon()?;
+                        Ok(Statement::Expression(expr))
+                    } else if matches!(self.peeked.kind, TokenKind::Ident(_) | TokenKind::LBrace | TokenKind::Async | TokenKind::Await | TokenKind::Yield) {
                         self.parse_var_decl(VarKind::Let)
                     } else {
                         let expr = self.parse_expression(0)?;

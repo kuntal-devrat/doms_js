@@ -29,7 +29,8 @@ impl<'a> Parser<'a> {
         };
         self.expect(TokenKind::LParen)?;
 
-        if self.check(&TokenKind::Async)
+        if !is_await
+            && self.check(&TokenKind::Async)
             && matches!(&self.peeked.kind, TokenKind::Ident(s) if s == "of")
             && !self.peeked.has_escape
         {
@@ -85,8 +86,7 @@ impl<'a> Parser<'a> {
                     }
                     let right = self.parse_expression(0)?;
                     self.expect(TokenKind::RParen)?;
-                    let body = Box::new(self.parse_statement()?);
-                    self.check_sub_statement(&body, false)?;
+                    let body = Box::new(self.parse_sub_statement(false)?);
 
                     if var_kind == Some(VarKind::Let) || var_kind == Some(VarKind::Const) {
                         let mut body_vars = Vec::new();
@@ -105,8 +105,7 @@ impl<'a> Parser<'a> {
                     self.advance()?; // of
                     let right = self.parse_expression(1)?;
                     self.expect(TokenKind::RParen)?;
-                    let body = Box::new(self.parse_statement()?);
-                    self.check_sub_statement(&body, false)?;
+                    let body = Box::new(self.parse_sub_statement(false)?);
 
                     if var_kind == Some(VarKind::Let) || var_kind == Some(VarKind::Const) {
                         let mut body_vars = Vec::new();
@@ -189,8 +188,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Semicolon)?;
                 let update = if self.check(&TokenKind::RParen) { None } else { Some(self.parse_expression(0)?) };
                 self.expect(TokenKind::RParen)?;
-                let body = Box::new(self.parse_statement()?);
-                self.check_sub_statement(&body, false)?;
+                let body = Box::new(self.parse_sub_statement(false)?);
                 return Ok(Statement::For { init, condition, update, body });
             }
 
@@ -204,8 +202,7 @@ impl<'a> Parser<'a> {
                 }
                 let right = self.parse_expression(0)?;
                 self.expect(TokenKind::RParen)?;
-                let body = Box::new(self.parse_statement()?);
-                self.check_sub_statement(&body, false)?;
+                let body = Box::new(self.parse_sub_statement(false)?);
 
                 if var_kind == Some(VarKind::Let) || var_kind == Some(VarKind::Const) {
                     let mut body_vars = Vec::new();
@@ -221,8 +218,7 @@ impl<'a> Parser<'a> {
                 self.advance()?; // of
                 let right = self.parse_expression(1)?;
                 self.expect(TokenKind::RParen)?;
-                let body = Box::new(self.parse_statement()?);
-                self.check_sub_statement(&body, false)?;
+                let body = Box::new(self.parse_sub_statement(false)?);
 
                 if var_kind == Some(VarKind::Let) || var_kind == Some(VarKind::Const) {
                     let mut body_vars = Vec::new();
@@ -274,8 +270,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::Semicolon)?;
             let update = if self.check(&TokenKind::RParen) { None } else { Some(self.parse_expression(0)?) };
             self.expect(TokenKind::RParen)?;
-            let body = Box::new(self.parse_statement()?);
-            self.check_sub_statement(&body, false)?;
+            let body = Box::new(self.parse_sub_statement(false)?);
 
             if kind != VarKind::Var {
                 let mut body_vars = Vec::new();
@@ -310,8 +305,7 @@ impl<'a> Parser<'a> {
                 self.validate_assignment_pattern(&expr)?;
                 let right = self.parse_expression(0)?;
                 self.expect(TokenKind::RParen)?;
-                let body = Box::new(self.parse_statement()?);
-                self.check_sub_statement(&body, false)?;
+                let body = Box::new(self.parse_sub_statement(false)?);
                 let mut unwrapped = &expr;
                 while let Expression::Grouping(inner) = unwrapped {
                     unwrapped = inner;
@@ -335,8 +329,7 @@ impl<'a> Parser<'a> {
                 self.validate_assignment_pattern(&expr)?;
                 let right = self.parse_expression(1)?;
                 self.expect(TokenKind::RParen)?;
-                let body = Box::new(self.parse_statement()?);
-                self.check_sub_statement(&body, false)?;
+                let body = Box::new(self.parse_sub_statement(false)?);
                 let mut unwrapped = &expr;
                 while let Expression::Grouping(inner) = unwrapped {
                     unwrapped = inner;
@@ -366,8 +359,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Semicolon)?;
         let update = if self.check(&TokenKind::RParen) { None } else { Some(self.parse_expression(0)?) };
         self.expect(TokenKind::RParen)?;
-        let body = Box::new(self.parse_statement()?);
-        self.check_sub_statement(&body, false)?;
+        let body = Box::new(self.parse_sub_statement(false)?);
         Ok(Statement::For { init, condition, update, body })
     }
 }

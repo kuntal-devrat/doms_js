@@ -10,18 +10,33 @@ impl Compiler {
         target: &str,
         value: &Expression,
     ) -> Result<(), CompileError> {
-        match value {
-            Expression::Conditional { condition, then_expr, else_expr } if !target.starts_with('@') => {
-                self.compile_conditional_with_name(condition, then_expr, else_expr, Some(target))?;
+        let inferred_name = if let Some(stripped) = target.strip_prefix("@name:") {
+            let parts: Vec<&str> = stripped.split(':').collect();
+            if !parts.is_empty() {
+                Some(parts[0])
+            } else {
+                None
             }
-            Expression::ClassExpr(class_def) if !target.starts_with('@') && class_def.name.is_none() => {
-                self.compile_class_definition_with_name(class_def, Some(target.to_string()))?;
+        } else if !target.starts_with('@') {
+            Some(target)
+        } else {
+            None
+        };
+
+        match value {
+            Expression::Conditional { condition, then_expr, else_expr } if inferred_name.is_some() => {
+                self.compile_conditional_with_name(condition, then_expr, else_expr, inferred_name)?;
+            }
+            Expression::ClassExpr(class_def) if inferred_name.is_some() && class_def.name.is_none() => {
+                self.compile_class_definition_with_name(class_def, inferred_name.map(|s| s.to_string()))?;
             }
             _ => {
                 self.compile_expression(value)?;
-                if !target.starts_with('@') && Self::is_anonymous_function_definition(value) {
-                    let name_idx = self.chunk.add_constant(Constant::String(target.to_string()));
-                    self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                if let Some(name) = inferred_name {
+                    if Self::is_anonymous_function_definition(value) {
+                        let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+                        self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                    }
                 }
             }
         }
@@ -205,9 +220,12 @@ impl Compiler {
             &mut stmts,
         );
 
+        let prev_internal = self.internal_statements;
+        self.internal_statements = true;
         for stmt in &stmts {
             self.compile_statement(stmt, false)?;
         }
+        self.internal_statements = prev_internal;
 
         Ok(())
     }

@@ -29,7 +29,7 @@
 //! Each `register_*` function is called from [`register_builtins`] below.
 
 use crate::interpreter::{PropertyKeyVal, Vm, VmError};
-use crate::object::{Accessor, JsObject, JsTypedArray, NativeFn, ObjectKind, TypedArrayKind};
+use crate::object::{Accessor, JsObject, JsTypedArray, MapIterationKind, NativeFn, ObjectKind, SetIterationKind, TypedArrayKind};
 use crate::value::JsValue;
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, One, Signed, Zero};

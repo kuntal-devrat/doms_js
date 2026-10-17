@@ -11,9 +11,11 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Map(entries) = &obj.kind {
-                for (k, v) in entries {
-                    if crate::object::js_values_equal(*k, key) {
-                        return Ok(*v);
+                for entry in entries {
+                    if let Some((k, v)) = entry {
+                        if crate::object::js_values_equal(*k, key) {
+                            return Ok(*v);
+                        }
                     }
                 }
                 return Ok(JsValue::undefined());
@@ -29,12 +31,14 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Map(entries) = &mut obj.kind {
                 for entry in entries.iter_mut() {
-                    if crate::object::js_values_equal(entry.0, key) {
-                        entry.1 = val;
-                        return Ok(this);
+                    if let Some((k, v)) = entry {
+                        if crate::object::js_values_equal(*k, key) {
+                            *v = val;
+                            return Ok(this);
+                        }
                     }
                 }
-                entries.push((key, val));
+                entries.push(Some((key, val)));
                 return Ok(this);
             }
         }
@@ -46,9 +50,11 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Map(entries) = &obj.kind {
-                for (k, _) in entries {
-                    if crate::object::js_values_equal(*k, key) {
-                        return Ok(JsValue::from_boolean(true));
+                for entry in entries {
+                    if let Some((k, _)) = entry {
+                        if crate::object::js_values_equal(*k, key) {
+                            return Ok(JsValue::from_boolean(true));
+                        }
                     }
                 }
                 return Ok(JsValue::from_boolean(false));
@@ -62,9 +68,13 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Map(entries) = &mut obj.kind {
-                if let Some(idx) = entries.iter().position(|(k, _)| crate::object::js_values_equal(*k, key)) {
-                    entries.remove(idx);
-                    return Ok(JsValue::from_boolean(true));
+                for entry in entries.iter_mut() {
+                    if let Some((k, _)) = entry {
+                        if crate::object::js_values_equal(*k, key) {
+                            *entry = None;
+                            return Ok(JsValue::from_boolean(true));
+                        }
+                    }
                 }
                 return Ok(JsValue::from_boolean(false));
             }
@@ -76,7 +86,9 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Map(entries) = &mut obj.kind {
-                entries.clear();
+                for entry in entries.iter_mut() {
+                    *entry = None;
+                }
                 return Ok(JsValue::undefined());
             }
         }
@@ -89,18 +101,26 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
             return Err(VmError::TypeError("Callback is not a function".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let entries = if let Some(ptr) = this.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Map(entries) = &obj.kind {
-                entries.clone()
+        let mut idx = 0;
+        loop {
+            let entry = if let Some(ptr) = this.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Map(entries) = &obj.kind {
+                    if idx < entries.len() {
+                        entries[idx]
+                    } else {
+                        break;
+                    }
+                } else {
+                    return Err(VmError::TypeError("Method Map.prototype.forEach called on incompatible receiver".into()));
+                }
             } else {
                 return Err(VmError::TypeError("Method Map.prototype.forEach called on incompatible receiver".into()));
+            };
+            idx += 1;
+            if let Some((k, v)) = entry {
+                let _ = vm.call(cb, this_arg, &[v, k, this])?;
             }
-        } else {
-            return Err(VmError::TypeError("Method Map.prototype.forEach called on incompatible receiver".into()));
-        };
-        for (k, v) in entries {
-            let _ = vm.call(cb, this_arg, &[v, k, this])?;
         }
         Ok(JsValue::undefined())
     });
@@ -108,9 +128,8 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
     let map_entries = vm.alloc_native_function("entries", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Map(entries) = &obj.kind {
-                let items: Vec<JsValue> = entries.iter().map(|(k, v)| vm.alloc_array(vec![*k, *v])).collect();
-                return Ok(vm.alloc_iterator(items));
+            if let ObjectKind::Map(_) = &obj.kind {
+                return Ok(vm.alloc_map_iterator(this, MapIterationKind::KeyValue));
             }
         }
         Err(VmError::TypeError("Method Map.prototype.entries called on incompatible receiver".into()))
@@ -119,9 +138,8 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
     let map_keys = vm.alloc_native_function("keys", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Map(entries) = &obj.kind {
-                let items: Vec<JsValue> = entries.iter().map(|(k, _)| *k).collect();
-                return Ok(vm.alloc_iterator(items));
+            if let ObjectKind::Map(_) = &obj.kind {
+                return Ok(vm.alloc_map_iterator(this, MapIterationKind::Key));
             }
         }
         Err(VmError::TypeError("Method Map.prototype.keys called on incompatible receiver".into()))
@@ -130,9 +148,8 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
     let map_values = vm.alloc_native_function("values", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Map(entries) = &obj.kind {
-                let items: Vec<JsValue> = entries.iter().map(|(_, v)| *v).collect();
-                return Ok(vm.alloc_iterator(items));
+            if let ObjectKind::Map(_) = &obj.kind {
+                return Ok(vm.alloc_map_iterator(this, MapIterationKind::Value));
             }
         }
         Err(VmError::TypeError("Method Map.prototype.values called on incompatible receiver".into()))
@@ -142,7 +159,8 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Map(entries) = &obj.kind {
-                return Ok(JsValue::from_int32(entries.len() as i32));
+                let count = entries.iter().filter(|e| e.is_some()).count();
+                return Ok(JsValue::from_int32(count as i32));
             }
         }
         Err(VmError::TypeError("Method get Map.prototype.size called on incompatible receiver".into()))

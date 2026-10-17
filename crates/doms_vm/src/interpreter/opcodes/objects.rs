@@ -147,7 +147,7 @@ impl Vm {
             }
         };
         self.temp_roots.truncate(prev_temp);
-        if !iterator.is_object() {
+        if !iterator.is_js_object() {
             let err = VmError::TypeError("Iterator is not an object".into());
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);
@@ -164,18 +164,41 @@ impl Vm {
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);
         }
-        self.push(iterator);
+        let rec = JsObject::new_with_kind(
+            ShapeRegistry::ROOT_SHAPE_ID,
+            None,
+            ObjectKind::IteratorRecord {
+                iterator,
+                next_method: next_fn,
+                done: false,
+            },
+        );
+        let ptr = self.allocate_js_object(rec);
+        let rec_val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
+        self.push(rec_val);
         Ok(None)
     }
 
     pub(crate) fn op_iterator_next(&mut self, target: i32, target_depth: usize) -> Result<Option<JsValue>, VmError> {
-        let iterator = self.pop()?;
-        let next_fn = match self.get_property_result(iterator, "next") {
-            Ok(n) => n,
-            Err(e) => {
-                self.handle_exception_at_depth(e, target_depth)?;
-                return Ok(None);
+        let iter_rec_val = self.pop()?;
+        let (iterator, next_fn) = if let Some(ptr) = iter_rec_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::IteratorRecord { iterator, next_method, .. } = obj.kind {
+                (iterator, next_method)
+            } else {
+                let next_fn = match self.get_property_result(iter_rec_val, "next") {
+                    Ok(n) => n,
+                    Err(e) => {
+                        self.handle_exception_at_depth(e, target_depth)?;
+                        return Ok(None);
+                    }
+                };
+                (iter_rec_val, next_fn)
             }
+        } else {
+            let err = VmError::TypeError("Iterator is not an object".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
         };
         if !self.is_callable(next_fn) {
             let err = VmError::TypeError("Iterator next is not callable".into());
@@ -194,7 +217,7 @@ impl Vm {
             }
         };
         self.temp_roots.push(step);
-        if !step.is_object() {
+        if !step.is_js_object() {
             self.temp_roots.truncate(prev_temp);
             let err = VmError::TypeError("Iterator result is not an object".into());
             self.handle_exception_at_depth(err, target_depth)?;
@@ -229,8 +252,18 @@ impl Vm {
     }
 
     pub(crate) fn op_iterator_close(&mut self, is_abrupt: bool, target_depth: usize) -> Result<Option<JsValue>, VmError> {
-        let iterator = self.pop()?;
-        if !iterator.is_object() {
+        let iter_rec_val = self.pop()?;
+        let iterator = if let Some(ptr) = iter_rec_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::IteratorRecord { iterator, .. } = obj.kind {
+                iterator
+            } else {
+                iter_rec_val
+            }
+        } else {
+            iter_rec_val
+        };
+        if !iterator.is_js_object() {
             return Ok(None);
         }
         let ret_method = match self.get_property_result(iterator, "return") {
@@ -266,7 +299,7 @@ impl Vm {
         }
         match inner_result {
             Ok(inner_val) => {
-                if !inner_val.is_object() {
+                if !inner_val.is_js_object() {
                     let err = VmError::TypeError("Iterator return did not return an object".into());
                     self.handle_exception_at_depth(err, target_depth)?;
                     return Ok(None);
@@ -325,7 +358,7 @@ impl Vm {
             }
         };
         self.temp_roots.truncate(prev_temp);
-        if !iterator.is_object() {
+        if !iterator.is_js_object() {
             let err = VmError::TypeError("Iterator is not an object".into());
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);
@@ -342,18 +375,41 @@ impl Vm {
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);
         }
-        self.push(iterator);
+        let rec = JsObject::new_with_kind(
+            ShapeRegistry::ROOT_SHAPE_ID,
+            None,
+            ObjectKind::AsyncIteratorRecord {
+                iterator,
+                next_method: next_fn,
+                done: false,
+            },
+        );
+        let ptr = self.allocate_js_object(rec);
+        let rec_val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
+        self.push(rec_val);
         Ok(None)
     }
 
     pub(crate) fn op_async_iterator_next(&mut self, target: i32, target_depth: usize) -> Result<Option<JsValue>, VmError> {
-        let iterator = self.pop()?;
-        let next_fn = match self.get_property_result(iterator, "next") {
-            Ok(n) => n,
-            Err(e) => {
-                self.handle_exception_at_depth(e, target_depth)?;
-                return Ok(None);
+        let iter_rec_val = self.pop()?;
+        let (iterator, next_fn) = if let Some(ptr) = iter_rec_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::AsyncIteratorRecord { iterator, next_method, .. } = obj.kind {
+                (iterator, next_method)
+            } else {
+                let next_fn = match self.get_property_result(iter_rec_val, "next") {
+                    Ok(n) => n,
+                    Err(e) => {
+                        self.handle_exception_at_depth(e, target_depth)?;
+                        return Ok(None);
+                    }
+                };
+                (iter_rec_val, next_fn)
             }
+        } else {
+            let err = VmError::TypeError("Iterator is not an object".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(None);
         };
         if !self.is_callable(next_fn) {
             let err = VmError::TypeError("Iterator next is not callable".into());
@@ -381,7 +437,7 @@ impl Vm {
             }
         };
         self.temp_roots.push(step);
-        if !step.is_object() {
+        if !step.is_js_object() {
             self.temp_roots.truncate(prev_temp);
             let err = VmError::TypeError("Iterator result is not an object".into());
             self.handle_exception_at_depth(err, target_depth)?;
@@ -416,8 +472,18 @@ impl Vm {
     }
 
     pub(crate) fn op_async_iterator_close(&mut self, is_abrupt: bool, target_depth: usize) -> Result<Option<JsValue>, VmError> {
-        let iterator = self.pop()?;
-        if !iterator.is_object() {
+        let iter_rec_val = self.pop()?;
+        let iterator = if let Some(ptr) = iter_rec_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::AsyncIteratorRecord { iterator, .. } = obj.kind {
+                iterator
+            } else {
+                iter_rec_val
+            }
+        } else {
+            iter_rec_val
+        };
+        if !iterator.is_js_object() {
             return Ok(None);
         }
         let ret_method = match self.get_property_result(iterator, "return") {
@@ -472,7 +538,7 @@ impl Vm {
             }
         };
         self.temp_roots.truncate(prev_temp);
-        if !ret_res.is_object() && !is_abrupt {
+        if !ret_res.is_js_object() && !is_abrupt {
             let err = VmError::TypeError("Iterator return did not return an object".into());
             self.handle_exception_at_depth(err, target_depth)?;
             return Ok(None);

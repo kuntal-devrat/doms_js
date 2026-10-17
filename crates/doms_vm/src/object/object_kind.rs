@@ -21,8 +21,8 @@ pub enum ObjectKind {
     },
     TypedArray(JsTypedArray),
     Worker(Arc<std::sync::Mutex<doms_parallel::MessagePort>>),
-    Map(Vec<(JsValue, JsValue)>),
-    Set(Vec<JsValue>),
+    Map(Vec<Option<(JsValue, JsValue)>>),
+    Set(Vec<Option<JsValue>>),
     WeakMap(Vec<(JsValue, JsValue)>),
     WeakSet(Vec<JsValue>),
     WeakRef(JsValue),
@@ -45,6 +45,39 @@ pub enum ObjectKind {
     NumberObject(f64),
     BooleanObject(bool),
     BigIntObject(BigInt),
+    IteratorRecord {
+        iterator: JsValue,
+        next_method: JsValue,
+        done: bool,
+    },
+    AsyncIteratorRecord {
+        iterator: JsValue,
+        next_method: JsValue,
+        done: bool,
+    },
+    MapIterator {
+        map: JsValue,
+        index: usize,
+        kind: MapIterationKind,
+    },
+    SetIterator {
+        set: JsValue,
+        index: usize,
+        kind: SetIterationKind,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapIterationKind {
+    Key,
+    Value,
+    KeyValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetIterationKind {
+    Value,
+    KeyValue,
 }
 
 #[derive(Debug, Clone, Default)]

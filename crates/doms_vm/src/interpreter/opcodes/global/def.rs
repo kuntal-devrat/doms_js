@@ -16,7 +16,7 @@ impl Vm {
                             VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)),
                             target_depth,
                         )?;
-                        return Ok(Some(JsValue::undefined()));
+                        return Ok(None);
                     }
                     self.var_names.insert(name.clone());
                     if !self.globals.contains_key(&name) {
@@ -25,7 +25,7 @@ impl Vm {
                                 VmError::TypeError(format!("Cannot define property '{}' on non-extensible global object", name)),
                                 target_depth,
                             )?;
-                            return Ok(Some(JsValue::undefined()));
+                            return Ok(None);
                         }
                         self.globals.insert(name.clone(), JsValue::undefined());
                         if self.global_object.is_object() {

@@ -41,7 +41,7 @@ impl Compiler {
                 } else {
                     self.chunk.emit(OpCode::Pop, 0);
                 }
-                if !self.is_in_function {
+                if !self.is_in_function && !self.internal_statements {
                     self.chunk.emit(OpCode::LoadUndefined, 0);
                 }
                 self.compile_statement(catch_stmt, false)?;
@@ -107,7 +107,7 @@ impl Compiler {
                 } else {
                     self.chunk.emit(OpCode::Pop, 0);
                 }
-                if !self.is_in_function {
+                if !self.is_in_function && !self.internal_statements {
                     self.chunk.emit(OpCode::LoadUndefined, 0);
                 }
                 self.compile_statement(catch_stmt, false)?;

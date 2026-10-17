@@ -385,7 +385,7 @@ impl Vm {
                 }
                 Err(e) => {
                     let promise = self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
-                    let err_val = self.alloc_string(e.to_string());
+                    let err_val = self.vm_error_to_js_value(&e);
                     self.reject_promise(promise, err_val);
                     let _ = self.drain_microtasks();
                     Ok(promise)

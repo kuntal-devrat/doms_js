@@ -329,5 +329,21 @@ pub fn define_property_internal(
         }
     }
 
+    if let Some(ptr) = target.as_object_ptr() {
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        if let ObjectKind::Array(elements) = &mut obj.kind {
+            if let PropertyKeyVal::String(s) = &prop_key {
+                if let Ok(idx) = s.parse::<u32>() {
+                    if idx.to_string() == *s {
+                        let idx = idx as usize;
+                        if idx >= elements.len() {
+                            elements.resize(idx + 1, JsValue::hole());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(target)
 }

@@ -10,10 +10,12 @@ pub(super) fn union(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
-                            if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
-                                if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
-                                    set_elements.push(*el);
+                            if let Some(el) = el {
+                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                    if !set_elements.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, *el))) {
+                                        set_elements.push(Some(*el));
+                                    }
                                 }
                             }
                         }
@@ -23,10 +25,12 @@ pub(super) fn union(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
-                            if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
-                                if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
-                                    set_elements.push(*el);
+                            if let Some(el) = el {
+                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                    if !set_elements.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, *el))) {
+                                        set_elements.push(Some(*el));
+                                    }
                                 }
                             }
                         }
@@ -44,13 +48,15 @@ pub(super) fn intersection(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let has_fn = vm.get_property(other, "has");
-                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
-                            if res.is_truthy() {
-                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
-                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
-                                    if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
-                                        set_elements.push(*el);
+                            if let Some(el) = el {
+                                let has_fn = vm.get_property(other, "has");
+                                let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                                if res.is_truthy() {
+                                    let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                    if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                        if !set_elements.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, *el))) {
+                                            set_elements.push(Some(*el));
+                                        }
                                     }
                                 }
                             }
@@ -69,13 +75,15 @@ pub(super) fn difference(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let has_fn = vm.get_property(other, "has");
-                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
-                            if !res.is_truthy() {
-                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
-                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
-                                    if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
-                                        set_elements.push(*el);
+                            if let Some(el) = el {
+                                let has_fn = vm.get_property(other, "has");
+                                let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                                if !res.is_truthy() {
+                                    let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                    if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                        if !set_elements.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, *el))) {
+                                            set_elements.push(Some(*el));
+                                        }
                                     }
                                 }
                             }
@@ -94,13 +102,15 @@ pub(super) fn symmetric_difference(vm: &mut Vm, target: JsValue) -> Option<JsVal
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let has_fn = vm.get_property(other, "has");
-                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
-                            if !res.is_truthy() {
-                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
-                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
-                                    if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
-                                        set_elements.push(*el);
+                            if let Some(el) = el {
+                                let has_fn = vm.get_property(other, "has");
+                                let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                                if !res.is_truthy() {
+                                    let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                    if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                        if !set_elements.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, *el))) {
+                                            set_elements.push(Some(*el));
+                                        }
                                     }
                                 }
                             }
@@ -111,13 +121,15 @@ pub(super) fn symmetric_difference(vm: &mut Vm, target: JsValue) -> Option<JsVal
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let has_fn = vm.get_property(target, "has");
-                            let res = vm.call(has_fn, target, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
-                            if !res.is_truthy() {
-                                let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
-                                if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
-                                    if !set_elements.iter().any(|existing| crate::object::js_values_equal(*existing, *el)) {
-                                        set_elements.push(*el);
+                            if let Some(el) = el {
+                                let has_fn = vm.get_property(target, "has");
+                                let res = vm.call(has_fn, target, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                                if !res.is_truthy() {
+                                    let n_obj = unsafe { &mut *(new_set.as_object_ptr().unwrap() as *mut JsObject) };
+                                    if let ObjectKind::Set(ref mut set_elements) = n_obj.kind {
+                                        if !set_elements.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, *el))) {
+                                            set_elements.push(Some(*el));
+                                        }
                                     }
                                 }
                             }
@@ -135,10 +147,12 @@ pub(super) fn is_subset_of(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let has_fn = vm.get_property(other, "has");
-                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
-                            if !res.is_truthy() {
-                                return Ok(JsValue::from_boolean(false));
+                            if let Some(el) = el {
+                                let has_fn = vm.get_property(other, "has");
+                                let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                                if !res.is_truthy() {
+                                    return Ok(JsValue::from_boolean(false));
+                                }
                             }
                         }
                     }
@@ -154,10 +168,12 @@ pub(super) fn is_superset_of(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let has_fn = vm.get_property(target, "has");
-                            let res = vm.call(has_fn, target, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
-                            if !res.is_truthy() {
-                                return Ok(JsValue::from_boolean(false));
+                            if let Some(el) = el {
+                                let has_fn = vm.get_property(target, "has");
+                                let res = vm.call(has_fn, target, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                                if !res.is_truthy() {
+                                    return Ok(JsValue::from_boolean(false));
+                                }
                             }
                         }
                     }
@@ -173,10 +189,12 @@ pub(super) fn is_disjoint_from(vm: &mut Vm, target: JsValue) -> Option<JsValue> 
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
                         for el in elements {
-                            let has_fn = vm.get_property(other, "has");
-                            let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
-                            if res.is_truthy() {
-                                return Ok(JsValue::from_boolean(false));
+                            if let Some(el) = el {
+                                let has_fn = vm.get_property(other, "has");
+                                let res = vm.call(has_fn, other, &[*el]).unwrap_or_else(|_| JsValue::from_boolean(false));
+                                if res.is_truthy() {
+                                    return Ok(JsValue::from_boolean(false));
+                                }
                             }
                         }
                     }

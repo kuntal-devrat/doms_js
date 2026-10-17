@@ -2,16 +2,22 @@ use super::*;
 
 impl<'a> Parser<'a> {
     pub(crate) fn parse_object_literal(&mut self) -> Result<Expression, ParseError> {
+        let prev_in = self.allow_in;
+        self.allow_in = true;
         let mut props = Vec::new();
         while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
             // Check for spread: ...expr
             if self.match_token(&TokenKind::DotDotDot)? {
                 let expr = self.parse_expression(1)?;
                 props.push(ObjectProperty::Spread(expr));
-                if !self.match_token(&TokenKind::Comma)? || self.check(&TokenKind::RBrace) {
+                if self.match_token(&TokenKind::Comma)? {
+                    if self.check(&TokenKind::RBrace) {
+                        self.trailing_comma_after_rest = true;
+                    }
+                    continue;
+                } else {
                     break;
                 }
-                continue;
             }
 
             // Check for getter: get <prop>() { ... }
@@ -166,6 +172,18 @@ impl<'a> Parser<'a> {
             let (key, is_ident) = self.parse_property_name_meta()?;
             let val = if self.match_token(&TokenKind::Colon)? {
                 self.parse_expression(1)?
+            } else if self.match_token(&TokenKind::Eq)? {
+                let default_expr = self.parse_expression(1)?;
+                match &key {
+                    PropertyKey::Literal(id) => Expression::Assignment {
+                        target: id.clone(),
+                        value: Box::new(default_expr),
+                    },
+                    _ => {
+                        self.allow_in = prev_in;
+                        return Err(ParseError::UnexpectedToken(TokenKind::Eq, self.current.line, self.current.col));
+                    }
+                }
             } else if self.check(&TokenKind::LParen) {
                 // Method shorthand: foo() { ... } or [expr]() { ... }
                 let prev_in_static = self.in_static_block;
@@ -195,6 +213,7 @@ impl<'a> Parser<'a> {
                     _ => unreachable!(),
                 }
             } else {
+                self.allow_in = prev_in;
                 return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
             };
 
@@ -204,6 +223,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokenKind::RBrace)?;
+        self.allow_in = prev_in;
         Ok(Expression::Object(props))
     }
 }

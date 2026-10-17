@@ -8,8 +8,22 @@ impl<'a> Parser<'a> {
             Ok((PropertyKey::Computed(expr), false))
         } else {
             let key_tok = self.advance()?;
-            let is_ident = matches!(&key_tok.kind, TokenKind::Ident(_))
-                || (!self.is_module && !self.in_async && !self.in_static_block && key_tok.kind == TokenKind::Await);
+            let is_ident = match &key_tok.kind {
+                TokenKind::Ident(id) => {
+                    !(self.is_strict && is_strict_reserved_word(id))
+                }
+                TokenKind::Undefined | TokenKind::As | TokenKind::From | TokenKind::Async => true,
+                TokenKind::Await => !self.is_module && !self.in_async && !self.in_static_block,
+                TokenKind::Yield => !self.is_strict && !self.in_generator,
+                TokenKind::Implements
+                | TokenKind::Interface
+                | TokenKind::Package
+                | TokenKind::Private
+                | TokenKind::Protected
+                | TokenKind::Public
+                | TokenKind::Static => !self.is_strict,
+                _ => false,
+            };
             let key = match &key_tok.kind {
                 TokenKind::StringLit { value, .. } => value.clone(),
                 TokenKind::Number(n) => n.to_string(),

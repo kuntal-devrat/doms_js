@@ -3,35 +3,17 @@
 use super::*;
 
 pub(super) fn values_or_keys(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
-    Some(vm.alloc_closure_native_function("values", 0, Arc::new(move |vm, _this, _args| {
-                let elements = if let Some(ptr) = target.as_object_ptr() {
-                    let obj = unsafe { &*(ptr as *mut JsObject) };
-                    if let ObjectKind::Set(elements) = &obj.kind {
-                        elements.clone()
-                    } else {
-                        Vec::new()
-                    }
-                } else {
-                    Vec::new()
-                };
-                Ok(vm.alloc_iterator(elements))
-            })))
+    Some(vm.alloc_closure_native_function("values", 0, Arc::new(move |vm, this, _args| {
+        let receiver = if this.is_object() { this } else { target };
+        Ok(vm.alloc_set_iterator(receiver, SetIterationKind::Value))
+    })))
 }
 
 pub(super) fn entries(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
-    Some(vm.alloc_closure_native_function("entries", 0, Arc::new(move |vm, _this, _args| {
-                let entries = if let Some(ptr) = target.as_object_ptr() {
-                    let obj = unsafe { &*(ptr as *mut JsObject) };
-                    if let ObjectKind::Set(elements) = &obj.kind {
-                        elements.iter().map(|el| vm.alloc_array(vec![*el, *el])).collect()
-                    } else {
-                        Vec::new()
-                    }
-                } else {
-                    Vec::new()
-                };
-                Ok(vm.alloc_iterator(entries))
-            })))
+    Some(vm.alloc_closure_native_function("entries", 0, Arc::new(move |vm, this, _args| {
+        let receiver = if this.is_object() { this } else { target };
+        Ok(vm.alloc_set_iterator(receiver, SetIterationKind::KeyValue))
+    })))
 }
 
 pub(super) fn add(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
@@ -40,8 +22,8 @@ pub(super) fn add(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                 if let Some(ptr) = target.as_object_ptr() {
                     let obj = unsafe { &mut *(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &mut obj.kind {
-                        if !elements.iter().any(|el| crate::object::js_values_equal(*el, val)) {
-                            elements.push(val);
+                        if !elements.iter().any(|el| el.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, val))) {
+                            elements.push(Some(val));
                         }
                     }
                 }
@@ -55,7 +37,7 @@ pub(super) fn has(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                 if let Some(ptr) = target.as_object_ptr() {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &obj.kind {
-                        return Ok(JsValue::from_boolean(elements.iter().any(|el| crate::object::js_values_equal(*el, val))));
+                        return Ok(JsValue::from_boolean(elements.iter().any(|el| el.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, val)))));
                     }
                 }
                 Ok(JsValue::from_boolean(false))
@@ -68,9 +50,13 @@ pub(super) fn delete(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                 if let Some(ptr) = target.as_object_ptr() {
                     let obj = unsafe { &mut *(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &mut obj.kind {
-                        if let Some(idx) = elements.iter().position(|el| crate::object::js_values_equal(*el, val)) {
-                            elements.remove(idx);
-                            return Ok(JsValue::from_boolean(true));
+                        for el in elements.iter_mut() {
+                            if let Some(e) = el {
+                                if crate::object::js_values_equal(*e, val) {
+                                    *el = None;
+                                    return Ok(JsValue::from_boolean(true));
+                                }
+                            }
                         }
                     }
                 }
@@ -83,7 +69,9 @@ pub(super) fn clear(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
                 if let Some(ptr) = target.as_object_ptr() {
                     let obj = unsafe { &mut *(ptr as *mut JsObject) };
                     if let ObjectKind::Set(elements) = &mut obj.kind {
-                        elements.clear();
+                        for el in elements.iter_mut() {
+                            *el = None;
+                        }
                     }
                 }
                 Ok(JsValue::undefined())
@@ -93,18 +81,27 @@ pub(super) fn clear(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
 pub(super) fn for_each(vm: &mut Vm, target: JsValue) -> Option<JsValue> {
     Some(vm.alloc_closure_native_function("forEach", 1, Arc::new(move |vm, _this, args| {
                 let cb = args.first().copied().unwrap_or(JsValue::undefined());
-                let elements = if let Some(ptr) = target.as_object_ptr() {
-                    let obj = unsafe { &*(ptr as *mut JsObject) };
-                    if let ObjectKind::Set(elements) = &obj.kind {
-                        elements.clone()
+                let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
+                let mut idx = 0;
+                loop {
+                    let el = if let Some(ptr) = target.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        if let ObjectKind::Set(elements) = &obj.kind {
+                            if idx < elements.len() {
+                                elements[idx]
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
                     } else {
-                        Vec::new()
+                        break;
+                    };
+                    idx += 1;
+                    if let Some(el) = el {
+                        let _ = vm.call(cb, this_arg, &[el, el, target])?;
                     }
-                } else {
-                    Vec::new()
-                };
-                for el in elements {
-                    let _ = vm.call(cb, target, &[el, el, target]);
                 }
                 Ok(JsValue::undefined())
             })))

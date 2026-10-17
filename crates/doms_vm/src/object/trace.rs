@@ -153,19 +153,23 @@ impl Trace for JsObject {
                 }
             }
             ObjectKind::Map(entries) => {
-                for (k, v) in entries {
-                    if let Some(p) = k.as_heap_ptr() {
-                        tracer.trace_ref(p);
-                    }
-                    if let Some(p) = v.as_heap_ptr() {
-                        tracer.trace_ref(p);
+                for entry in entries {
+                    if let Some((k, v)) = entry {
+                        if let Some(p) = k.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
+                        if let Some(p) = v.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
                     }
                 }
             }
             ObjectKind::Set(elements) => {
                 for el in elements {
-                    if let Some(p) = el.as_heap_ptr() {
-                        tracer.trace_ref(p);
+                    if let Some(el) = el {
+                        if let Some(p) = el.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
                     }
                 }
             }
@@ -206,6 +210,25 @@ impl Trace for JsObject {
                     tracer.trace_ref(p);
                 }
                 if let Some(p) = handler.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
+            ObjectKind::IteratorRecord { iterator, next_method, .. }
+            | ObjectKind::AsyncIteratorRecord { iterator, next_method, .. } => {
+                if let Some(p) = iterator.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+                if let Some(p) = next_method.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
+            ObjectKind::MapIterator { map, .. } => {
+                if let Some(p) = map.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
+            ObjectKind::SetIterator { set, .. } => {
+                if let Some(p) = set.as_heap_ptr() {
                     tracer.trace_ref(p);
                 }
             }
@@ -321,14 +344,18 @@ impl JsObject {
                 }
             }
             ObjectKind::Map(entries) => {
-                for (k, v) in entries {
-                    visitor(k);
-                    visitor(v);
+                for entry in entries {
+                    if let Some((k, v)) = entry {
+                        visitor(k);
+                        visitor(v);
+                    }
                 }
             }
             ObjectKind::Set(elements) => {
                 for el in elements {
-                    visitor(el);
+                    if let Some(el) = el {
+                        visitor(el);
+                    }
                 }
             }
             ObjectKind::WeakMap(entries) => {
@@ -351,6 +378,17 @@ impl JsObject {
                         visitor(u);
                     }
                 }
+            }
+            ObjectKind::IteratorRecord { iterator, next_method, .. }
+            | ObjectKind::AsyncIteratorRecord { iterator, next_method, .. } => {
+                visitor(iterator);
+                visitor(next_method);
+            }
+            ObjectKind::MapIterator { map, .. } => {
+                visitor(map);
+            }
+            ObjectKind::SetIterator { set, .. } => {
+                visitor(set);
             }
             _ => {}
         }

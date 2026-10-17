@@ -171,7 +171,7 @@ impl Vm {
                         match self.run_until_depth(target_depth) {
                             Ok(res) => self.resolve_promise(promise_val, res),
                             Err(e) => {
-                                let err_val = self.alloc_string(e.to_string());
+                                let err_val = self.vm_error_to_js_value(&e);
                                 self.reject_promise(promise_val, err_val);
                             }
                         }

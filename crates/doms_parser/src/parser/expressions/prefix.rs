@@ -91,20 +91,11 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::Yield => {
-                if self.is_strict && !self.in_generator {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Yield, tok.line, tok.col));
-                }
                 if !self.in_generator {
-                    if self.check(&TokenKind::Eq)
-                        || self.check(&TokenKind::Semicolon)
-                        || self.check(&TokenKind::Comma)
-                        || self.check(&TokenKind::RParen)
-                        || self.check(&TokenKind::RBracket)
-                        || self.check(&TokenKind::RBrace)
-                        || self.check(&TokenKind::Eof)
-                    {
-                        return Ok(Expression::Identifier("yield".to_string()));
+                    if self.is_strict {
+                        return Err(ParseError::UnexpectedToken(TokenKind::Yield, tok.line, tok.col));
                     }
+                    return Ok(Expression::Identifier("yield".to_string()));
                 }
                 if self.match_token(&TokenKind::Star)? {
                     let expr = self.parse_expression(0)?;

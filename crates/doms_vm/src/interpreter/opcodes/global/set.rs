@@ -24,6 +24,14 @@ impl Vm {
                             let scope_val = self.frames[f_idx].scopes[s_idx];
                             if scope_val.is_object() {
                                 if self.has_property(scope_val, &name).unwrap_or(false) {
+                                    let cur_val = self.get_property(scope_val, &name);
+                                    if cur_val.is_uninitialized() {
+                                        self.handle_exception_at_depth(
+                                            VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                                            target_depth,
+                                        )?;
+                                        return Ok(None);
+                                    }
                                     self.set_property(scope_val, &name, val);
                                     for f in &mut self.frames {
                                         if f.env_obj == Some(scope_val) {
@@ -46,6 +54,13 @@ impl Vm {
                             for (i, local_name) in frame.local_names.iter().enumerate().rev() {
                                 if *local_name == name {
                                     if i < frame.locals.len() {
+                                        if frame.locals[i].is_uninitialized() {
+                                            self.handle_exception_at_depth(
+                                                VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                                                target_depth,
+                                            )?;
+                                            return Ok(None);
+                                        }
                                         frame.locals[i] = val;
                                     }
                                     if let Some(env) = frame.env_obj {
@@ -72,7 +87,7 @@ impl Vm {
                                                 VmError::TypeError(format!("Assignment to constant variable '{}'", name)),
                                                 target_depth,
                                             )?;
-                                            return Ok(Some(JsValue::undefined()));
+                                            return Ok(None);
                                         } else {
                                             return Ok(None);
                                         }
@@ -125,7 +140,7 @@ impl Vm {
                                 VmError::TypeError(format!("Assignment to constant variable {}", name)),
                                 target_depth,
                             )?;
-                            return Ok(Some(JsValue::undefined()));
+                            return Ok(None);
                         }
                         let mut found_in_module = false;
                         let mod_vals: Vec<JsValue> = self.modules.values().copied().collect();
@@ -152,7 +167,7 @@ impl Vm {
                                 VmError::TypeError(format!("Assignment to constant variable {}", name)),
                                 target_depth,
                             )?;
-                            return Ok(Some(JsValue::undefined()));
+                            return Ok(None);
                         }
                         if self.non_writable_props.contains(&(self.global_object, name.clone())) {
                             let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
@@ -161,11 +176,18 @@ impl Vm {
                                     VmError::TypeError(format!("Cannot assign to read only property '{}'", name)),
                                     target_depth,
                                 )?;
-                                return Ok(Some(JsValue::undefined()));
+                                return Ok(None);
                             }
-                            return Ok(Some(JsValue::undefined()));
+                            return Ok(None);
                         }
-                        if self.global_lexicals.contains_key(&name) {
+                        if let Some(cur_val) = self.global_lexicals.get(&name).copied() {
+                            if cur_val.is_uninitialized() {
+                                self.handle_exception_at_depth(
+                                    VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                                    target_depth,
+                                )?;
+                                return Ok(None);
+                            }
                             self.global_lexicals.insert(name.clone(), val);
                             if let Some(mod_obj) = self.current_module_obj {
                                 if let Some(ptr) = mod_obj.as_object_ptr() {

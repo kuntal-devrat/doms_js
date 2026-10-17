@@ -17,19 +17,34 @@ impl Compiler {
             }
         }
         for decl in declarations {
+            let inferred_name = if let Some(stripped) = decl.name.strip_prefix("@name:") {
+                let parts: Vec<&str> = stripped.split(':').collect();
+                if !parts.is_empty() {
+                    Some(parts[0])
+                } else {
+                    None
+                }
+            } else if !decl.name.starts_with('@') {
+                Some(decl.name.as_str())
+            } else {
+                None
+            };
+
             if let Some(init_expr) = &decl.init {
                 match init_expr {
-                    Expression::Conditional { condition, then_expr, else_expr } if !decl.name.starts_with('@') => {
-                        self.compile_conditional_with_name(condition, then_expr, else_expr, Some(&decl.name))?;
+                    Expression::Conditional { condition, then_expr, else_expr } if inferred_name.is_some() => {
+                        self.compile_conditional_with_name(condition, then_expr, else_expr, inferred_name)?;
                     }
-                    Expression::ClassExpr(class_def) if !decl.name.starts_with('@') && class_def.name.is_none() => {
-                        self.compile_class_definition_with_name(class_def, Some(decl.name.clone()))?;
+                    Expression::ClassExpr(class_def) if inferred_name.is_some() && class_def.name.is_none() => {
+                        self.compile_class_definition_with_name(class_def, inferred_name.map(|s| s.to_string()))?;
                     }
                     _ => {
                         self.compile_expression(init_expr)?;
-                        if !decl.name.starts_with('@') && Self::is_anonymous_function_definition(init_expr) {
-                            let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
-                            self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                        if let Some(name) = inferred_name {
+                            if Self::is_anonymous_function_definition(init_expr) {
+                                let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+                                self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                            }
                         }
                     }
                 }
@@ -78,8 +93,10 @@ impl Compiler {
                     }
                     let is_touched = self.touched_bindings.remove(&decl.name);
                     let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
-                    if *kind == VarKind::Const && !self.is_eval && self.symbols.scope_depth == 0 {
+                    if *kind == VarKind::Const && !self.is_in_function {
                         self.chunk.emit(OpCode::InitConst(name_idx), 0);
+                    } else if *kind == VarKind::Let && !self.is_in_function {
+                        self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
                     } else if is_touched {
                         self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
                     } else {
@@ -113,7 +130,11 @@ impl Compiler {
                         self.symbols.define_local(decl.name.clone());
                     }
                     let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
-                    self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                    if !self.is_in_function {
+                        self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
+                    } else {
+                        self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                    }
                     self.chunk.emit(OpCode::Pop, 0);
                 }
             } else if *kind == VarKind::Var && self.is_in_function {
@@ -161,7 +182,7 @@ impl Compiler {
                 self.chunk.emit(OpCode::Dup, 0);
                 let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                 self.chunk.emit(OpCode::LoadConst(name_idx), 0);
-                self.chunk.emit(OpCode::LoadUndefined, 0);
+                self.chunk.emit(OpCode::LoadUninitialized, 0);
                 self.chunk.emit(OpCode::SetElem, 0);
                 self.chunk.emit(OpCode::Pop, 0);
             }

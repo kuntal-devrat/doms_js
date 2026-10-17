@@ -365,3 +365,4 @@ fn test_generational_gc_auto_scavenge_under_allocation_pressure() {
     assert!(vm.heap.nursery.scavenge_count >= 1, "Expected at least 1 automatic nursery scavenge, got {}", vm.heap.nursery.scavenge_count);
 }
 
+

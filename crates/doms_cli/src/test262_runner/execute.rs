@@ -35,6 +35,7 @@ impl Test262Runner {
                 || feat == "regexp-modifiers"
                 || feat == "source-phase-imports"
                 || feat == "source-phase-imports-module-source"
+                || feat == "explicit-resource-management"
             {
                 return TestStatus::Skip(format!("Feature '{}' not supported", feat));
             }

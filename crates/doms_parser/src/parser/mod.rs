@@ -229,7 +229,7 @@ impl<'a> Parser<'a> {
                 "await".to_string()
             }
             TokenKind::Yield => {
-                if self.is_strict {
+                if self.is_strict || self.in_generator {
                     return Err(ParseError::UnexpectedToken(TokenKind::Yield, tok.line, tok.col));
                 }
                 "yield".to_string()

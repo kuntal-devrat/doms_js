@@ -39,6 +39,10 @@ impl Compiler {
         condition: &Expression,
         body: &Statement,
     ) -> Result<(), CompileError> {
+        if !self.is_in_function {
+            self.chunk.emit(OpCode::Pop, 0);
+            self.chunk.emit(OpCode::LoadUndefined, 0);
+        }
         let loop_start = self.chunk.instructions.len() as i32;
         self.compile_expression(condition)?;
         let jump_exit_idx = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
@@ -74,6 +78,10 @@ impl Compiler {
         update: &Option<Expression>,
         body: &Statement,
     ) -> Result<(), CompileError> {
+        if !self.is_in_function {
+            self.chunk.emit(OpCode::Pop, 0);
+            self.chunk.emit(OpCode::LoadUndefined, 0);
+        }
         let mut for_lex_names = Vec::new();
         if !self.is_in_function {
             if let Some(init_stmt) = init {
@@ -164,6 +172,10 @@ impl Compiler {
         body: &Statement,
         condition: &Expression,
     ) -> Result<(), CompileError> {
+        if !self.is_in_function {
+            self.chunk.emit(OpCode::Pop, 0);
+            self.chunk.emit(OpCode::LoadUndefined, 0);
+        }
         let loop_start = self.chunk.instructions.len() as i32;
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
@@ -196,6 +208,10 @@ impl Compiler {
         right: &Expression,
         body: &Statement,
     ) -> Result<(), CompileError> {
+        if !self.is_in_function {
+            self.chunk.emit(OpCode::Pop, 0);
+            self.chunk.emit(OpCode::LoadUndefined, 0);
+        }
         self.symbols.enter_scope();
         let is_lex = matches!(var_kind, Some(VarKind::Let) | Some(VarKind::Const)) && !left.starts_with('@');
         let local_slot = if left.starts_with('@') {
@@ -325,6 +341,10 @@ impl Compiler {
         body: &Statement,
         is_await: bool,
     ) -> Result<(), CompileError> {
+        if !self.is_in_function {
+            self.chunk.emit(OpCode::Pop, 0);
+            self.chunk.emit(OpCode::LoadUndefined, 0);
+        }
         self.symbols.enter_scope();
         let is_lex = matches!(var_kind, Some(VarKind::Let) | Some(VarKind::Const)) && !left.starts_with('@');
         let local_slot = if left.starts_with('@') {

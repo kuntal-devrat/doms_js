@@ -24,7 +24,7 @@ impl Vm {
                                     VmError::TypeError(format!("Cannot delete property '{}'", prop)),
                                     target_depth,
                                 )?;
-                                return Ok(Some(JsValue::undefined()));
+                                return Ok(None);
                             } else {
                                 self.push(JsValue::from_boolean(false));
                             }
@@ -67,7 +67,7 @@ impl Vm {
                                         VmError::TypeError("Cannot delete property".into()),
                                         target_depth,
                                     )?;
-                                    return Ok(Some(JsValue::undefined()));
+                                    return Ok(None);
                                 } else {
                                     self.push(JsValue::from_boolean(false));
                                     return Ok(None);
@@ -91,7 +91,7 @@ impl Vm {
                                         VmError::TypeError(format!("Cannot delete property '{}'", prop)),
                                         target_depth,
                                     )?;
-                                    return Ok(Some(JsValue::undefined()));
+                                    return Ok(None);
                                 } else {
                                     self.push(JsValue::from_boolean(false));
                                 }
@@ -103,7 +103,7 @@ impl Vm {
                                                 VmError::TypeError("Cannot delete property 'length'".into()),
                                                 target_depth,
                                             )?;
-                                            return Ok(Some(JsValue::undefined()));
+                                            return Ok(None);
                                         } else {
                                             self.push(JsValue::from_boolean(false));
                                             return Ok(None);
@@ -164,7 +164,7 @@ impl Vm {
                                             VmError::TypeError(format!("Cannot delete property '{}'", name)),
                                             target_depth,
                                         )?;
-                                        return Ok(Some(JsValue::undefined()));
+                                        return Ok(None);
                                     } else {
                                         self.push(JsValue::from_boolean(false));
                                     }
@@ -189,7 +189,7 @@ impl Vm {
                                 VmError::SyntaxError(format!("Delete of unqualified identifier in strict mode: {}", name)),
                                 target_depth,
                             )?;
-                            return Ok(Some(JsValue::undefined()));
+                            return Ok(None);
                         } else {
                             self.push(JsValue::from_boolean(false));
                         }
@@ -202,7 +202,7 @@ impl Vm {
                                         VmError::TypeError(format!("Cannot delete property '{}'", name)),
                                         target_depth,
                                     )?;
-                                    return Ok(Some(JsValue::undefined()));
+                                    return Ok(None);
                                 } else {
                                     self.push(JsValue::from_boolean(false));
                                 }
