@@ -23,6 +23,18 @@ impl Vm {
         self.strict_equal(a, b)
     }
 
+    pub fn same_value_zero(&self, a: JsValue, b: JsValue) -> bool {
+        if a.is_number() && b.is_number() {
+            let na = a.to_number().unwrap();
+            let nb = b.to_number().unwrap();
+            if na.is_nan() && nb.is_nan() {
+                return true;
+            }
+            return na == nb;
+        }
+        self.strict_equal(a, b)
+    }
+
     pub fn abstract_equal(&mut self, a: JsValue, b: JsValue) -> Result<bool, VmError> {
         if self.strict_equal(a, b) {
             return Ok(true);

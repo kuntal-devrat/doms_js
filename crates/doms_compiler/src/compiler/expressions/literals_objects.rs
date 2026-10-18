@@ -49,7 +49,7 @@ impl Compiler {
                 return Ok(());
             }
         }
-        if self.is_in_function && self.with_depth == 0 && self.block_scope_depth == 0 {
+        if self.with_depth == 0 {
             if let Some(slot) = self.symbols.resolve_local(name) {
                 self.chunk.emit(OpCode::GetLocal(slot), 0);
                 return Ok(());

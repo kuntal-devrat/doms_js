@@ -21,8 +21,8 @@ pub struct HeapConfig {
 impl Default for HeapConfig {
     fn default() -> Self {
         Self {
-            nursery_size: 4 * 1024 * 1024,  // 4 MB
-            old_gen_size: 64 * 1024 * 1024, // 64 MB
+            nursery_size: 2 * 1024 * 1024, // 2 MB (fits in CPU cache)
+            old_gen_size: 8 * 1024 * 1024, // 8 MB
         }
     }
 }

@@ -51,6 +51,14 @@ impl Compiler {
             }
         }
 
+        let mut self_slot = None;
+        if let Some(ref fn_name) = name {
+            if !fn_name.is_empty() && compiler.symbols.resolve_local(fn_name).is_none() {
+                let slot = compiler.symbols.define_local_at_depth(fn_name.clone(), 1);
+                self_slot = Some(slot);
+            }
+        }
+
         let mut lexical_local_names = Vec::new();
         collect_lexical_names(body, &mut lexical_local_names);
 
@@ -108,12 +116,17 @@ impl Compiler {
         // Default return undefined
         compiler.chunk.emit(OpCode::LoadUndefined, 0);
         compiler.chunk.emit(OpCode::Return, 0);
-        let local_names: Vec<String> = compiler.symbols.all_local_names;
+        let local_names_arc = std::sync::Arc::new(compiler.symbols.all_local_names);
+        let lexical_local_names_arc = std::sync::Arc::new(lexical_local_names);
+        compiler.chunk.local_names = std::sync::Arc::clone(&local_names_arc);
+        compiler.chunk.lexical_local_names = std::sync::Arc::clone(&lexical_local_names_arc);
+        compiler.chunk.self_slot = self_slot;
         Ok(FunctionDef {
             name,
             params,
-            local_names,
-            lexical_local_names,
+            self_slot,
+            local_names: local_names_arc,
+            lexical_local_names: lexical_local_names_arc,
             chunk: compiler.chunk,
             is_strict,
             has_param_exprs,

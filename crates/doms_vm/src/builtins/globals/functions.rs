@@ -148,6 +148,65 @@ pub(super) fn register_global_functions(vm: &mut Vm) {
         Ok(vm.alloc_string(res))
     });
 
+    let escape_fn = vm.alloc_native_function("escape", 1, |vm, _this, args| {
+        let s = if let Some(v) = args.first() {
+            vm.to_string_value(*v)
+        } else {
+            "undefined".to_string()
+        };
+        let mut r = String::with_capacity(s.len() * 2);
+        for ch in s.chars() {
+            let cp = ch as u32;
+            if cp <= 127 && (ch.is_ascii_alphanumeric() || matches!(ch, '@' | '*' | '_' | '+' | '-' | '.' | '/')) {
+                r.push(ch);
+            } else if cp < 256 {
+                r.push_str(&format!("%{:02X}", cp));
+            } else {
+                r.push_str(&format!("%u{:04X}", cp));
+            }
+        }
+        Ok(vm.alloc_string(r))
+    });
+
+    let unescape_fn = vm.alloc_native_function("unescape", 1, |vm, _this, args| {
+        let s = if let Some(v) = args.first() {
+            vm.to_string_value(*v)
+        } else {
+            "undefined".to_string()
+        };
+        let chars: Vec<char> = s.chars().collect();
+        let len = chars.len();
+        let mut r = String::with_capacity(len);
+        let mut k = 0;
+        while k < len {
+            let c = chars[k];
+            if c == '%' {
+                if k + 5 < len && chars[k + 1] == 'u' {
+                    let hex_s: String = chars[k + 2..k + 6].iter().collect();
+                    if let Ok(val) = u32::from_str_radix(&hex_s, 16) {
+                        if let Some(decoded_char) = char::from_u32(val) {
+                            r.push(decoded_char);
+                            k += 6;
+                            continue;
+                        }
+                    }
+                } else if k + 2 < len {
+                    let hex_s: String = chars[k + 1..k + 3].iter().collect();
+                    if let Ok(val) = u32::from_str_radix(&hex_s, 16) {
+                        if let Some(decoded_char) = char::from_u32(val) {
+                            r.push(decoded_char);
+                            k += 3;
+                            continue;
+                        }
+                    }
+                }
+            }
+            r.push(c);
+            k += 1;
+        }
+        Ok(vm.alloc_string(r))
+    });
+
     vm.globals.insert("parseInt".to_string(), parse_int);
     vm.globals.insert("parseFloat".to_string(), parse_float);
     vm.globals.insert("isNaN".to_string(), is_nan);
@@ -156,6 +215,12 @@ pub(super) fn register_global_functions(vm: &mut Vm) {
     vm.globals.insert("decodeURI".to_string(), decode_uri);
     vm.globals.insert("encodeURIComponent".to_string(), encode_uri_comp);
     vm.globals.insert("decodeURIComponent".to_string(), decode_uri_comp);
+    vm.globals.insert("escape".to_string(), escape_fn);
+    vm.globals.insert("unescape".to_string(), unescape_fn);
+    if vm.global_object.is_object() {
+        vm.set_property(vm.global_object, "escape", escape_fn);
+        vm.set_property(vm.global_object, "unescape", unescape_fn);
+    }
     vm.globals.insert("NaN".to_string(), JsValue::from_double(f64::NAN));
     vm.globals.insert("Infinity".to_string(), JsValue::from_double(f64::INFINITY));
     vm.globals.insert("undefined".to_string(), JsValue::undefined());

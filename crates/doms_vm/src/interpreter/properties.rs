@@ -5,6 +5,9 @@ use super::*;
 impl Vm {
     pub fn get_prototype_of(&mut self, target: JsValue) -> Option<JsValue> {
         if let Some(ptr) = target.as_object_ptr() {
+            if !self.is_valid_heap_object(ptr) {
+                return None;
+            }
             let obj = unsafe { &*(ptr as *mut JsObject) };
             obj.prototype
         } else if target.is_string() {
@@ -20,8 +23,23 @@ impl Vm {
         }
     }
 
+    pub fn is_instance_of_iterator_proto(&mut self, val: JsValue) -> bool {
+        let Some(iter_proto) = self.iterator_proto else { return false; };
+        let mut curr = self.get_prototype_of(val);
+        while let Some(proto) = curr {
+            if proto == iter_proto {
+                return true;
+            }
+            curr = self.get_prototype_of(proto);
+        }
+        false
+    }
+
     pub fn set_prototype(&mut self, target: JsValue, proto: JsValue) {
         if let Some(ptr) = target.as_object_ptr() {
+            if !self.is_valid_heap_object(ptr) {
+                return;
+            }
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             obj.prototype = if proto.is_null() { None } else { Some(proto) };
         }
@@ -30,6 +48,9 @@ impl Vm {
     pub fn set_property_direct(&mut self, target: JsValue, key: &str, value: JsValue) {
         self.deleted_props.remove(&(target, key.to_string()));
         if let Some(ptr) = target.as_object_ptr() {
+            if !self.is_valid_heap_object(ptr) {
+                return;
+            }
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
                 obj.set_slot(offset, value);
@@ -49,6 +70,9 @@ impl Vm {
         }
         if self.non_extensible_objects.contains(&target) {
             if let Some(ptr) = target.as_object_ptr() {
+                if !self.is_valid_heap_object(ptr) {
+                    return;
+                }
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if !self.shapes.has_property(obj.shape_id, key) {
                     return;
@@ -59,6 +83,9 @@ impl Vm {
             return;
         }
         if let Some(ptr) = target.as_object_ptr() {
+            if !self.is_valid_heap_object(ptr) {
+                return;
+            }
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
 
             // 1. Check own accessor

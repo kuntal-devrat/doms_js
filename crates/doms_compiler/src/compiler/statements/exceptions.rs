@@ -26,18 +26,11 @@ impl Compiler {
                 let catch_start = self.chunk.instructions.len() as i32;
                 self.chunk.patch_jump(catch_jump_idx, catch_start);
 
-                let has_catch_scope = !self.is_in_function && catch_param.is_some();
                 self.symbols.enter_scope();
                 if let Some(param) = catch_param {
-                    if !self.is_in_function {
-                        let name_idx = self.chunk.add_constant(Constant::String(param.clone()));
-                        self.emit_push_catch_scope(name_idx);
-                        self.symbols.define_local(param.clone());
-                    } else {
-                        let slot = self.symbols.define_local(param.clone());
-                        self.chunk.emit(OpCode::SetLocal(slot), 0);
-                        self.chunk.emit(OpCode::Pop, 0);
-                    }
+                    let slot = self.symbols.define_local(param.clone());
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
                 } else {
                     self.chunk.emit(OpCode::Pop, 0);
                 }
@@ -45,9 +38,6 @@ impl Compiler {
                     self.chunk.emit(OpCode::LoadUndefined, 0);
                 }
                 self.compile_statement(catch_stmt, false)?;
-                if has_catch_scope {
-                    self.emit_pop_scope();
-                }
                 self.symbols.exit_scope();
 
                 let exit_catch_target = self.chunk.instructions.len() as i32;
@@ -92,18 +82,11 @@ impl Compiler {
             self.chunk.patch_jump(catch_jump_idx, catch_start);
 
             if let Some(catch_stmt) = catch_block {
-                let has_catch_scope = !self.is_in_function && catch_param.is_some();
                 self.symbols.enter_scope();
                 if let Some(param) = catch_param {
-                    if !self.is_in_function {
-                        let name_idx = self.chunk.add_constant(Constant::String(param.clone()));
-                        self.emit_push_catch_scope(name_idx);
-                        self.symbols.define_local(param.clone());
-                    } else {
-                        let slot = self.symbols.define_local(param.clone());
-                        self.chunk.emit(OpCode::SetLocal(slot), 0);
-                        self.chunk.emit(OpCode::Pop, 0);
-                    }
+                    let slot = self.symbols.define_local(param.clone());
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
                 } else {
                     self.chunk.emit(OpCode::Pop, 0);
                 }
@@ -111,9 +94,6 @@ impl Compiler {
                     self.chunk.emit(OpCode::LoadUndefined, 0);
                 }
                 self.compile_statement(catch_stmt, false)?;
-                if has_catch_scope {
-                    self.emit_pop_scope();
-                }
                 self.symbols.exit_scope();
             }
 

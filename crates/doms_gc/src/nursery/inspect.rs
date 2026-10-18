@@ -58,6 +58,24 @@ impl Nursery {
         self.space_size
     }
 
+    /// Returns the current bump pointer cursor.
+    #[inline]
+    pub fn cursor(&self) -> *mut u8 {
+        self.cursor
+    }
+
+    /// Sets the bump pointer cursor.
+    #[inline]
+    pub fn set_cursor(&mut self, cursor: *mut u8) {
+        self.cursor = cursor;
+    }
+
+    /// Returns the end limit of from-space.
+    #[inline]
+    pub fn limit(&self) -> *mut u8 {
+        self.limit
+    }
+
     /// Returns the utilization ratio (0.0 to 1.0).
     #[inline]
     pub fn utilization(&self) -> f64 {

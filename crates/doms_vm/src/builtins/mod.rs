@@ -41,6 +41,7 @@ mod console;
 mod function;
 mod globals;
 pub(crate) mod helpers;
+pub(crate) mod iterator;
 mod json;
 mod math;
 pub(crate) mod object;
@@ -60,6 +61,7 @@ use console::{native_console_log, register_console};
 use function::register_function_builtins;
 use globals::register_global_helpers;
 use helpers::{define_property_on_module_namespace, get_enumerable_keys, iterate_to_vec};
+use iterator::register_iterator_builtins;
 use json::register_json;
 use math::register_math;
 use object::register_object_builtins;
@@ -79,6 +81,7 @@ pub fn register_builtins(vm: &mut Vm) {
     register_symbol(vm);
     register_object_builtins(vm);
     register_function_builtins(vm);
+    register_iterator_builtins(vm);
     register_array_builtins(vm);
     register_console(vm);
     register_math(vm);
@@ -117,6 +120,14 @@ pub fn register_builtins(vm: &mut Vm) {
         vm.boolean_proto,
         vm.symbol_proto,
         vm.promise_proto,
+        vm.iterator_proto,
+        vm.array_iterator_proto,
+        vm.map_iterator_proto,
+        vm.set_iterator_proto,
+        vm.string_iterator_proto,
+        vm.generator_proto,
+        vm.wrap_for_valid_iterator_proto,
+        vm.iterator_helper_proto,
     ] {
         if let Some(p) = opt_proto {
             builtin_targets.push(p);

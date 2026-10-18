@@ -82,33 +82,6 @@ impl Compiler {
             self.chunk.emit(OpCode::Pop, 0);
             self.chunk.emit(OpCode::LoadUndefined, 0);
         }
-        let mut for_lex_names = Vec::new();
-        if !self.is_in_function {
-            if let Some(init_stmt) = init {
-                if let Statement::VarDecl { kind, declarations } = init_stmt.as_ref() {
-                    if *kind != VarKind::Var {
-                        for d in declarations {
-                            if !for_lex_names.contains(&d.name) {
-                                for_lex_names.push(d.name.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        let has_lex_scope = !for_lex_names.is_empty();
-        if has_lex_scope {
-            self.chunk.emit(OpCode::CreateObject, 0);
-            for name in &for_lex_names {
-                self.chunk.emit(OpCode::Dup, 0);
-                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                self.chunk.emit(OpCode::LoadConst(name_idx), 0);
-                self.chunk.emit(OpCode::LoadUndefined, 0);
-                self.chunk.emit(OpCode::SetElem, 0);
-                self.chunk.emit(OpCode::Pop, 0);
-            }
-            self.emit_push_scope();
-        }
 
         self.symbols.enter_scope();
         if let Some(init_stmt) = init {
@@ -161,9 +134,6 @@ impl Compiler {
         }
 
         self.symbols.exit_scope();
-        if has_lex_scope {
-            self.emit_pop_scope();
-        }
         Ok(())
     }
 

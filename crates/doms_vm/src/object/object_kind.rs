@@ -75,6 +75,41 @@ pub enum ObjectKind {
         index: usize,
         kind: ArrayIterationKind,
     },
+    WrapForValidIterator {
+        iterator: JsValue,
+        next_method: JsValue,
+        done: bool,
+    },
+    IteratorHelper {
+        kind: Box<IteratorHelperKind>,
+        iterator: JsValue,
+        next_method: JsValue,
+        done: bool,
+        index: usize,
+        executing: bool,
+    },
+    StringIterator {
+        string: String,
+        index: usize,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum IteratorHelperKind {
+    Map { mapper: JsValue },
+    Filter { predicate: JsValue },
+    Take { remaining: f64 },
+    Drop { remaining: f64 },
+    FlatMap { mapper: JsValue, inner_iter: Option<JsValue>, inner_next: Option<JsValue> },
+    Concat { iterables: Vec<JsValue>, current_idx: usize, current_iter: Option<JsValue>, current_next: Option<JsValue> },
+    Zip { others: Vec<JsValue>, mode: ZipMode, padding: Option<JsValue> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZipMode {
+    Shortest,
+    Longest,
+    Strict,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

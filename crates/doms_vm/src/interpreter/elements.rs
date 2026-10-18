@@ -34,7 +34,7 @@ impl Vm {
                 return self.get_property(obj, &key);
             }
             if let ObjectKind::TypedArray(ta) = &jsobj.kind {
-                if let Some(v) = Self::read_typed_array_element(ta, index) {
+                if let Some(v) = self.read_typed_array_element_vm(ta, index) {
                     return v;
                 }
             }
@@ -87,7 +87,7 @@ impl Vm {
                 return self.get_property_result(obj, &key);
             }
             if let ObjectKind::TypedArray(ta) = &jsobj.kind {
-                if let Some(v) = Self::read_typed_array_element(ta, index) {
+                if let Some(v) = self.read_typed_array_element_vm(ta, index) {
                     return Ok(v);
                 }
             }
@@ -133,7 +133,7 @@ impl Vm {
                 }
             }
             if let ObjectKind::TypedArray(ta) = &mut jsobj.kind {
-                Self::write_typed_array_element(ta, index, val);
+                let _ = self.write_typed_array_element_vm(ta, index, val);
                 return;
             }
         }

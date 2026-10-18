@@ -56,6 +56,9 @@ impl Vm {
         }
 
         if let Some(ptr) = target.as_object_ptr() {
+            if !self.is_valid_heap_object(ptr) {
+                return Ok(JsValue::undefined());
+            }
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
                 let prop_key = PropertyKeyVal::Symbol(key);
@@ -64,6 +67,9 @@ impl Vm {
         }
 
         let mut curr_proto = if let Some(ptr) = target.as_object_ptr() {
+            if !self.is_valid_heap_object(ptr) {
+                return Ok(JsValue::undefined());
+            }
             let obj = unsafe { &*(ptr as *mut JsObject) };
 
             if let Some(accs) = &obj.symbol_accessors {
@@ -103,6 +109,9 @@ impl Vm {
 
         while let Some(proto_val) = curr_proto {
             if let Some(proto_ptr) = proto_val.as_object_ptr() {
+                if !self.is_valid_heap_object(proto_ptr) {
+                    break;
+                }
                 let proto_obj = unsafe { &*(proto_ptr as *mut JsObject) };
                 if matches!(proto_obj.kind, ObjectKind::Proxy { .. }) {
                     let prop_key = PropertyKeyVal::Symbol(key);
@@ -259,6 +268,14 @@ impl Vm {
         let _ = self.set_symbol_property_result(target, key, value);
     }
 
+    #[inline]
+    pub fn is_valid_heap_object(&self, ptr: *const u8) -> bool {
+        if ptr.is_null() || (ptr as usize) % std::mem::align_of::<JsObject>() != 0 {
+            return false;
+        }
+        self.heap.contains(ptr)
+    }
+
     pub fn has_property_key(&mut self, target: JsValue, key: &PropertyKeyVal) -> Result<bool, VmError> {
         if !target.is_object() {
             return Ok(false);
@@ -274,6 +291,9 @@ impl Vm {
         let mut curr = Some(target);
         while let Some(c_val) = curr {
             if let Some(c_ptr) = c_val.as_object_ptr() {
+                if !self.is_valid_heap_object(c_ptr) {
+                    return Ok(false);
+                }
                 let c_obj = unsafe { &*(c_ptr as *mut JsObject) };
                 if matches!(c_obj.kind, ObjectKind::Proxy { .. }) {
                     return self.proxy_has(c_val, key);
@@ -298,6 +318,9 @@ impl Vm {
             return false;
         }
         let ptr = target.as_object_ptr().unwrap();
+        if !self.is_valid_heap_object(ptr) {
+            return false;
+        }
         let obj = unsafe { &*(ptr as *mut JsObject) };
 
         match prop_key {

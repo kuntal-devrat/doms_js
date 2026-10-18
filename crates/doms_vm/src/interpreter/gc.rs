@@ -73,6 +73,33 @@ impl Vm {
         if let Some(proto) = self.date_proto {
             mark_val(proto, &mut worklist, &mut live);
         }
+        if let Some(proto) = self.iterator_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(proto) = self.array_iterator_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(proto) = self.map_iterator_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(proto) = self.set_iterator_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(proto) = self.string_iterator_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(proto) = self.generator_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(proto) = self.wrap_for_valid_iterator_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(proto) = self.iterator_helper_proto {
+            mark_val(proto, &mut worklist, &mut live);
+        }
+        if let Some(nt) = self.current_new_target {
+            mark_val(nt, &mut worklist, &mut live);
+        }
         if let Some(s) = self.symbol_iterator {
             mark_val(s, &mut worklist, &mut live);
         }
@@ -259,6 +286,8 @@ impl Vm {
             }
         }
 
+        crate::jit::clear_jit_call_cache();
+        crate::jit::clear_jit_array_cache();
         before_count - self.objects.len()
     }
 
@@ -327,6 +356,42 @@ impl Vm {
         if let Some(mut proto) = self.date_proto {
             copy_val(&mut proto, &mut to_cursor);
             self.date_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.iterator_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.iterator_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.array_iterator_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.array_iterator_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.map_iterator_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.map_iterator_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.set_iterator_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.set_iterator_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.string_iterator_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.string_iterator_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.generator_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.generator_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.wrap_for_valid_iterator_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.wrap_for_valid_iterator_proto = Some(proto);
+        }
+        if let Some(mut proto) = self.iterator_helper_proto {
+            copy_val(&mut proto, &mut to_cursor);
+            self.iterator_helper_proto = Some(proto);
+        }
+        if let Some(mut nt) = self.current_new_target {
+            copy_val(&mut nt, &mut to_cursor);
+            self.current_new_target = Some(nt);
         }
         if let Some(mut s) = self.symbol_iterator {
             copy_val(&mut s, &mut to_cursor);
@@ -548,27 +613,32 @@ impl Vm {
         }
 
         // ── Phase 3: Walk self.objects: drop dead objects in from-space, update live pointers ──
-        let mut i = 0;
-        while i < self.objects.len() {
-            let ptr = self.objects[i];
+        self.objects.retain_mut(|ptr_ref| {
+            let ptr = *ptr_ref;
             if self.heap.nursery.contains(ptr as *const u8) {
                 let header = unsafe { &*((ptr as *mut doms_gc::GcHeader).sub(1)) };
                 if header.is_forwarded() {
-                    self.objects[i] = unsafe { header.forwarding_address() as *mut JsObject };
-                    i += 1;
+                    *ptr_ref = unsafe { header.forwarding_address() as *mut JsObject };
+                    true
                 } else {
-                    unsafe {
-                        std::ptr::drop_in_place(ptr);
-                    }
-                    self.objects.swap_remove(i);
+                    false
                 }
             } else {
-                i += 1;
+                true
             }
-        }
+        });
 
         // ── Phase 4: Finish scavenge (swaps spaces, resets cursor, clears old from-space) ──
         self.heap.nursery.finish_scavenge(to_cursor);
+        crate::jit::NURSERY_PTRS.with(|cell| {
+            let ptrs = unsafe { &mut *cell.get() };
+            if !ptrs.bump.is_null() {
+                ptrs.bump = self.heap.nursery.cursor();
+                ptrs.limit = self.heap.nursery.limit();
+            }
+        });
+        crate::jit::clear_jit_call_cache();
+        crate::jit::clear_jit_array_cache();
     }
 }
 

@@ -24,8 +24,8 @@ mod sweep;
 #[cfg(test)]
 mod tests;
 
-/// Default old generation size: 64 MB.
-const DEFAULT_OLD_GEN_SIZE: usize = 64 * 1024 * 1024;
+/// Default old generation size: 8 MB.
+const DEFAULT_OLD_GEN_SIZE: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkState {

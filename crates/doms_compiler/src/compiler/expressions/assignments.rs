@@ -41,7 +41,7 @@ impl Compiler {
             }
         }
         self.chunk.emit(OpCode::Dup, 0);
-        if (self.is_in_function || target.starts_with('@')) && self.with_depth == 0 {
+        if self.with_depth == 0 {
             if let Some(slot) = self.symbols.resolve_local(target) {
                 self.chunk.emit(OpCode::SetLocal(slot), 0);
                 self.chunk.emit(OpCode::Pop, 0);
@@ -102,7 +102,7 @@ impl Compiler {
         let one_idx = self.chunk.add_constant(Constant::Number(1.0));
         match unwrap_grouping(expr) {
             Expression::Identifier(name) => {
-                if self.is_in_function && self.with_depth == 0 {
+                if self.with_depth == 0 {
                     if let Some(slot) = self.symbols.resolve_local(name) {
                         self.chunk.emit(OpCode::GetLocal(slot), 0);
                     } else {
@@ -123,7 +123,7 @@ impl Compiler {
                         self.chunk.emit(OpCode::Sub, 0);
                     }
                     self.chunk.emit(OpCode::Dup, 0);
-                    if self.is_in_function && self.with_depth == 0 {
+                    if self.with_depth == 0 {
                         if let Some(slot) = self.symbols.resolve_local(name) {
                             self.chunk.emit(OpCode::SetLocal(slot), 0);
                             self.chunk.emit(OpCode::Pop, 0);
@@ -145,7 +145,7 @@ impl Compiler {
                     } else {
                         self.chunk.emit(OpCode::Sub, 0);
                     }
-                    if self.is_in_function && self.with_depth == 0 {
+                    if self.with_depth == 0 {
                         if let Some(slot) = self.symbols.resolve_local(name) {
                             self.chunk.emit(OpCode::SetLocal(slot), 0);
                             self.chunk.emit(OpCode::Pop, 0);

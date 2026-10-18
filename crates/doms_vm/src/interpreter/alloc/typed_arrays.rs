@@ -28,7 +28,7 @@ impl Vm {
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
     pub fn read_typed_array_element(ta: &JsTypedArray, index: usize) -> Option<JsValue> {
-        if index >= ta.length {
+        if ta.buffer.is_detached() || index >= ta.length {
             return None;
         }
         let bpe = ta.kind.bytes_per_element();
@@ -107,8 +107,8 @@ impl Vm {
             }
         }
     }
-    pub fn write_typed_array_element(ta: &mut JsTypedArray, index: usize, value: JsValue) -> bool {
-        if index >= ta.length {
+    pub fn write_typed_array_element(ta: &JsTypedArray, index: usize, value: JsValue) -> bool {
+        if ta.buffer.is_detached() || index >= ta.length {
             return false;
         }
         let bpe = ta.kind.bytes_per_element();
@@ -194,6 +194,108 @@ impl Vm {
             }
         }
         true
+    }
+
+    pub fn read_typed_array_element_vm(&mut self, ta: &JsTypedArray, index: usize) -> Option<JsValue> {
+        if ta.buffer.is_detached() || index >= ta.length {
+            return None;
+        }
+        let bpe = ta.kind.bytes_per_element();
+        let off = ta.byte_offset + index * bpe;
+        if off + bpe > ta.buffer.byte_length() {
+            return None;
+        }
+        match ta.kind {
+            TypedArrayKind::BigInt64 => {
+                let mut bytes = [0u8; 8];
+                for i in 0..8 {
+                    bytes[i] = ta.buffer.get(off + i)?;
+                }
+                let val = i64::from_le_bytes(bytes);
+                Some(self.alloc_bigint(BigInt::from(val)))
+            }
+            TypedArrayKind::BigUint64 => {
+                let mut bytes = [0u8; 8];
+                for i in 0..8 {
+                    bytes[i] = ta.buffer.get(off + i)?;
+                }
+                let val = u64::from_le_bytes(bytes);
+                Some(self.alloc_bigint(BigInt::from(val)))
+            }
+            _ => Self::read_typed_array_element(ta, index),
+        }
+    }
+
+    pub fn to_bigint_op(&mut self, val: JsValue) -> Result<BigInt, VmError> {
+        let prim = self.to_primitive(val, PreferredType::Number)?;
+        if prim.is_nullish() {
+            return Err(VmError::TypeError("Cannot convert undefined or null to a BigInt".into()));
+        }
+        if prim.is_symbol() {
+            return Err(VmError::TypeError("Cannot convert a Symbol value to a BigInt".into()));
+        }
+        if prim.is_number() {
+            return Err(VmError::TypeError("Cannot convert number to a BigInt".into()));
+        }
+        if let Some(b) = self.as_bigint_val(prim) {
+            return Ok(b);
+        }
+        if prim.is_boolean() {
+            return Ok(if prim.as_boolean() == Some(true) { BigInt::one() } else { BigInt::zero() });
+        }
+        let s = self.to_string_value(prim);
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Ok(BigInt::zero());
+        }
+        if let Some(bi) = crate::interpreter::helpers::string_to_bigint(trimmed) {
+            return Ok(bi);
+        }
+        Err(VmError::SyntaxError("Cannot convert string to a BigInt".into()))
+    }
+
+    pub fn write_typed_array_element_vm(&mut self, ta: &JsTypedArray, index: usize, value: JsValue) -> Result<bool, VmError> {
+        if ta.buffer.is_detached() || index >= ta.length {
+            return Ok(false);
+        }
+        let bpe = ta.kind.bytes_per_element();
+        let off = ta.byte_offset + index * bpe;
+        if off + bpe > ta.buffer.byte_length() {
+            return Ok(false);
+        }
+        match ta.kind {
+            TypedArrayKind::BigInt64 => {
+                let bi = self.to_bigint_op(value)?;
+                let (sign, digits) = bi.to_u64_digits();
+                let mut val_u64 = digits.first().copied().unwrap_or(0);
+                if sign == num_bigint::Sign::Minus {
+                    val_u64 = (!val_u64).wrapping_add(1);
+                }
+                let bytes = (val_u64 as i64).to_le_bytes();
+                for (i, &b) in bytes.iter().enumerate() {
+                    ta.buffer.set(off + i, b);
+                }
+            }
+            TypedArrayKind::BigUint64 => {
+                let bi = self.to_bigint_op(value)?;
+                let (sign, digits) = bi.to_u64_digits();
+                let mut val_u64 = digits.first().copied().unwrap_or(0);
+                if sign == num_bigint::Sign::Minus {
+                    val_u64 = (!val_u64).wrapping_add(1);
+                }
+                let bytes = val_u64.to_le_bytes();
+                for (i, &b) in bytes.iter().enumerate() {
+                    ta.buffer.set(off + i, b);
+                }
+            }
+            _ => {
+                if self.as_bigint_val(value).is_some() {
+                    return Err(VmError::TypeError("Cannot convert BigInt to number".into()));
+                }
+                Self::write_typed_array_element(ta, index, value);
+            }
+        }
+        Ok(true)
     }
     pub fn alloc_worker(&mut self, port: Arc<std::sync::Mutex<doms_parallel::MessagePort>>) -> JsValue {
         let obj = JsObject::new_worker(ShapeRegistry::ROOT_SHAPE_ID, None, port);

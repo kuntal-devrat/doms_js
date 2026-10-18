@@ -29,8 +29,8 @@ mod inspect;
 #[cfg(test)]
 mod tests;
 
-/// Default size of each semi-space: 4 MB.
-pub const DEFAULT_SEMI_SPACE_SIZE: usize = 4 * 1024 * 1024;
+/// Default size of each semi-space: 2 MB (fits in CPU L3 cache).
+pub const DEFAULT_SEMI_SPACE_SIZE: usize = 2 * 1024 * 1024;
 
 /// Number of scavenges an object must survive before promotion.
 pub const PROMOTION_THRESHOLD: u8 = 2;

@@ -20,30 +20,44 @@ impl Vm {
             return upvalues;
         }
 
-        let (local_names, locals, arguments, callee_name, callee_val) = {
+        let (local_names, callee_name) = {
             let frame = self.frames.last().unwrap();
             let c_name = frame.callee_func.as_ref().and_then(|f| f.name.clone());
-            (frame.local_names.clone(), frame.locals.clone(), frame.arguments, c_name, frame.callee_val)
+            (frame.local_names.clone(), c_name)
         };
+        let prev_temp = self.temp_roots.len();
         let env = self.alloc_object();
-        for (i, name) in local_names.iter().enumerate() {
-            let val = locals.get(i).copied().unwrap_or(JsValue::undefined());
-            self.set_property(env, name, val);
-        }
-        if let Some(args_val) = arguments {
-            if !local_names.iter().any(|n| n == "arguments") {
-                self.set_property(env, "arguments", args_val);
-            }
-        }
-        if let (Some(fn_name), Some(val)) = (callee_name, callee_val) {
-            if !local_names.iter().any(|n| n == &fn_name) {
-                self.set_property(env, &fn_name, val);
-            }
-        }
+        self.temp_roots.push(env);
         if let Some(frame) = self.frames.last_mut() {
             frame.env_obj = Some(env);
         }
-        upvalues.push(env);
+        for (i, name) in local_names.iter().enumerate() {
+            let cur_env = self.temp_roots[prev_temp];
+            let val = self.frames.last().and_then(|f| f.locals.get(i).copied()).unwrap_or(JsValue::undefined());
+            self.set_property(cur_env, name, val);
+        }
+        if self.frames.last().and_then(|f| f.arguments).is_some() {
+            if !local_names.iter().any(|n| n == "arguments") {
+                let cur_env = self.temp_roots[prev_temp];
+                if let Some(args_val) = self.frames.last().and_then(|f| f.arguments) {
+                    self.set_property(cur_env, "arguments", args_val);
+                }
+            }
+        }
+        if let Some(fn_name) = callee_name {
+            if !local_names.iter().any(|n| n == &fn_name) {
+                let cur_env = self.temp_roots[prev_temp];
+                if let Some(val) = self.frames.last().and_then(|f| f.callee_val) {
+                    self.set_property(cur_env, &fn_name, val);
+                }
+            }
+        }
+        let fresh_env = self.temp_roots[prev_temp];
+        self.temp_roots.truncate(prev_temp);
+        if let Some(frame) = self.frames.last_mut() {
+            frame.env_obj = Some(fresh_env);
+        }
+        upvalues.push(fresh_env);
         upvalues
     }
 }

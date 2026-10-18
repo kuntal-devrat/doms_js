@@ -22,6 +22,7 @@ impl Vm {
                     let js_fn = JsFunction {
                         name: def.name.clone(),
                         params: def.params.clone(),
+                        self_slot: def.self_slot,
                         local_names: def.local_names.clone(),
                         lexical_local_names: def.lexical_local_names.clone(),
                         chunk: Arc::new(def.chunk.clone()),
@@ -30,11 +31,14 @@ impl Vm {
                         is_generator: false,
                         call_count: 0,
                         jit_entry: None,
+                        jit_attempted: false,
                         is_strict: def.is_strict,
                         has_param_exprs: def.has_param_exprs,
                         is_method: def.is_method,
                         is_arrow: def.is_arrow,
                         home_object,
+                        prototype: None,
+                        initial_shape: None,
                     };
                     let func_val = self.alloc_function(js_fn);
                     self.push(func_val);
@@ -59,6 +63,7 @@ impl Vm {
                     let js_fn = JsFunction {
                         name: def.name.clone(),
                         params: def.params.clone(),
+                        self_slot: def.self_slot,
                         local_names: def.local_names.clone(),
                         lexical_local_names: def.lexical_local_names.clone(),
                         chunk: Arc::new(def.chunk.clone()),
@@ -67,11 +72,14 @@ impl Vm {
                         is_generator: false,
                         call_count: 0,
                         jit_entry: None,
+                        jit_attempted: false,
                         is_strict: def.is_strict,
                         has_param_exprs: def.has_param_exprs,
                         is_method: def.is_method,
                         is_arrow: def.is_arrow,
                         home_object,
+                        prototype: None,
+                        initial_shape: None,
                     };
                     let func_val = self.alloc_function(js_fn);
                     self.push(func_val);
@@ -96,6 +104,7 @@ impl Vm {
                     let js_fn = JsFunction {
                         name: def.name.clone(),
                         params: def.params.clone(),
+                        self_slot: def.self_slot,
                         local_names: def.local_names.clone(),
                         lexical_local_names: def.lexical_local_names.clone(),
                         chunk: Arc::new(def.chunk.clone()),
@@ -104,11 +113,14 @@ impl Vm {
                         is_generator: true,
                         call_count: 0,
                         jit_entry: None,
+                        jit_attempted: false,
                         is_strict: def.is_strict,
                         has_param_exprs: def.has_param_exprs,
                         is_method: def.is_method,
                         is_arrow: def.is_arrow,
                         home_object,
+                        prototype: None,
+                        initial_shape: None,
                     };
                     let func_val = self.alloc_function(js_fn);
                     self.push(func_val);
@@ -133,6 +145,7 @@ impl Vm {
                     let js_fn = JsFunction {
                         name: def.name.clone(),
                         params: def.params.clone(),
+                        self_slot: def.self_slot,
                         local_names: def.local_names.clone(),
                         lexical_local_names: def.lexical_local_names.clone(),
                         chunk: Arc::new(def.chunk.clone()),
@@ -141,11 +154,14 @@ impl Vm {
                         is_generator: true,
                         call_count: 0,
                         jit_entry: None,
+                        jit_attempted: false,
                         is_strict: def.is_strict,
                         has_param_exprs: def.has_param_exprs,
                         is_method: def.is_method,
                         is_arrow: def.is_arrow,
                         home_object,
+                        prototype: None,
+                        initial_shape: None,
                     };
                     let func_val = self.alloc_function(js_fn);
                     self.push(func_val);
@@ -171,7 +187,7 @@ impl Vm {
                     if is_eval {
                         self.in_direct_eval = true;
                     }
-                    let res = self.execute_call_internal(callee, JsValue::undefined(), args);
+                    let res = self.execute_call_internal(callee, JsValue::undefined(), &args);
                     self.in_direct_eval = false;
                     match res {
                         Ok(Some(res)) => self.push(res),

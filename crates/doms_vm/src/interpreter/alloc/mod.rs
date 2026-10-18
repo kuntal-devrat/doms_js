@@ -9,6 +9,20 @@ mod objects;
 mod typed_arrays;
 
 impl Vm {
+    /// Allocate a `JsObject` directly in OldGen (immovable tenured space for functions/prototypes).
+    pub fn allocate_js_object_old_gen(&mut self, obj: JsObject) -> *mut JsObject {
+        let payload_size = std::mem::size_of::<JsObject>();
+        if let Some(ptr) = self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+            let obj_ptr = ptr as *mut JsObject;
+            unsafe {
+                std::ptr::write(obj_ptr, obj);
+            }
+            self.track_ptr(obj_ptr);
+            return obj_ptr;
+        }
+        self.allocate_js_object(obj)
+    }
+
     /// Allocate a `JsObject` using the GC heap bump nursery and fallback spaces.
     pub fn allocate_js_object(&mut self, mut obj: JsObject) -> *mut JsObject {
         let payload_size = std::mem::size_of::<JsObject>();

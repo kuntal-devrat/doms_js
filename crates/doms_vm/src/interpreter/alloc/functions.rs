@@ -7,7 +7,7 @@ impl Vm {
         let native = NativeFunction::new_fn(name.to_string(), length, func);
         let proto = self.function_proto.or(self.object_proto);
         let obj = JsObject::new_native_function(ShapeRegistry::ROOT_SHAPE_ID, proto, native);
-        let ptr = self.allocate_js_object(obj);
+        let ptr = self.allocate_js_object_old_gen(obj);
         let fn_val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
 
         let prev_temp = self.temp_roots.len();
@@ -32,7 +32,7 @@ impl Vm {
         let native = NativeFunction::new_closure(name.to_string(), length, func);
         let proto = self.function_proto.or(self.object_proto);
         let obj = JsObject::new_native_function(ShapeRegistry::ROOT_SHAPE_ID, proto, native);
-        let ptr = self.allocate_js_object(obj);
+        let ptr = self.allocate_js_object_old_gen(obj);
         let fn_val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
 
         let prev_temp = self.temp_roots.len();
@@ -57,7 +57,7 @@ impl Vm {
         let len = func.params.iter().take_while(|p| !p.starts_with("...")).count();
         let name_str = func.name.as_deref().unwrap_or("").to_string();
         let obj = JsObject::new_function(ShapeRegistry::ROOT_SHAPE_ID, fn_proto, func);
-        let ptr = self.allocate_js_object(obj);
+        let ptr = self.allocate_js_object_old_gen(obj);
         let fn_val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
 
         let prev_temp = self.temp_roots.len();
@@ -71,13 +71,19 @@ impl Vm {
         self.set_own_property(self.temp_roots[prev_temp], "name", name_val);
         self.non_enumerable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
 
-        let proto = self.alloc_object();
+        let proto = self.alloc_object_old_gen();
         let current_fn_val = self.temp_roots[prev_temp];
         self.set_own_property(proto, "constructor", current_fn_val);
         self.non_enumerable_props.insert((proto, "constructor".to_string()));
         self.set_own_property(current_fn_val, "prototype", proto);
         self.non_enumerable_props.insert((current_fn_val, "prototype".to_string()));
         self.non_configurable_props.insert((current_fn_val, "prototype".to_string()));
+        if let Some(p) = current_fn_val.as_object_ptr() {
+            let jsobj = unsafe { &mut *(p as *mut JsObject) };
+            if let ObjectKind::Function(ref mut f) = jsobj.kind {
+                f.prototype = Some(proto);
+            }
+        }
 
         self.temp_roots.pop();
         self.temp_roots.truncate(prev_temp);

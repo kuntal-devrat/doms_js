@@ -27,6 +27,12 @@ impl JitCompiler {
         builder::compile_native(chunk)
     }
 
+    /// Compile a bytecode chunk into Cranelift native machine code for On-Stack Replacement (OSR) at a loop target.
+    #[inline]
+    pub fn compile_osr(chunk: &BytecodeChunk, loop_target: usize) -> Option<JitFunction> {
+        builder::compile_native_osr(chunk, loop_target)
+    }
+
     /// Compile a bytecode chunk using the Tier-1 interpreted delegation fallback.
     pub fn compile_interpreted(chunk: &BytecodeChunk) -> Option<JitFunction> {
         let chunk_clone = Arc::new(chunk.clone());
@@ -58,6 +64,9 @@ impl JitCompiler {
                 vm.push(*arg);
             }
 
+            let local_names = Arc::clone(&frame_chunk.local_names);
+            let lexical_local_names = Arc::clone(&frame_chunk.lexical_local_names);
+
             vm.frames.push(crate::interpreter::CallFrame {
                 chunk: frame_chunk,
                 ip: 0,
@@ -65,12 +74,13 @@ impl JitCompiler {
                 this_val,
                 gen_val: None,
                 locals: args.to_vec(),
-                local_names: Vec::new(),
-                lexical_local_names: Vec::new(),
+                local_names,
+                lexical_local_names,
                 scopes: Vec::new(),
                 upvalues_count: 0,
                 env_obj: None,
                 arguments: None,
+                raw_args: Some(args.to_vec()),
                 is_strict: false,
                 new_target: None,
                 is_function: true,

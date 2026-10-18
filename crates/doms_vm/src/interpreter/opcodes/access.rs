@@ -12,7 +12,7 @@ impl Vm {
         target_depth: usize,
     ) -> Result<(), VmError> {
         let name = match &chunk.constants[name_idx as usize] {
-            Constant::String(s) => s.clone(),
+            Constant::String(s) => s.as_str(),
             _ => return Err(VmError::TypeError("Property name must be string".into())),
         };
         let obj = self.pop()?;
@@ -71,7 +71,20 @@ impl Vm {
 
         if let Some(ptr) = obj.as_object_ptr() {
             let jsobj = unsafe { &*(ptr as *mut JsObject) };
-            let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(&name));
+            if let ObjectKind::Array(elements) = &jsobj.kind {
+                if name == "length" {
+                    chunk.record_feedback_array_length(call_site_ip);
+                    let len = elements.len();
+                    let val = if len <= i32::MAX as usize {
+                        JsValue::from_int32(len as i32)
+                    } else {
+                        JsValue::from_double(len as f64)
+                    };
+                    self.push(val);
+                    return Ok(());
+                }
+            }
+            let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(name));
             if !has_acc && !self.module_namespace_objects.contains(&obj) {
                 if let Some(offset) = self.chunk_ics.get(&chunk_key).and_then(|ics| {
                     ics.get(call_site_ip).and_then(|slot| slot.lookup(name_idx, jsobj.shape_id))
@@ -85,7 +98,7 @@ impl Vm {
         }
 
         self.temp_roots.push(obj);
-        let val_res = self.get_property_result(self.temp_roots.last().copied().unwrap(), &name);
+        let val_res = self.get_property_result(self.temp_roots.last().copied().unwrap(), name);
         let rooted_obj = self.temp_roots.pop().unwrap();
         let val = match val_res {
             Ok(v) => v,
@@ -97,14 +110,23 @@ impl Vm {
 
         if let Some(ptr) = rooted_obj.as_object_ptr() {
             let jsobj = unsafe { &*(ptr as *mut JsObject) };
-            let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(&name));
-            if !has_acc {
-                if let Some(offset) = self.shapes.lookup_offset(jsobj.shape_id, &name) {
-                    let ics = self.chunk_ics.entry(chunk_key).or_insert_with(|| {
-                        vec![InlineCacheSlot::new(); chunk.instructions.len()]
-                    });
-                    if call_site_ip < ics.len() {
-                        ics[call_site_ip].record_hit(name_idx, jsobj.shape_id, offset);
+            if matches!(jsobj.kind, ObjectKind::Array(_)) {
+                if name == "length" {
+                    chunk.record_feedback_array_length(call_site_ip);
+                } else if name == "push" {
+                    chunk.record_feedback_array_push(call_site_ip);
+                }
+            } else {
+                let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(name));
+                if !has_acc {
+                    if let Some(offset) = self.shapes.lookup_offset(jsobj.shape_id, name) {
+                        let ics = self.chunk_ics.entry(chunk_key).or_insert_with(|| {
+                            vec![InlineCacheSlot::new(); chunk.instructions.len()]
+                        });
+                        if call_site_ip < ics.len() {
+                            ics[call_site_ip].record_hit(name_idx, jsobj.shape_id, offset);
+                        }
+                        chunk.record_feedback_shape(call_site_ip, jsobj.shape_id, offset);
                     }
                 }
             }
@@ -121,7 +143,7 @@ impl Vm {
         target_depth: usize,
     ) -> Result<(), VmError> {
         let name = match &chunk.constants[name_idx as usize] {
-            Constant::String(s) => s.clone(),
+            Constant::String(s) => s.as_str(),
             _ => return Err(VmError::TypeError("Property name must be string".into())),
         };
         let val = self.pop()?;
@@ -138,10 +160,10 @@ impl Vm {
             }
             if let Some(ptr) = obj.as_object_ptr() {
                 let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
-                if let Some(elem) = jsobj.get_private_element(&name).cloned() {
+                if let Some(elem) = jsobj.get_private_element(name).cloned() {
                     match elem {
                         PrivateElement::Value(_) => {
-                            jsobj.insert_private_element(name, val);
+                            jsobj.insert_private_element(name.to_string(), val);
                             self.push(val);
                             return Ok(());
                         }
@@ -192,7 +214,7 @@ impl Vm {
             }
         }
 
-        if self.non_writable_props.contains(&(obj, name.clone())) {
+        if !self.non_writable_props.is_empty() && self.non_writable_props.contains(&(obj, name.to_string())) {
             let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
             if is_strict {
                 self.handle_exception_at_depth(
@@ -219,8 +241,8 @@ impl Vm {
 
         if let Some(ptr) = obj.as_object_ptr() {
             let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
-            let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(&name));
-            if !has_acc && jsobj.prototype.is_none() {
+            let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(name));
+            if !has_acc {
                 if let Some(offset) = self.chunk_ics.get(&chunk_key).and_then(|ics| {
                     ics.get(call_site_ip).and_then(|slot| slot.lookup(name_idx, jsobj.shape_id))
                 }) {
@@ -233,7 +255,7 @@ impl Vm {
 
         self.temp_roots.push(obj);
         self.temp_roots.push(val);
-        let res = self.set_property_result(self.temp_roots[self.temp_roots.len() - 2], &name, self.temp_roots[self.temp_roots.len() - 1]);
+        let res = self.set_property_result(self.temp_roots[self.temp_roots.len() - 2], name, self.temp_roots[self.temp_roots.len() - 1]);
         let _rooted_val = self.temp_roots.pop().unwrap();
         let rooted_obj = self.temp_roots.pop().unwrap();
         if let Err(err) = res {
@@ -243,15 +265,16 @@ impl Vm {
 
         if let Some(ptr) = rooted_obj.as_object_ptr() {
             let jsobj = unsafe { &*(ptr as *mut JsObject) };
-            let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(&name));
-            if !has_acc && jsobj.prototype.is_none() {
-                if let Some(offset) = self.shapes.lookup_offset(jsobj.shape_id, &name) {
+            let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(name));
+            if !has_acc {
+                if let Some(offset) = self.shapes.lookup_offset(jsobj.shape_id, name) {
                     let ics = self.chunk_ics.entry(chunk_key).or_insert_with(|| {
                         vec![InlineCacheSlot::new(); chunk.instructions.len()]
                     });
                     if call_site_ip < ics.len() {
                         ics[call_site_ip].record_hit(name_idx, jsobj.shape_id, offset);
                     }
+                    chunk.record_feedback_shape(call_site_ip, jsobj.shape_id, offset);
                 }
             }
         }
@@ -260,20 +283,29 @@ impl Vm {
         Ok(())
     }
 
+#[inline(always)]
+fn to_canonical_array_index(key: JsValue) -> Option<usize> {
+    if key.is_int32() {
+        let i = key.as_int32().unwrap();
+        if i >= 0 {
+            return Some(i as usize);
+        }
+    } else if let Some(d) = key.as_double() {
+        if !d.is_nan() && !d.is_infinite() && d >= 0.0 && d.fract() == 0.0 && d < 4294967295.0 {
+            return Some(d as usize);
+        }
+    }
+    None
+}
+
     pub(crate) fn op_get_elem(
         &mut self,
         target_depth: usize,
     ) -> Result<(), VmError> {
                     let key = self.pop()?;
                     let obj = self.pop()?;
-                    if obj.is_sso_string() {
-                        let i = if key.is_int32() {
-                            key.as_int32().unwrap()
-                        } else {
-                            key.to_int32().unwrap_or(-1)
-                        };
-                        if i >= 0 {
-                            let idx = i as usize;
+                    if let Some(idx) = Self::to_canonical_array_index(key) {
+                        if obj.is_sso_string() {
                             let len = ((obj.0 >> 40) & 0x7) as usize;
                             if idx < len {
                                 let payload = obj.0 & 0x0000_00FF_FFFF_FFFF;
@@ -283,61 +315,36 @@ impl Vm {
                                 return Ok(());
                             }
                         }
-                    }
-                    if let Some(ptr) = obj.as_object_ptr() {
-                        let jsobj = unsafe { &*(ptr as *mut JsObject) };
-                        if let ObjectKind::Array(elements) = &jsobj.kind {
-                            let i = if key.is_int32() {
-                                key.as_int32().unwrap()
-                            } else {
-                                key.to_int32().unwrap_or(-1)
-                            };
-                            if i >= 0 && (i as usize) < elements.len() {
-                                let el = elements[i as usize];
-                                if !el.is_hole() {
-                                    self.push(el);
-                                    return Ok(());
+                        if let Some(ptr) = obj.as_object_ptr() {
+                            let jsobj = unsafe { &*(ptr as *mut JsObject) };
+                            if let ObjectKind::Array(elements) = &jsobj.kind {
+                                if idx < elements.len() {
+                                    let el = elements[idx];
+                                    if !el.is_hole() {
+                                        self.push(el);
+                                        return Ok(());
+                                    }
                                 }
                             }
-                        }
-                        if let ObjectKind::String(s) = &jsobj.kind {
-                            let i = if key.is_int32() {
-                                key.as_int32().unwrap()
-                            } else {
-                                key.to_int32().unwrap_or(-1)
-                            };
-                            if i >= 0 {
-                                let idx = i as usize;
+                            if let ObjectKind::String(s) = &jsobj.kind {
                                 if let Some(ch) = s.chars().nth(idx) {
                                     let ch_str = self.alloc_string(ch.to_string());
                                     self.push(ch_str);
                                     return Ok(());
                                 }
                             }
-                        }
-                        if let ObjectKind::ConsString { length, .. } = &jsobj.kind {
-                            let i = if key.is_int32() {
-                                key.as_int32().unwrap()
-                            } else {
-                                key.to_int32().unwrap_or(-1)
-                            };
-                            if i >= 0 && (i as usize) < *length {
-                                let s = self.to_string_value(obj);
-                                if let Some(ch) = s.chars().nth(i as usize) {
-                                    let ch_str = self.alloc_string(ch.to_string());
-                                    self.push(ch_str);
-                                    return Ok(());
+                            if let ObjectKind::ConsString { length, .. } = &jsobj.kind {
+                                if idx < *length {
+                                    let s = self.to_string_value(obj);
+                                    if let Some(ch) = s.chars().nth(idx) {
+                                        let ch_str = self.alloc_string(ch.to_string());
+                                        self.push(ch_str);
+                                        return Ok(());
+                                    }
                                 }
                             }
-                        }
-                        if let ObjectKind::TypedArray(ta) = &jsobj.kind {
-                            let i = if key.is_int32() {
-                                key.as_int32().unwrap()
-                            } else {
-                                key.to_int32().unwrap_or(-1)
-                            };
-                            if i >= 0 {
-                                if let Some(val) = Self::read_typed_array_element(ta, i as usize) {
+                            if let ObjectKind::TypedArray(ta) = &jsobj.kind {
+                                if let Some(val) = self.read_typed_array_element_vm(ta, idx) {
                                     self.push(val);
                                     return Ok(());
                                 }
@@ -382,19 +389,13 @@ impl Vm {
                     let val = self.pop()?;
                     let key = self.pop()?;
                     let obj = self.pop()?;
-                    if let Some(ptr) = obj.as_object_ptr() {
-                        let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
-                        if let ObjectKind::Array(elements) = &mut jsobj.kind {
-                            let i = if key.is_int32() {
-                                key.as_int32().unwrap()
-                            } else {
-                                key.to_int32().unwrap_or(-1)
-                            };
-                            if i >= 0 {
-                                let idx = i as usize;
+                    if let Some(idx) = Self::to_canonical_array_index(key) {
+                        if let Some(ptr) = obj.as_object_ptr() {
+                            let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                            if let ObjectKind::Array(elements) = &mut jsobj.kind {
                                 let is_existing = idx < elements.len() && !elements[idx].is_hole();
                                 let is_standard_proto = jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
-                                if (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 && !self.non_extensible_objects.contains(&obj) {
+                                if (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 && (self.non_extensible_objects.is_empty() || !self.non_extensible_objects.contains(&obj)) {
                                     if idx < elements.len() {
                                         elements[idx] = val;
                                     } else if idx == elements.len() {
@@ -407,14 +408,17 @@ impl Vm {
                                     return Ok(());
                                 }
                             }
-                        }
-                        if let ObjectKind::TypedArray(ta) = &mut jsobj.kind {
-                            if let Some(i) = key.to_int32() {
-                                if i >= 0 {
-                                    if Self::write_typed_array_element(ta, i as usize, val) {
+                            if let ObjectKind::TypedArray(ta) = &mut jsobj.kind {
+                                match self.write_typed_array_element_vm(ta, idx, val) {
+                                    Ok(true) => {
                                         self.push(val);
                                         return Ok(());
                                     }
+                                    Err(err) => {
+                                        self.handle_exception_at_depth(err, target_depth)?;
+                                        return Ok(());
+                                    }
+                                    _ => {}
                                 }
                             }
                         }

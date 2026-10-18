@@ -4,8 +4,49 @@
 use super::*;
 
 impl Vm {
+    pub fn alloc_object_old_gen(&mut self) -> JsValue {
+        let obj = JsObject::new_ordinary(ShapeRegistry::ROOT_SHAPE_ID, self.object_proto);
+        let ptr = self.allocate_js_object_old_gen(obj);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
     pub fn alloc_object(&mut self) -> JsValue {
         let obj = JsObject::new_ordinary(ShapeRegistry::ROOT_SHAPE_ID, self.object_proto);
+        let ptr = self.allocate_js_object(obj);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_object_with_proto(&mut self, proto: Option<JsValue>) -> JsValue {
+        let obj = JsObject::new_ordinary(ShapeRegistry::ROOT_SHAPE_ID, proto.or(self.object_proto));
+        let ptr = self.allocate_js_object(obj);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_object_with_exact_proto(&mut self, proto: Option<JsValue>) -> JsValue {
+        let obj = JsObject::new_ordinary(ShapeRegistry::ROOT_SHAPE_ID, proto);
+        let ptr = self.allocate_js_object(obj);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
+
+    pub fn alloc_iter_result(&mut self, value: JsValue, done: bool) -> Result<JsValue, VmError> {
+        let prev = self.temp_roots.len();
+        self.temp_roots.push(value);
+        let res = self.alloc_object();
+        self.temp_roots.push(res);
+        let val = self.temp_roots[prev];
+        let obj = self.temp_roots[prev + 1];
+        self.set_property_direct(obj, "value", val);
+        self.set_property_direct(obj, "done", JsValue::from_boolean(done));
+        self.temp_roots.truncate(prev);
+        Ok(obj)
+    }
+
+    pub fn alloc_object_with_shape_and_proto(&mut self, shape_id: crate::shape::ShapeId, proto: Option<JsValue>) -> JsValue {
+        let mut obj = JsObject::new_ordinary(shape_id, proto.or(self.object_proto));
+        let num_props = self.shapes.get(shape_id).map(|s| s.next_offset as usize).unwrap_or(0);
+        if num_props > crate::object::IN_OBJECT_SLOTS {
+            obj.extra_slots.resize(num_props - crate::object::IN_OBJECT_SLOTS, JsValue::hole());
+        }
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
@@ -123,7 +164,8 @@ impl Vm {
         res
     }
     pub fn alloc_generator(&mut self, generator: JsGenerator) -> JsValue {
-        let obj = JsObject::new_generator(ShapeRegistry::ROOT_SHAPE_ID, None, generator);
+        let proto = self.generator_proto.or(self.iterator_proto);
+        let obj = JsObject::new_generator(ShapeRegistry::ROOT_SHAPE_ID, proto, generator);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }

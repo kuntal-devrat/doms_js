@@ -7,24 +7,24 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     vm.string_proto = Some(string_proto);
 
     let str_value_of = vm.alloc_native_function("valueOf", 0, |vm, this, _args| {
-        if this.is_string() {
+        if this.is_js_string() {
             return Ok(this);
         }
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::StringObject(ref s) | ObjectKind::String(ref s) = obj.kind {
+            if let ObjectKind::StringObject(ref s) = obj.kind {
                 return Ok(vm.alloc_string(s.clone()));
             }
         }
         Err(VmError::TypeError("String.prototype.valueOf requires that 'this' be a String".into()))
     });
     let str_to_string = vm.alloc_native_function("toString", 0, |vm, this, _args| {
-        if this.is_string() {
+        if this.is_js_string() {
             return Ok(this);
         }
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::StringObject(ref s) | ObjectKind::String(ref s) = obj.kind {
+            if let ObjectKind::StringObject(ref s) = obj.kind {
                 return Ok(vm.alloc_string(s.clone()));
             }
         }
@@ -132,8 +132,15 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     if let Some(sym_iter) = vm.symbol_iterator {
         let str_iter_fn = vm.alloc_native_function("[Symbol.iterator]", 0, |vm, this, _args| {
             let s = vm.to_string_value(this);
-            let chars: Vec<JsValue> = s.chars().map(|c| vm.alloc_string(c.to_string())).collect();
-            Ok(vm.alloc_iterator(chars))
+            let iter_obj = vm.alloc_object_with_exact_proto(vm.string_iterator_proto);
+            if let Some(ptr) = iter_obj.as_object_ptr() {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                obj.kind = ObjectKind::StringIterator {
+                    string: s,
+                    index: 0,
+                };
+            }
+            Ok(iter_obj)
         });
         vm.set_symbol_property(string_proto, sym_iter, str_iter_fn);
     }

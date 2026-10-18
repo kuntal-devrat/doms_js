@@ -13,11 +13,6 @@ impl OldGen {
             panic!("Failed to allocate old generation ({} bytes)", size);
         }
 
-        // SAFETY: start is valid for `size` bytes.
-        unsafe {
-            ptr::write_bytes(start, 0, size);
-        }
-
         let limit = unsafe { start.add(size) };
 
         Self {

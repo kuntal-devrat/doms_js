@@ -1,17 +1,19 @@
 //! SharedArrayBuffer backing implementation.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 #[derive(Debug, Clone)]
 pub struct SharedArrayBuffer {
     data: Arc<Vec<AtomicU8>>,
+    detached: Arc<AtomicBool>,
 }
 
 impl SharedArrayBuffer {
     pub fn new(byte_length: usize) -> Self {
         Self::try_new(byte_length).unwrap_or_else(|_| Self {
             data: Arc::new(Vec::new()),
+            detached: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -27,19 +29,40 @@ impl SharedArrayBuffer {
         for _ in 0..byte_length {
             vec.push(AtomicU8::new(0));
         }
-        Ok(Self { data: Arc::new(vec) })
+        Ok(Self {
+            data: Arc::new(vec),
+            detached: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    pub fn is_detached(&self) -> bool {
+        self.detached.load(Ordering::SeqCst)
+    }
+
+    pub fn detach(&self) {
+        self.detached.store(true, Ordering::SeqCst);
     }
 
     pub fn byte_length(&self) -> usize {
-        self.data.len()
+        if self.is_detached() {
+            0
+        } else {
+            self.data.len()
+        }
     }
 
     pub fn get(&self, index: usize) -> Option<u8> {
-        self.data.get(index).map(|a| a.load(Ordering::SeqCst))
+        if self.is_detached() {
+            None
+        } else {
+            self.data.get(index).map(|a| a.load(Ordering::SeqCst))
+        }
     }
 
     pub fn set(&self, index: usize, value: u8) -> bool {
-        if let Some(atomic) = self.data.get(index) {
+        if self.is_detached() {
+            false
+        } else if let Some(atomic) = self.data.get(index) {
             atomic.store(value, Ordering::SeqCst);
             true
         } else {

@@ -84,6 +84,17 @@ impl Compiler {
                     };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
+                } else if !self.is_in_function && (*kind == VarKind::Let || *kind == VarKind::Const) && self.with_depth == 0 {
+                    let slot = if let Some(existing_slot) = self.symbols.resolve_local(&decl.name) {
+                        existing_slot
+                    } else {
+                        if self.symbols.is_local_in_current_scope(&decl.name) {
+                            return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
+                        }
+                        self.symbols.define_local(decl.name.clone())
+                    };
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
                 } else {
                     if !self.is_in_function && self.symbols.scope_depth > 0 {
                         if self.symbols.is_local_in_current_scope(&decl.name) {
@@ -122,6 +133,13 @@ impl Compiler {
                     let slot = self.symbols.define_local(decl.name.clone());
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
+                } else if !self.is_in_function && self.with_depth == 0 {
+                    if self.symbols.is_local_in_current_scope(&decl.name) {
+                        return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
+                    }
+                    let slot = self.symbols.define_local(decl.name.clone());
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
                 } else {
                     if !self.is_in_function && self.symbols.scope_depth > 0 {
                         if self.symbols.is_local_in_current_scope(&decl.name) {
@@ -151,54 +169,12 @@ impl Compiler {
         stmts: &[Statement],
         is_last: bool,
     ) -> Result<(), CompileError> {
-        let is_top_level_block = !self.is_in_function;
-        let mut block_lex_names = Vec::new();
-        if is_top_level_block {
-            for s in stmts {
-                match s {
-                    Statement::VarDecl { kind, declarations } if *kind != VarKind::Var => {
-                        for d in declarations {
-                            if !d.name.starts_with('@') && !block_lex_names.contains(&d.name) {
-                                block_lex_names.push(d.name.clone());
-                            }
-                        }
-                    }
-                    Statement::ClassDecl(c) => {
-                        if let Some(ref n) = c.name {
-                            if !block_lex_names.contains(n) {
-                                block_lex_names.push(n.clone());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        let has_lex_scope = !block_lex_names.is_empty();
-        if has_lex_scope {
-            self.chunk.emit(OpCode::CreateObject, 0);
-            for name in &block_lex_names {
-                self.chunk.emit(OpCode::Dup, 0);
-                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                self.chunk.emit(OpCode::LoadConst(name_idx), 0);
-                self.chunk.emit(OpCode::LoadUninitialized, 0);
-                self.chunk.emit(OpCode::SetElem, 0);
-                self.chunk.emit(OpCode::Pop, 0);
-            }
-            self.emit_push_scope();
-        }
-
         self.symbols.enter_scope();
         let len = stmts.len();
         for (idx, s) in stmts.iter().enumerate() {
             self.compile_statement(s, is_last && idx == len - 1)?;
         }
         self.symbols.exit_scope();
-
-        if has_lex_scope {
-            self.emit_pop_scope();
-        }
         Ok(())
     }
 }

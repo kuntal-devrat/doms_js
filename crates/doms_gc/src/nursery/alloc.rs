@@ -73,8 +73,9 @@ impl Nursery {
     pub fn allocate(&mut self, payload_size: usize, type_tag: TypeTag) -> Option<*mut u8> {
         let total_size = Self::align_up(HEADER_SIZE + payload_size, GC_ALIGN);
 
-        // Check if we have space.
-        // SAFETY: cursor and limit are always valid pointers within from-space.
+        if self.cursor >= self.limit {
+            return None;
+        }
         let remaining = unsafe { self.limit.offset_from(self.cursor) } as usize;
         if total_size > remaining {
             return None; // Nursery full — caller should trigger scavenge.

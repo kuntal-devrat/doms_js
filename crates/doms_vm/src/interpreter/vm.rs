@@ -37,6 +37,15 @@ pub struct Vm {
     pub symbol_proto: Option<JsValue>,
     pub promise_proto: Option<JsValue>,
     pub date_proto: Option<JsValue>,
+    pub iterator_proto: Option<JsValue>,
+    pub array_iterator_proto: Option<JsValue>,
+    pub map_iterator_proto: Option<JsValue>,
+    pub set_iterator_proto: Option<JsValue>,
+    pub string_iterator_proto: Option<JsValue>,
+    pub generator_proto: Option<JsValue>,
+    pub wrap_for_valid_iterator_proto: Option<JsValue>,
+    pub iterator_helper_proto: Option<JsValue>,
+    pub current_new_target: Option<JsValue>,
     pub global_object: JsValue,
     pub global_lexicals: HashMap<String, JsValue>,
     pub const_bindings: HashSet<String>,
@@ -73,6 +82,19 @@ pub struct Vm {
     pub star_exports: HashMap<String, JsValue>,
     pub module_reexports: HashMap<(JsValue, String), (JsValue, String)>,
     pub in_import_module: bool,
+    pub loop_hotness: HashMap<(u64, usize), u32>,
+    pub osr_cache: HashMap<(u64, usize), Option<crate::jit::JitFunction>>,
+    pub regexp_last_match: RegExpLastMatch,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RegExpLastMatch {
+    pub input: String,
+    pub last_match: String,
+    pub last_paren: String,
+    pub left_context: String,
+    pub right_context: String,
+    pub parens: [String; 9],
 }
 
 impl Vm {
@@ -112,6 +134,15 @@ impl Vm {
             symbol_proto: None,
             promise_proto: None,
             date_proto: None,
+            iterator_proto: None,
+            array_iterator_proto: None,
+            map_iterator_proto: None,
+            set_iterator_proto: None,
+            string_iterator_proto: None,
+            generator_proto: None,
+            wrap_for_valid_iterator_proto: None,
+            iterator_helper_proto: None,
+            current_new_target: None,
             global_object: JsValue::undefined(),
             global_lexicals: HashMap::new(),
             const_bindings: HashSet::new(),
@@ -148,8 +179,11 @@ impl Vm {
             star_exports: HashMap::new(),
             module_reexports: HashMap::new(),
             in_import_module: false,
+            loop_hotness: HashMap::new(),
+            osr_cache: HashMap::new(),
+            regexp_last_match: RegExpLastMatch::default(),
         };
-        let global_obj = vm.alloc_object();
+        let global_obj = vm.alloc_object_old_gen();
         vm.global_object = global_obj;
         vm.globals.insert("globalThis".to_string(), global_obj);
         register_builtins(&mut vm);

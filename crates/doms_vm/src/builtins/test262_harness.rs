@@ -25,7 +25,21 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
     });
     vm.set_property(test262_obj, "gc", gc_fn);
 
-    let detach_fn = vm.alloc_native_function("detachArrayBuffer", 1, |_vm, _this, _args| {
+    let detach_fn = vm.alloc_native_function("detachArrayBuffer", 1, |_vm, _this, args| {
+        if let Some(arg) = args.first() {
+            if let Some(ptr) = arg.as_object_ptr() {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                match &mut obj.kind {
+                    ObjectKind::ArrayBuffer(b) | ObjectKind::SharedArrayBuffer(b) => {
+                        b.detach();
+                    }
+                    ObjectKind::TypedArray(ta) => {
+                        ta.buffer.detach();
+                    }
+                    _ => {}
+                }
+            }
+        }
         Ok(JsValue::undefined())
     });
     vm.set_property(test262_obj, "detachArrayBuffer", detach_fn);
@@ -98,12 +112,13 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
                 this_val: realm_glob,
                 gen_val: None,
                 locals: Vec::new(),
-                local_names: Vec::new(),
-                lexical_local_names: Vec::new(),
+                local_names: std::sync::Arc::new(Vec::new()),
+                lexical_local_names: std::sync::Arc::new(Vec::new()),
                 scopes: eval_scopes.clone(),
                 upvalues_count: eval_scopes.len(),
                 env_obj: None,
                 arguments: None,
+                raw_args: None,
                 is_strict: has_use_strict,
                 new_target: None,
                 is_function: false,

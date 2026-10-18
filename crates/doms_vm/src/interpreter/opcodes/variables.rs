@@ -11,7 +11,13 @@ impl Vm {
     ) -> Result<(), VmError> {
                     let c = &chunk.constants[idx as usize];
                     let val = match c {
-                        Constant::Number(n) => JsValue::from_double(*n),
+                        Constant::Number(n) => {
+                            if n.fract() == 0.0 && *n >= i32::MIN as f64 && *n <= i32::MAX as f64 && (*n != 0.0 || n.is_sign_positive()) {
+                                JsValue::from_int32(*n as i32)
+                            } else {
+                                JsValue::from_double(*n)
+                            }
+                        },
                         Constant::BigInt(bi) => self.alloc_bigint(bi.clone()),
                         Constant::String(s) => self.alloc_string(s.clone()),
                         Constant::Boolean(b) => JsValue::from_boolean(*b),
@@ -25,6 +31,7 @@ impl Vm {
                             let js_fn = JsFunction {
                                 name: f.name.clone(),
                                 params: f.params.clone(),
+                                self_slot: f.self_slot,
                                 local_names: f.local_names.clone(),
                                 lexical_local_names: f.lexical_local_names.clone(),
                                 chunk: Arc::new(f.chunk.clone()),
@@ -33,11 +40,14 @@ impl Vm {
                                 is_generator: f.is_generator,
                                 call_count: 0,
                                 jit_entry: None,
+                                jit_attempted: false,
                                 is_strict: f.is_strict,
                                 has_param_exprs: f.has_param_exprs,
                                 is_method: f.is_method,
                                 is_arrow: f.is_arrow,
                                 home_object,
+                                prototype: None,
+                                initial_shape: None,
                             };
                             self.alloc_function(js_fn)
                         }
@@ -52,7 +62,7 @@ impl Vm {
     ) -> Result<(), VmError> {
                     let val = *self.peek()?;
                     let slot_idx = slot as usize;
-                    let (env_and_name, args_and_idx) = {
+                    let (env_and_name, args_and_idx, global_lex_name) = {
                         let frame = self.frames.last_mut().unwrap();
                         if slot_idx < frame.locals.len() {
                             frame.locals[slot_idx] = val;
@@ -72,13 +82,23 @@ impl Vm {
                         } else {
                             None
                         };
-                        (env_and_name, args_and_idx)
+                        let global_lex_name = if !frame.is_function {
+                            frame.local_names.get(slot_idx).cloned()
+                        } else {
+                            None
+                        };
+                        (env_and_name, args_and_idx, global_lex_name)
                     };
                     if let Some((env, name)) = env_and_name {
                         self.set_property(env, &name, val);
                     }
                     if let Some((args_obj, idx)) = args_and_idx {
                         self.set_own_property(args_obj, &idx.to_string(), val);
+                    }
+                    if let Some(name) = global_lex_name {
+                        if self.global_lexicals.contains_key(&name) {
+                            self.global_lexicals.insert(name, val);
+                        }
                     }
         Ok(())
     }

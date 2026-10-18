@@ -55,6 +55,7 @@ impl Test262Runner {
                 .name(format!("test262-worker-{}", handles.len()))
                 .stack_size(4 * 1024 * 1024)
                 .spawn(move || {
+                let mut local_stats = HashMap::<String, CategoryStats>::new();
                 for path in chunk {
                     if runner_copy.config.verbose {
                         eprintln!("[START] {}", path.display());
@@ -74,8 +75,7 @@ impl Test262Runner {
                         }
                     };
 
-                    let mut stats = cat_stats_c.lock().unwrap();
-                    let entry = stats.entry(cat).or_default();
+                    let entry = local_stats.entry(cat).or_default();
 
                     if runner_copy.config.verbose {
                         match &status {
@@ -113,6 +113,17 @@ impl Test262Runner {
                             eprintln!("[Progress] {:6}/{} ({:5.1}%) | Passed: {:6} ({:5.1}%) | Failed: {:6}",
                                 comp, total, (comp as f64 * 100.0) / total as f64, p, pct, f);
                         }
+                    }
+                }
+
+                // Merge thread-local stats once per worker, completely eliminating lock contention
+                {
+                    let mut global_stats = cat_stats_c.lock().unwrap();
+                    for (cat, st) in local_stats {
+                        let entry = global_stats.entry(cat).or_default();
+                        entry.passed += st.passed;
+                        entry.failed += st.failed;
+                        entry.total += st.total;
                     }
                 }
             }).expect("Failed to spawn thread");

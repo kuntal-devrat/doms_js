@@ -209,6 +209,7 @@ impl Vm {
         Ok(None)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn op_jump_if_false(&mut self, target: i32) -> Result<(), VmError> {
         let cond = self.pop()?;
         if !cond.is_truthy() {
@@ -218,6 +219,7 @@ impl Vm {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn op_jump_if_true(&mut self, target: i32) -> Result<(), VmError> {
         let cond = self.pop()?;
         if cond.is_truthy() {
@@ -277,10 +279,17 @@ impl Vm {
             _ => return Err(VmError::TypeError("Catch param name must be string".into())),
         };
         let err = self.pop()?;
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(err);
         let obj = self.alloc_object();
-        self.set_property(obj, &name, err);
+        self.temp_roots.push(obj);
+        let cur_err = self.temp_roots[prev_temp];
+        let cur_obj = self.temp_roots[prev_temp + 1];
+        self.set_property(cur_obj, &name, cur_err);
+        let cur_obj = self.temp_roots[prev_temp + 1];
+        self.temp_roots.truncate(prev_temp);
         let frame = self.frames.last_mut().unwrap();
-        frame.scopes.push(obj);
+        frame.scopes.push(cur_obj);
         Ok(())
     }
 }

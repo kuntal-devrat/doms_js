@@ -335,6 +335,21 @@ impl JsObject {
         self.add_prop_order(key);
     }
 
+    pub fn define_symbol_accessor(&mut self, sym: JsValue, getter: Option<JsValue>, setter: Option<JsValue>) {
+        let accs = self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let acc = accs.entry(sym).or_default();
+        if getter.is_some() {
+            acc.getter = getter;
+        }
+        if setter.is_some() {
+            acc.setter = setter;
+        }
+        let order = self.symbol_order.get_or_insert_with(Vec::new);
+        if !order.contains(&sym) {
+            order.push(sym);
+        }
+    }
+
     #[inline]
     pub fn get_slot(&self, offset: u32) -> Option<JsValue> {
         let idx = offset as usize;

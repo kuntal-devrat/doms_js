@@ -7,6 +7,20 @@ impl Vm {
         let b = self.pop()?;
         let a = self.pop()?;
 
+        if let Some(frame) = self.frames.last() {
+            let call_site_ip = frame.ip.saturating_sub(1);
+            let lm = if a.is_int32() { doms_compiler::TypeMask::INT32 } else if a.is_number() { doms_compiler::TypeMask::DOUBLE } else if a.is_string() { doms_compiler::TypeMask::STRING } else if a.is_js_object() { doms_compiler::TypeMask::OBJECT } else { doms_compiler::TypeMask::OTHER };
+            let rm = if b.is_int32() { doms_compiler::TypeMask::INT32 } else if b.is_number() { doms_compiler::TypeMask::DOUBLE } else if b.is_string() { doms_compiler::TypeMask::STRING } else if b.is_js_object() { doms_compiler::TypeMask::OBJECT } else { doms_compiler::TypeMask::OTHER };
+            frame.chunk.record_feedback_binary_op(call_site_ip, lm, rm);
+        }
+
+        if let (Some(ia), Some(ib)) = (a.as_int32(), b.as_int32()) {
+            if let Some(sum) = ia.checked_add(ib) {
+                self.push(JsValue::from_int32(sum));
+                return Ok(());
+            }
+        }
+
         let prev_temp = self.temp_roots.len();
         self.temp_roots.push(a);
         self.temp_roots.push(b);
@@ -105,6 +119,21 @@ impl Vm {
     pub(crate) fn op_sub(&mut self) -> Result<(), VmError> {
         let b_val = self.pop()?;
         let a_val = self.pop()?;
+
+        if let Some(frame) = self.frames.last() {
+            let call_site_ip = frame.ip.saturating_sub(1);
+            let lm = if a_val.is_int32() { doms_compiler::TypeMask::INT32 } else if a_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            let rm = if b_val.is_int32() { doms_compiler::TypeMask::INT32 } else if b_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            frame.chunk.record_feedback_binary_op(call_site_ip, lm, rm);
+        }
+
+        if let (Some(ia), Some(ib)) = (a_val.as_int32(), b_val.as_int32()) {
+            if let Some(diff) = ia.checked_sub(ib) {
+                self.push(JsValue::from_int32(diff));
+                return Ok(());
+            }
+        }
+
         let a_num = self.to_numeric(a_val)?;
         let b_num = self.to_numeric(b_val)?;
         if let (Some(ba), Some(bb)) = (self.as_bigint_val(a_num), self.as_bigint_val(b_num)) {
@@ -123,6 +152,25 @@ impl Vm {
     pub(crate) fn op_mul(&mut self) -> Result<(), VmError> {
         let b_val = self.pop()?;
         let a_val = self.pop()?;
+
+        if let Some(frame) = self.frames.last() {
+            let call_site_ip = frame.ip.saturating_sub(1);
+            let lm = if a_val.is_int32() { doms_compiler::TypeMask::INT32 } else if a_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            let rm = if b_val.is_int32() { doms_compiler::TypeMask::INT32 } else if b_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            frame.chunk.record_feedback_binary_op(call_site_ip, lm, rm);
+        }
+
+        if let (Some(ia), Some(ib)) = (a_val.as_int32(), b_val.as_int32()) {
+            if (ia != 0 || ib >= 0) && (ib != 0 || ia >= 0) {
+                if let Some(prod) = ia.checked_mul(ib) {
+                    if prod != 0 || (ia >= 0 && ib >= 0) {
+                        self.push(JsValue::from_int32(prod));
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         let a_num = self.to_numeric(a_val)?;
         let b_num = self.to_numeric(b_val)?;
         if let (Some(ba), Some(bb)) = (self.as_bigint_val(a_num), self.as_bigint_val(b_num)) {
@@ -141,6 +189,14 @@ impl Vm {
     pub(crate) fn op_div(&mut self) -> Result<(), VmError> {
         let b_val = self.pop()?;
         let a_val = self.pop()?;
+
+        if let Some(frame) = self.frames.last() {
+            let call_site_ip = frame.ip.saturating_sub(1);
+            let lm = if a_val.is_int32() { doms_compiler::TypeMask::INT32 } else if a_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            let rm = if b_val.is_int32() { doms_compiler::TypeMask::INT32 } else if b_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            frame.chunk.record_feedback_binary_op(call_site_ip, lm, rm);
+        }
+
         let a_num = self.to_numeric(a_val)?;
         let b_num = self.to_numeric(b_val)?;
         if let (Some(ba), Some(bb)) = (self.as_bigint_val(a_num), self.as_bigint_val(b_num)) {

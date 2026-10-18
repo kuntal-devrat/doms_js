@@ -74,6 +74,7 @@ impl Compiler {
         self.block_scope_depth += 1;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn emit_push_catch_scope(&mut self, name_idx: u16) {
         self.chunk.emit(OpCode::PushCatchScope(name_idx), 0);
         self.block_scope_depth += 1;

@@ -124,7 +124,7 @@ pub(super) fn register_constructor(
         Ok(to)
     });
 
-    let object_proto = vm.alloc_object();
+    let object_proto = vm.alloc_object_old_gen();
     vm.object_proto = Some(object_proto);
     if let Some(ptr) = vm.global_object.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };

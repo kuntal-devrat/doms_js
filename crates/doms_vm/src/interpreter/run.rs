@@ -7,19 +7,22 @@ impl Vm {
         self.instantiate_global_declarations(chunk)?;
         let root_chunk = Arc::new(chunk.clone());
         let target_depth = self.frames.len();
+        let local_names = Arc::clone(&root_chunk.local_names);
+        let lexical_local_names = Arc::clone(&root_chunk.lexical_local_names);
         self.frames.push(CallFrame {
             chunk: root_chunk,
             ip: 0,
             base_sp: self.stack.len(),
             this_val: if self.is_module { JsValue::undefined() } else { self.global_object },
             gen_val: None,
-            locals: Vec::new(),
-            local_names: Vec::new(),
-            lexical_local_names: Vec::new(),
+            locals: vec![JsValue::undefined(); local_names.len()],
+            local_names,
+            lexical_local_names,
             scopes: Vec::new(),
             upvalues_count: 0,
             env_obj: None,
             arguments: None,
+            raw_args: None,
             is_strict: self.is_strict,
             new_target: None,
             is_function: false,
@@ -34,6 +37,15 @@ impl Vm {
             home_object: None,
         });
         let result = self.run_until_depth(target_depth)?;
+        if let Some(frame) = self.frames.get(target_depth) {
+            for (idx, name) in frame.local_names.iter().enumerate() {
+                if let Some(val) = frame.locals.get(idx) {
+                    if self.global_lexicals.contains_key(name) {
+                        self.global_lexicals.insert(name.clone(), *val);
+                    }
+                }
+            }
+        }
         self.drain_microtasks()?;
         Ok(result)
     }
@@ -67,9 +79,9 @@ impl Vm {
     fn run_until_depth_internal(&mut self, target_depth: usize) -> Result<JsValue, VmError> {
         while self.frames.len() > target_depth {
             if self.objects.len() >= self.gc_threshold {
-                self.gc_collect();
+                self.scavenge_nursery();
                 if self.objects.len() * 2 > self.gc_threshold {
-                    self.gc_threshold = (self.objects.len() * 2).max(4096);
+                    self.gc_threshold = (self.objects.len() * 2).max(16384);
                 }
             }
             if self.oom {
@@ -257,9 +269,64 @@ impl Vm {
                     self.op_inherit_class()?;
                 }
                 OpCode::GetElem => {
+                    let stack_len = self.stack.len();
+                    if stack_len >= 2 {
+                        let key = self.stack[stack_len - 1];
+                        let obj = self.stack[stack_len - 2];
+                        if key.is_int32() {
+                            let idx = key.as_int32().unwrap();
+                            if idx >= 0 {
+                                if let Some(ptr) = obj.as_object_ptr() {
+                                    let jsobj = unsafe { &*(ptr as *mut JsObject) };
+                                    if let ObjectKind::Array(elements) = &jsobj.kind {
+                                        let uidx = idx as usize;
+                                        if uidx < elements.len() {
+                                            let el = elements[uidx];
+                                            if !el.is_hole() {
+                                                self.stack[stack_len - 2] = el;
+                                                self.stack.truncate(stack_len - 1);
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     self.op_get_elem(target_depth)?;
                 }
                 OpCode::SetElem => {
+                    let stack_len = self.stack.len();
+                    if stack_len >= 3 {
+                        let val = self.stack[stack_len - 1];
+                        let key = self.stack[stack_len - 2];
+                        let obj = self.stack[stack_len - 3];
+                        if key.is_int32() {
+                            let idx = key.as_int32().unwrap();
+                            if idx >= 0 {
+                                if let Some(ptr) = obj.as_object_ptr() {
+                                    let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                                    if let ObjectKind::Array(elements) = &mut jsobj.kind {
+                                        let uidx = idx as usize;
+                                        if uidx < elements.len() && !elements[uidx].is_hole() {
+                                            elements[uidx] = val;
+                                            self.stack[stack_len - 3] = val;
+                                            self.stack.truncate(stack_len - 2);
+                                            continue;
+                                        } else if uidx == elements.len()
+                                            && (jsobj.prototype.is_none() || jsobj.prototype == self.array_proto)
+                                            && (self.non_extensible_objects.is_empty() || !self.non_extensible_objects.contains(&obj))
+                                        {
+                                            elements.push(val);
+                                            self.stack[stack_len - 3] = val;
+                                            self.stack.truncate(stack_len - 2);
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     self.op_set_elem(target_depth)?;
                 }
                 OpCode::SetSuperProp(name_idx) => {
@@ -536,14 +603,55 @@ impl Vm {
                 }
 
                 OpCode::Jump(target) => {
+                    let t = target as usize;
                     let frame = self.frames.last_mut().unwrap();
-                    frame.ip = target as usize;
+                    if t <= frame.ip {
+                        if let Some(ret_val) = self.maybe_trigger_osr(&chunk, t, target_depth)? {
+                            if self.frames.len() == target_depth {
+                                return Ok(ret_val);
+                            }
+                            self.push(ret_val);
+                            continue;
+                        }
+                    }
+                    let frame = self.frames.last_mut().unwrap();
+                    frame.ip = t;
                 }
                 OpCode::JumpIfFalse(target) => {
-                    self.op_jump_if_false(target)?;
+                    let cond = self.pop()?;
+                    if !cond.is_truthy() {
+                        let t = target as usize;
+                        let frame = self.frames.last_mut().unwrap();
+                        if t <= frame.ip {
+                            if let Some(ret_val) = self.maybe_trigger_osr(&chunk, t, target_depth)? {
+                                if self.frames.len() == target_depth {
+                                    return Ok(ret_val);
+                                }
+                                self.push(ret_val);
+                                continue;
+                            }
+                        }
+                        let frame = self.frames.last_mut().unwrap();
+                        frame.ip = t;
+                    }
                 }
                 OpCode::JumpIfTrue(target) => {
-                    self.op_jump_if_true(target)?;
+                    let cond = self.pop()?;
+                    if cond.is_truthy() {
+                        let t = target as usize;
+                        let frame = self.frames.last_mut().unwrap();
+                        if t <= frame.ip {
+                            if let Some(ret_val) = self.maybe_trigger_osr(&chunk, t, target_depth)? {
+                                if self.frames.len() == target_depth {
+                                    return Ok(ret_val);
+                                }
+                                self.push(ret_val);
+                                continue;
+                            }
+                        }
+                        let frame = self.frames.last_mut().unwrap();
+                        frame.ip = t;
+                    }
                 }
 
                 OpCode::Throw => {
@@ -650,4 +758,81 @@ impl Vm {
 
         Ok(self.pop().unwrap_or_default())
     }
-}
+
+    #[inline]
+    fn maybe_trigger_osr(
+        &mut self,
+        chunk: &BytecodeChunk,
+        target_ip: usize,
+        _target_depth: usize,
+    ) -> Result<Option<JsValue>, VmError> {
+        let count = self.loop_hotness.entry((chunk.id, target_ip)).or_insert(0);
+        *count = count.saturating_add(1);
+        if *count >= crate::jit::OSR_HOT_THRESHOLD {
+            if !self.osr_cache.contains_key(&(chunk.id, target_ip)) {
+                let jit_fn = crate::jit::JitCompiler::compile_osr(chunk, target_ip);
+                self.osr_cache.insert((chunk.id, target_ip), jit_fn);
+            }
+            let osr_native = self.osr_cache.get(&(chunk.id, target_ip)).and_then(|opt| {
+                opt.as_ref().and_then(|jit| {
+                    if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } = &jit.code {
+                        Some((*func_ptr, *num_locals))
+                    } else {
+                        None
+                    }
+                })
+            });
+            if let Some((func_ptr, num_locals)) = osr_native {
+                let prev_vm = crate::jit::CURRENT_VM.with(|c| c.get());
+                crate::jit::CURRENT_VM.with(|c| c.set(self as *mut Vm));
+                crate::jit::NURSERY_PTRS.with(|cell| {
+                    let ptrs = unsafe { &mut *cell.get() };
+                    ptrs.bump = self.heap.nursery.cursor();
+                    ptrs.limit = self.heap.nursery.limit();
+                });
+
+                let (locals_ptr, locals_len) = {
+                    let frame = self.frames.last_mut().unwrap();
+                    if frame.locals.len() < num_locals {
+                        frame.locals.resize(num_locals, JsValue::undefined());
+                    }
+                    (frame.locals.as_mut_ptr() as *mut u64, frame.locals.len())
+                };
+
+                let cur_this = self.frames.last().map(|f| f.this_val.0).unwrap_or(crate::value::TAG_UNDEFINED);
+                let res = unsafe { (func_ptr)(locals_ptr, locals_len, cur_this) };
+
+                    crate::jit::NURSERY_PTRS.with(|cell| {
+                        let ptrs = unsafe { &*cell.get() };
+                        if !ptrs.bump.is_null() {
+                            self.heap.nursery.set_cursor(ptrs.bump);
+                        }
+                    });
+                    crate::jit::CURRENT_VM.with(|c| c.set(prev_vm));
+                    if res != crate::jit::JIT_DEOPT_SENTINEL {
+                        let finished = self.frames.pop().unwrap();
+                        for (idx, name) in finished.local_names.iter().enumerate() {
+                            if let Some(val) = finished.locals.get(idx) {
+                                if self.global_lexicals.contains_key(name) {
+                                    self.global_lexicals.insert(name.clone(), *val);
+                                }
+                            }
+                        }
+                        while let Some(top) = self.catch_stack.last() {
+                            if top.frame_idx >= self.frames.len() {
+                                self.catch_stack.pop();
+                            } else {
+                                break;
+                            }
+                        }
+                        let ret_val = JsValue(res);
+                        self.stack.truncate(finished.base_sp);
+                        return Ok(Some(ret_val));
+                    } else {
+                        self.osr_cache.insert((chunk.id, target_ip), None);
+                    }
+                }
+            }
+            Ok(None)
+        }
+    }

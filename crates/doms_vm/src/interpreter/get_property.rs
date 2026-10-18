@@ -66,6 +66,9 @@ impl Vm {
         }
 
         if let Some(ptr) = target.as_object_ptr() {
+            if !self.is_valid_heap_object(ptr) {
+                return JsValue::undefined();
+            }
             let obj = unsafe { &*(ptr as *mut JsObject) };
 
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
@@ -174,6 +177,14 @@ impl Vm {
 
             // Special properties on TypedArray
             if let ObjectKind::TypedArray(ta) = &obj.kind {
+                if ta.buffer.is_detached() {
+                    match key {
+                        "length" | "byteLength" | "byteOffset" => return JsValue::from_int32(0),
+                        "buffer" => return self.alloc_array_buffer(Arc::clone(&ta.buffer)),
+                        "BYTES_PER_ELEMENT" => return JsValue::from_int32(ta.kind.bytes_per_element() as i32),
+                        _ => return JsValue::undefined(),
+                    }
+                }
                 match key {
                     "length" => return JsValue::from_int32(ta.length as i32),
                     "byteLength" => return JsValue::from_int32((ta.length * ta.kind.bytes_per_element()) as i32),
@@ -182,7 +193,7 @@ impl Vm {
                     "BYTES_PER_ELEMENT" => return JsValue::from_int32(ta.kind.bytes_per_element() as i32),
                     _ => {
                         if let Ok(idx) = key.parse::<usize>() {
-                            if let Some(val) = Self::read_typed_array_element(ta, idx) {
+                            if let Some(val) = self.read_typed_array_element_vm(ta, idx) {
                                 return val;
                             }
                         }
@@ -262,6 +273,9 @@ impl Vm {
             let mut curr_proto = obj.prototype;
             while let Some(proto_val) = curr_proto {
                 if let Some(proto_ptr) = proto_val.as_object_ptr() {
+                    if !self.is_valid_heap_object(proto_ptr) {
+                        break;
+                    }
                     let proto_obj = unsafe { &*(proto_ptr as *mut JsObject) };
                     if matches!(proto_obj.kind, ObjectKind::Proxy { .. }) {
                         let prop_key = PropertyKeyVal::String(key.to_string());
@@ -289,6 +303,9 @@ impl Vm {
         }
 
         if let Some(ptr) = target.as_object_ptr() {
+            if !self.is_valid_heap_object(ptr) {
+                return JsValue::undefined();
+            }
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if matches!(&obj.kind, ObjectKind::String(_)) {
                 if let Some(proto) = self.string_proto {

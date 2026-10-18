@@ -13,6 +13,7 @@ impl Compiler {
         if has_directive {
             self.is_strict = true;
         }
+        self.symbols.enter_scope();
 
         // Collect top-level declarations for script GlobalDeclarationInstantiation
         let mut top_vars = Vec::new();
@@ -195,6 +196,10 @@ impl Compiler {
                     }
                 }
                 if !name.is_empty() {
+                    let slot = self.symbols.define_local(name.clone());
+                    self.chunk.emit(OpCode::Dup, 0);
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
                     let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                     self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
                     self.chunk.emit(OpCode::Pop, 0);
@@ -225,6 +230,9 @@ impl Compiler {
             self.compile_statement(stmt, false)?;
         }
         self.chunk.emit(OpCode::Halt, 0);
+        let local_names_arc = Arc::new(self.symbols.all_local_names.clone());
+        self.chunk.local_names = Arc::clone(&local_names_arc);
+        self.chunk.lexical_local_names = local_names_arc;
         Ok(self.chunk)
     }
 }

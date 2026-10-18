@@ -89,19 +89,23 @@ fn test_phase3_jit_hot_execution() {
     let js_fn = JsFunction {
         name: Some("add".into()),
         params: vec!["a".into(), "b".into()],
-        local_names: vec!["a".into(), "b".into()],
-        lexical_local_names: Vec::new(),
+        self_slot: None,
+        local_names: Arc::new(vec!["a".into(), "b".into()]),
+        lexical_local_names: Arc::new(Vec::new()),
         chunk: Arc::new(chunk),
         upvalues: Vec::new(),
         is_async: false,
         is_generator: false,
         call_count: 0,
         jit_entry: None,
+        jit_attempted: false,
         is_strict: false,
         has_param_exprs: false,
         is_method: false,
         is_arrow: false,
         home_object: None,
+        prototype: None,
+        initial_shape: None,
     };
     let fn_val = vm.alloc_function(js_fn);
 
@@ -364,5 +368,149 @@ fn test_generational_gc_auto_scavenge_under_allocation_pressure() {
     assert_eq!(res.as_boolean(), Some(true));
     assert!(vm.heap.nursery.scavenge_count >= 1, "Expected at least 1 automatic nursery scavenge, got {}", vm.heap.nursery.scavenge_count);
 }
+
+#[test]
+fn test_phase4_regexp_advanced() {
+    let mut vm = Vm::new();
+
+    // 1. Unicode sets /v flag
+    let res_v = vm.eval(r#"
+        let re = new RegExp('abc', 'v');
+        re.unicodeSets === true && re.unicode === false && re.flags === 'v'
+    "#).unwrap();
+    assert_eq!(res_v.as_boolean(), Some(true));
+
+    // 2. /u and /v mutual exclusivity
+    let res_uv = vm.eval(r#"
+        let caught = false;
+        try {
+            new RegExp('abc', 'uv');
+        } catch (e) {
+            caught = e instanceof SyntaxError;
+        }
+        caught
+    "#).unwrap();
+    assert_eq!(res_uv.as_boolean(), Some(true));
+
+    // 3. Match indices /d flag
+    let res_d = vm.eval(r#"
+        let reD = new RegExp('a(b)(?<group>c)', 'd');
+        let m = reD.exec('abc');
+        let m0_start = m.indices[0][0];
+        let m0_end = m.indices[0][1];
+        let m1_start = m.indices[1][0];
+        let m1_end = m.indices[1][1];
+        let mg_start = m.indices.groups.group[0];
+        let mg_end = m.indices.groups.group[1];
+        m0_start === 0 && m0_end === 3 && m1_start === 1 && m1_end === 2 && mg_start === 2 && mg_end === 3
+    "#).unwrap();
+    assert_eq!(res_d.as_boolean(), Some(true));
+
+    // 4. Generic RegExp.prototype.flags getter
+    let res_generic_flags = vm.eval(r#"
+        let fake = { hasIndices: true, multiline: true, dotAll: true };
+        let desc = Object.getOwnPropertyDescriptor(RegExp.prototype, 'flags');
+        desc.get.call(fake) === 'dms'
+    "#).unwrap();
+    assert_eq!(res_generic_flags.as_boolean(), Some(true));
+
+    // 5. Annex B RegExp.prototype.compile
+    let res_compile = vm.eval(r#"
+        let reComp = new RegExp('foo');
+        let ret = reComp.compile('bar', 'i');
+        ret === reComp && reComp.test('BAR') === true && reComp.source === 'bar' && reComp.flags === 'i'
+    "#).unwrap();
+    assert_eq!(res_compile.as_boolean(), Some(true));
+
+    // 6. Annex B RegExp legacy constructor properties
+    let res_legacy = vm.eval(r#"
+        let r = new RegExp('hello (\\w+)');
+        r.exec('say hello world today');
+        RegExp.lastMatch === 'hello world' &&
+        RegExp.$1 === 'world' &&
+        RegExp.leftContext === 'say ' &&
+        RegExp.rightContext === ' today'
+    "#).unwrap();
+    assert_eq!(res_legacy.as_boolean(), Some(true));
+}
+
+#[test]
+fn test_phase4_intl_expanded() {
+    let mut vm = Vm::new();
+
+    // 1. Intl.getCanonicalLocales
+    let res_canon = vm.eval(r#"
+        let list = Intl.getCanonicalLocales(['EN-us', 'ZH-hans-CN', 'en-US']);
+        list.length === 2 && list[0] === 'en-US' && list[1] === 'zh-Hans-CN'
+    "#).unwrap();
+    assert_eq!(res_canon.as_boolean(), Some(true));
+
+    // Invalid tag throws RangeError
+    let res_invalid = vm.eval(r#"
+        let threw = false;
+        try {
+            Intl.getCanonicalLocales('invalid_tag');
+        } catch (e) {
+            threw = e instanceof RangeError;
+        }
+        threw
+    "#).unwrap();
+    assert_eq!(res_invalid.as_boolean(), Some(true));
+
+    // 2. Intl.Locale
+    vm.eval(r#"
+        let loc = new Intl.Locale('zh-Hans-CN', { calendar: 'gregory', numeric: true });
+    "#).unwrap();
+    assert_eq!(vm.eval("loc.baseName === 'zh-Hans-CN'").unwrap().as_boolean(), Some(true), "baseName failed: {:?}", vm.eval("loc.baseName"));
+    assert_eq!(vm.eval("loc.language === 'zh'").unwrap().as_boolean(), Some(true), "language failed: {:?}", vm.eval("loc.language"));
+    assert_eq!(vm.eval("loc.script === 'Hans'").unwrap().as_boolean(), Some(true), "script failed: {:?}", vm.eval("loc.script"));
+    assert_eq!(vm.eval("loc.region === 'CN'").unwrap().as_boolean(), Some(true), "region failed: {:?}", vm.eval("loc.region"));
+    assert_eq!(vm.eval("loc.calendar === 'gregory'").unwrap().as_boolean(), Some(true), "calendar failed: {:?}", vm.eval("loc.calendar"));
+    assert_eq!(vm.eval("loc.numeric === true").unwrap().as_boolean(), Some(true), "numeric failed: {:?}", vm.eval("loc.numeric"));
+    assert_eq!(vm.eval("loc.toString() === 'zh-Hans-CN-u-ca-gregory-kn'").unwrap().as_boolean(), Some(true), "toString failed: {:?}", vm.eval("loc.toString()"));
+
+    // 3. Intl.PluralRules
+    let res_pr = vm.eval(r#"
+        let pr = new Intl.PluralRules('en-US');
+        pr instanceof Intl.PluralRules && pr.select(1) === 'one' && pr.select(2) === 'other'
+    "#).unwrap();
+    assert_eq!(res_pr.as_boolean(), Some(true));
+
+    // 4. Intl.ListFormat
+    let res_lf = vm.eval(r#"
+        let lf = new Intl.ListFormat('en-US');
+        let formatted = lf.format(['Apple', 'Banana', 'Orange']);
+        formatted === 'Apple, Banana, and Orange'
+    "#).unwrap();
+    assert_eq!(res_lf.as_boolean(), Some(true));
+
+    // 5. Intl.DisplayNames
+    let res_dn = vm.eval(r#"
+        let dn = new Intl.DisplayNames('en-US', { type: 'region' });
+        dn.of('US') === 'United States' && dn.of('JP') === 'Japan'
+    "#).unwrap();
+    assert_eq!(res_dn.as_boolean(), Some(true));
+
+    // 6. Intl.Segmenter
+    let res_seg = vm.eval(r#"
+        let seg = new Intl.Segmenter('en-US', { granularity: 'word' });
+        let segments = seg.segment('Hello world');
+        let item = segments.containing(0);
+        item.segment === 'H' && item.index === 0
+    "#).unwrap();
+    assert_eq!(res_seg.as_boolean(), Some(true));
+}
+
+#[test]
+fn test_phase4_annex_b_escape_unescape() {
+    let mut vm = Vm::new();
+    let res = vm.eval(r#"
+        let enc = escape('Hello World!');
+        let dec = unescape(enc);
+        enc === 'Hello%20World%21' && dec === 'Hello World!'
+    "#).unwrap();
+    assert_eq!(res.as_boolean(), Some(true));
+}
+
 
 

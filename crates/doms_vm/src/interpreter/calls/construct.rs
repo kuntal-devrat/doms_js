@@ -53,11 +53,24 @@ impl Vm {
                             jsobj.prototype = Some(cur_proto);
                         }
                     }
-                    let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
+                    let cur_this = self.temp_roots[args_start + args_len + 1];
+                    let cur_callee = self.temp_roots[prev_temp];
+                    let cur_nt = self.temp_roots[prev_temp + 1];
+                    let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
                     let prev_constructing = self.is_constructing;
+                    let prev_nt = self.current_new_target;
                     self.is_constructing = true;
-                    let res = native.call(self, cur_this, &cur_args);
+                    self.current_new_target = Some(new_target_val);
+                    let res = if args_len <= 8 {
+                        let mut stack_args = [JsValue::undefined(); 8];
+                        stack_args[..args_len].copy_from_slice(&self.temp_roots[args_start..args_start + args_len]);
+                        native.call(self, cur_this, &stack_args[..args_len])
+                    } else {
+                        let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
+                        native.call(self, cur_this, &cur_args)
+                    };
                     self.is_constructing = prev_constructing;
+                    self.current_new_target = prev_nt;
                     let val = res?;
                     let cur_proto = self.temp_roots[args_start + args_len];
                     let cur_this = self.temp_roots[args_start + args_len + 1];
@@ -78,29 +91,37 @@ impl Vm {
                     self.temp_roots.truncate(prev_temp);
                     Ok(ret)
                 }
-                ObjectKind::Function(_) => {
+                ObjectKind::Function(f) => {
                     let cur_callee = self.temp_roots[prev_temp];
                     let cur_nt = self.temp_roots[prev_temp + 1];
                     let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
-                    let proto = self.get_property(new_target_val, "prototype");
+                    let proto = if new_target_val == cur_callee {
+                        f.prototype.unwrap_or_else(|| self.get_property(new_target_val, "prototype"))
+                    } else {
+                        self.get_property(new_target_val, "prototype")
+                    };
                     self.temp_roots.push(proto);
-                    let this_obj = self.alloc_object();
+                    let shape_id = if new_target_val == cur_callee {
+                        f.initial_shape.unwrap_or(ShapeRegistry::ROOT_SHAPE_ID)
+                    } else {
+                        ShapeRegistry::ROOT_SHAPE_ID
+                    };
+                    let this_obj = self.alloc_object_with_shape_and_proto(shape_id, if proto.is_object() { Some(proto) } else { None });
                     self.temp_roots.push(this_obj);
-                    let cur_proto = self.temp_roots[args_start + args_len];
-                    let cur_this = self.temp_roots[args_start + args_len + 1];
-                    if cur_proto.is_object() {
-                        if let Some(this_ptr) = cur_this.as_object_ptr() {
-                            let jsobj = unsafe { &mut *(this_ptr as *mut JsObject) };
-                            jsobj.prototype = Some(cur_proto);
-                        }
-                    }
                     let cur_callee = self.temp_roots[prev_temp];
                     let cur_this = self.temp_roots[args_start + args_len + 1];
-                    let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
                     let prev_constructing = self.is_constructing;
+                    let prev_nt = self.current_new_target;
                     self.is_constructing = true;
-                    let call_res = self.execute_call_internal(cur_callee, cur_this, cur_args);
-                    self.is_constructing = prev_constructing;
+                    self.current_new_target = Some(new_target_val);
+                    let call_res = if args_len <= 8 {
+                        let mut stack_args = [JsValue::undefined(); 8];
+                        stack_args[..args_len].copy_from_slice(&self.temp_roots[args_start..args_start + args_len]);
+                        self.execute_call_internal(cur_callee, cur_this, &stack_args[..args_len])
+                    } else {
+                        let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
+                        self.execute_call_internal(cur_callee, cur_this, &cur_args)
+                    };
                     let res_opt = call_res?;
                     let val = if let Some(res) = res_opt {
                         res
@@ -108,7 +129,48 @@ impl Vm {
                         let target_depth = self.frames.len() - 1;
                         self.run_until_depth(target_depth)?
                     };
+                    self.is_constructing = prev_constructing;
+                    self.current_new_target = prev_nt;
                     let cur_this = self.temp_roots[args_start + args_len + 1];
+                    let cur_callee = self.temp_roots[prev_temp];
+                    let cur_nt = self.temp_roots[prev_temp + 1];
+                    let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
+
+                    if new_target_val == cur_callee && !val.is_object() {
+                        if let Some(this_ptr) = cur_this.as_object_ptr() {
+                            let this_shape = unsafe { (*(this_ptr as *mut JsObject)).shape_id };
+                            if this_shape != ShapeRegistry::ROOT_SHAPE_ID {
+                                if let Some(callee_ptr) = cur_callee.as_object_ptr() {
+                                    let callee_obj = unsafe { &mut *(callee_ptr as *mut JsObject) };
+                                    if let ObjectKind::Function(ref mut callee_func) = callee_obj.kind {
+                                        callee_func.initial_shape = Some(this_shape);
+                                        let chunk_id = callee_func.chunk.id;
+                                        for (ip, op) in callee_func.chunk.instructions.iter().enumerate() {
+                                            if let doms_compiler::bytecode::OpCode::SetProp(prop_idx) = op {
+                                                if let doms_compiler::bytecode::Constant::String(name) = &callee_func.chunk.constants[*prop_idx as usize] {
+                                                    if let Some(offset) = self.shapes.lookup_offset(this_shape, name) {
+                                                        callee_func.chunk.record_feedback_shape(ip, this_shape, offset);
+                                                        let ics = self.chunk_ics.entry(chunk_id).or_insert_with(|| {
+                                                            vec![crate::inline_cache::InlineCacheSlot::new(); callee_func.chunk.instructions.len()]
+                                                        });
+                                                        if ip < ics.len() {
+                                                            ics[ip].state = crate::inline_cache::IcState::Monomorphic;
+                                                            ics[ip].name_idx = *prop_idx;
+                                                            ics[ip].entries[0] = crate::inline_cache::ShapeOffsetPair { shape_id: this_shape, offset };
+                                                            ics[ip].entry_count = 1;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        callee_func.jit_attempted = true;
+                                        callee_func.jit_entry = crate::jit::JitCompiler::compile_native(&callee_func.chunk);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     self.temp_roots.truncate(prev_temp);
                     if val.is_object() {
                         Ok(val)
@@ -131,10 +193,10 @@ impl Vm {
     pub fn execute_construct(
         &mut self,
         callee: JsValue,
-        args: Vec<JsValue>,
+        args: &[JsValue],
         target_depth: usize,
     ) -> Result<(), VmError> {
-        match self.construct(callee, &args) {
+        match self.construct(callee, args) {
             Ok(res) => {
                 self.push(res);
                 Ok(())

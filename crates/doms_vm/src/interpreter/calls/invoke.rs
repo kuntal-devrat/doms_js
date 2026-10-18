@@ -1,11 +1,78 @@
 use super::*;
 
 impl Vm {
+    pub fn execute_call_from_stack_at(
+        &mut self,
+        callee: JsValue,
+        this_val: JsValue,
+        stack_args_start: usize,
+        argc: usize,
+    ) -> Result<Option<JsValue>, VmError> {
+        if self.frames.len() >= 1024 {
+            return Err(VmError::RangeError("Maximum call stack size exceeded".to_string()));
+        }
+        if let Some(ptr) = callee.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref mut f) = obj.kind {
+                if !f.is_generator && !f.is_async && !self.is_constructing {
+                    f.call_count = f.call_count.saturating_add(1);
+                    if f.call_count >= crate::jit::JIT_HOT_THRESHOLD && !f.jit_attempted {
+                        f.jit_attempted = true;
+                        f.jit_entry = crate::jit::JitCompiler::compile_native(&f.chunk);
+                    }
+                    if let Some(jit) = &f.jit_entry {
+                        if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } = &jit.code {
+                            let locals_count = *num_locals;
+                            let self_slot = f.self_slot;
+                            let func_fn = *func_ptr;
+
+                            let res = if locals_count <= 16 {
+                                let mut stack_args = [crate::value::TAG_UNDEFINED; 16];
+                                let to_copy = argc.min(locals_count);
+                                for i in 0..to_copy {
+                                    stack_args[i] = self.stack[stack_args_start + i].0;
+                                }
+                                if let Some(slot) = self_slot {
+                                    if (slot as usize) < locals_count {
+                                        stack_args[slot as usize] = callee.0;
+                                    }
+                                }
+                                unsafe { (func_fn)(stack_args.as_mut_ptr(), locals_count, this_val.0) }
+                            } else {
+                                let mut raw_args: Vec<u64> = self.stack[stack_args_start..stack_args_start + argc].iter().map(|v| v.0).collect();
+                                if raw_args.len() < locals_count {
+                                    raw_args.resize(locals_count, crate::value::TAG_UNDEFINED);
+                                }
+                                if let Some(slot) = self_slot {
+                                    if (slot as usize) < raw_args.len() {
+                                        raw_args[slot as usize] = callee.0;
+                                    }
+                                }
+                                unsafe { (func_fn)(raw_args.as_mut_ptr(), raw_args.len(), this_val.0) }
+                            };
+
+                            if res != crate::jit::JIT_DEOPT_SENTINEL {
+                                return Ok(Some(JsValue(res)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(callee);
+        self.temp_roots.push(this_val);
+        let args_start = self.temp_roots.len();
+        self.temp_roots.extend_from_slice(&self.stack[stack_args_start..stack_args_start + argc]);
+        let args_len = argc;
+        self.execute_call_common(prev_temp, args_start, args_len)
+    }
+
     pub fn execute_call_internal(
         &mut self,
         callee: JsValue,
         this_val: JsValue,
-        args: Vec<JsValue>,
+        args: &[JsValue],
     ) -> Result<Option<JsValue>, VmError> {
         if self.frames.len() >= 1024 {
             return Err(VmError::RangeError("Maximum call stack size exceeded".to_string()));
@@ -14,9 +81,17 @@ impl Vm {
         self.temp_roots.push(callee);
         self.temp_roots.push(this_val);
         let args_start = self.temp_roots.len();
-        self.temp_roots.extend_from_slice(&args);
+        self.temp_roots.extend_from_slice(args);
         let args_len = args.len();
+        self.execute_call_common(prev_temp, args_start, args_len)
+    }
 
+    fn execute_call_common(
+        &mut self,
+        prev_temp: usize,
+        args_start: usize,
+        args_len: usize,
+    ) -> Result<Option<JsValue>, VmError> {
         let cur_callee = self.temp_roots[prev_temp];
         if let Some(ptr) = cur_callee.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
@@ -24,8 +99,14 @@ impl Vm {
                 ObjectKind::NativeFunction(native) => {
                     let native = native.clone();
                     let cur_this = self.temp_roots[prev_temp + 1];
-                    let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
-                    let res = native.call(self, cur_this, &cur_args);
+                    let res = if args_len <= 8 {
+                        let mut stack_args = [JsValue::undefined(); 8];
+                        stack_args[..args_len].copy_from_slice(&self.temp_roots[args_start..args_start + args_len]);
+                        native.call(self, cur_this, &stack_args[..args_len])
+                    } else {
+                        let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
+                        native.call(self, cur_this, &cur_args)
+                    };
                     self.temp_roots.truncate(prev_temp);
                     Ok(Some(res?))
                 }
@@ -40,18 +121,51 @@ impl Vm {
                 ObjectKind::Function(f) => {
                     if !f.is_generator && !f.is_async && !self.is_constructing {
                         f.call_count = f.call_count.saturating_add(1);
-                        if f.call_count >= crate::jit::JIT_HOT_THRESHOLD && f.jit_entry.is_none() {
+                        if f.call_count >= crate::jit::JIT_HOT_THRESHOLD && !f.jit_attempted {
+                            f.jit_attempted = true;
                             f.jit_entry = crate::jit::JitCompiler::compile_native(&f.chunk);
                         }
                         if let Some(jit) = &f.jit_entry {
                             if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } = &jit.code {
-                                let mut raw_args: Vec<u64> = self.temp_roots[args_start..args_start + args_len].iter().map(|v| v.0).collect();
-                                if raw_args.len() < *num_locals {
-                                    raw_args.resize(*num_locals, crate::value::TAG_UNDEFINED);
+                                let locals_count = *num_locals;
+                                let self_slot = f.self_slot;
+                                let func_fn = *func_ptr;
+                                let cur_callee = self.temp_roots[prev_temp];
+
+                                let res = if locals_count <= 16 {
+                                    let mut stack_args = [crate::value::TAG_UNDEFINED; 16];
+                                    let to_copy = args_len.min(locals_count);
+                                    for i in 0..to_copy {
+                                        stack_args[i] = self.temp_roots[args_start + i].0;
+                                    }
+                                    if let Some(slot) = self_slot {
+                                        if (slot as usize) < locals_count {
+                                            stack_args[slot as usize] = cur_callee.0;
+                                        }
+                                    }
+                                    let cur_this = self.temp_roots[prev_temp + 1];
+                                    unsafe { (func_fn)(stack_args.as_mut_ptr(), locals_count, cur_this.0) }
+                                } else {
+                                    let mut raw_args: Vec<u64> = self.temp_roots[args_start..args_start + args_len].iter().map(|v| v.0).collect();
+                                    if raw_args.len() < locals_count {
+                                        raw_args.resize(locals_count, crate::value::TAG_UNDEFINED);
+                                    }
+                                    if let Some(slot) = self_slot {
+                                        if (slot as usize) < raw_args.len() {
+                                            raw_args[slot as usize] = cur_callee.0;
+                                        }
+                                    }
+                                    let cur_this = self.temp_roots[prev_temp + 1];
+                                    unsafe { (func_fn)(raw_args.as_mut_ptr(), raw_args.len(), cur_this.0) }
+                                };
+
+                                if res != crate::jit::JIT_DEOPT_SENTINEL {
+                                    self.temp_roots.truncate(prev_temp);
+                                    return Ok(Some(JsValue(res)));
+                                } else {
+                                    // Deoptimization: speculative guard failed, fall back to interpreter
+                                    f.jit_entry = None;
                                 }
-                                let res = unsafe { (func_ptr)(raw_args.as_ptr(), raw_args.len()) };
-                                self.temp_roots.truncate(prev_temp);
-                                return Ok(Some(JsValue(res)));
                             }
                         }
                     }
@@ -113,36 +227,33 @@ impl Vm {
                         }
                     }
                     let locals_len = self.temp_roots.len() - locals_start;
+                    if let Some(slot) = func.self_slot {
+                        let cur_callee = self.temp_roots[prev_temp];
+                        if (slot as usize) < locals_len {
+                            self.temp_roots[locals_start + slot as usize] = cur_callee;
+                        }
+                    }
 
                     let new_target = if self.is_constructing { Some(self.temp_roots[prev_temp]) } else { None };
 
-                    let (args_obj, mapped_args) = if func.is_arrow {
-                        (None, None)
-                    } else {
-                        let mapped = if !is_strict_func && !func.has_param_exprs && !has_rest {
-                            Some(vec![true; func.params.len().min(args_len)])
-                        } else {
-                            None
-                        };
-                        let cur_callee = self.temp_roots[prev_temp];
-                        let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
-                        let a_obj = self.alloc_arguments(cur_callee, cur_args, is_strict_func);
-                        (Some(a_obj), mapped)
-                    };
-
-                    let args_obj_idx = if let Some(ao) = args_obj {
-                        let idx = self.temp_roots.len();
-                        self.temp_roots.push(ao);
-                        Some(idx)
+                    let mapped_args = if func.is_arrow {
+                        None
+                    } else if !is_strict_func && !func.has_param_exprs && !has_rest {
+                        Some(vec![true; func.params.len().min(args_len)])
                     } else {
                         None
+                    };
+
+                    let raw_args = if func.is_arrow {
+                        None
+                    } else {
+                        Some(self.temp_roots[args_start..args_start + args_len].to_vec())
                     };
 
                     if func.is_generator {
                         let cur_callee = self.temp_roots[prev_temp];
                         let cur_this = self.temp_roots[prev_temp + 1];
                         let locals = self.temp_roots[locals_start..locals_start + locals_len].to_vec();
-                        let actual_args_obj = args_obj_idx.map(|idx| self.temp_roots[idx]);
                         let (fresh_upvalues, fresh_home_object) = if let Some(ptr) = cur_callee.as_object_ptr() {
                             let obj = unsafe { &*(ptr as *mut JsObject) };
                             if let ObjectKind::Function(ref f) = obj.kind {
@@ -174,7 +285,8 @@ impl Vm {
                             scopes: fresh_upvalues.clone(),
                             upvalues_count: fresh_upvalues.len(),
                             env_obj: None,
-                            arguments: actual_args_obj,
+                            arguments: None,
+                            raw_args: raw_args.clone(),
                             is_strict: is_strict_func,
                             new_target,
                             is_function: true,
@@ -185,7 +297,7 @@ impl Vm {
                             is_indirect_eval: false,
                             callee_func: Some(callee_func),
                             callee_val: Some(cur_callee),
-                            mapped_arguments: mapped_args,
+                            mapped_arguments: mapped_args.clone(),
                             home_object: fresh_home_object,
                         });
                         let gen_val = self.run_until_depth(target_depth)?;
@@ -198,7 +310,6 @@ impl Vm {
                         let cur_callee = self.temp_roots[prev_temp];
                         let cur_this = self.temp_roots[prev_temp + 1];
                         let locals = self.temp_roots[locals_start..locals_start + locals_len].to_vec();
-                        let actual_args_obj = args_obj_idx.map(|idx| self.temp_roots[idx]);
                         let (fresh_upvalues, fresh_home_object) = if let Some(ptr) = cur_callee.as_object_ptr() {
                             let obj = unsafe { &*(ptr as *mut JsObject) };
                             if let ObjectKind::Function(ref f) = obj.kind {
@@ -229,7 +340,8 @@ impl Vm {
                             scopes: fresh_upvalues.clone(),
                             upvalues_count: fresh_upvalues.len(),
                             env_obj: None,
-                            arguments: actual_args_obj,
+                            arguments: None,
+                            raw_args: raw_args.clone(),
                             is_strict: is_strict_func,
                             new_target,
                             is_function: true,
@@ -240,7 +352,7 @@ impl Vm {
                             is_indirect_eval: false,
                             callee_func: Some(callee_func),
                             callee_val: Some(cur_callee),
-                            mapped_arguments: mapped_args,
+                            mapped_arguments: mapped_args.clone(),
                             home_object: fresh_home_object,
                         });
                         match self.run_until_depth(target_depth) {
@@ -262,7 +374,6 @@ impl Vm {
                         let cur_callee = self.temp_roots[prev_temp];
                         let cur_this = self.temp_roots[prev_temp + 1];
                         let locals = self.temp_roots[locals_start..locals_start + locals_len].to_vec();
-                        let actual_args_obj = args_obj_idx.map(|idx| self.temp_roots[idx]);
                         let (fresh_upvalues, fresh_home_object) = if let Some(ptr) = cur_callee.as_object_ptr() {
                             let obj = unsafe { &*(ptr as *mut JsObject) };
                             if let ObjectKind::Function(ref f) = obj.kind {
@@ -291,7 +402,8 @@ impl Vm {
                             scopes: fresh_upvalues.clone(),
                             upvalues_count: fresh_upvalues.len(),
                             env_obj: None,
-                            arguments: actual_args_obj,
+                            arguments: None,
+                            raw_args,
                             is_strict: is_strict_func,
                             new_target,
                             is_function: true,
@@ -323,7 +435,7 @@ impl Vm {
     }
 
     pub fn call(&mut self, callee: JsValue, this_val: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
-        let res_opt = self.execute_call_internal(callee, this_val, args.to_vec())?;
+        let res_opt = self.execute_call_internal(callee, this_val, args)?;
         if let Some(res) = res_opt {
             Ok(res)
         } else {
