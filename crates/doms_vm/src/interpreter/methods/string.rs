@@ -76,6 +76,36 @@ impl Vm {
                     Ok(JsValue::from_double(f64::NAN))
                 }
             })),
+            "codePointAt" => Some(self.alloc_native_function("codePointAt", 1, |vm, this, args| {
+                let s = vm.to_string_value(this);
+                let idx = match args.first() {
+                    Some(val) => {
+                        let num = vm.to_number_value(*val)?;
+                        if num.is_nan() || num.is_infinite() {
+                            return Ok(JsValue::undefined());
+                        }
+                        let int = num.trunc();
+                        if int < 0.0 || int >= (usize::MAX as f64) {
+                            return Ok(JsValue::undefined());
+                        }
+                        int as usize
+                    }
+                    None => 0,
+                };
+                let u16_chars: Vec<u16> = s.encode_utf16().collect();
+                if idx >= u16_chars.len() {
+                    return Ok(JsValue::undefined());
+                }
+                let first = u16_chars[idx];
+                if (0xD800..=0xDBFF).contains(&first) && idx + 1 < u16_chars.len() {
+                    let second = u16_chars[idx + 1];
+                    if (0xDC00..=0xDFFF).contains(&second) {
+                        let cp = 0x10000 + (((first as u32 - 0xD800) << 10) | (second as u32 - 0xDC00));
+                        return Ok(JsValue::from_int32(cp as i32));
+                    }
+                }
+                Ok(JsValue::from_int32(first as i32))
+            })),
             "slice" => Some(self.alloc_native_function("slice", 2, |vm, this, args| {
                 let s = vm.to_string_value(this);
                 let is_ascii = s.is_ascii();

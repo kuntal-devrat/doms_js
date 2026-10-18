@@ -62,7 +62,7 @@ impl Vm {
         }
         if let Some(ptr) = val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            matches!(obj.kind, ObjectKind::String(_) | ObjectKind::BigInt(_))
+            matches!(obj.kind, ObjectKind::String(_) | ObjectKind::ConsString { .. } | ObjectKind::BigInt(_))
         } else {
             true
         }

@@ -206,11 +206,12 @@ impl Vm {
 
 impl Drop for Vm {
     fn drop(&mut self) {
+        let mut seen = std::collections::HashSet::new();
         for &ptr in &self.objects {
-            if !ptr.is_null() {
+            if !ptr.is_null() && seen.insert(ptr) {
                 unsafe {
                     std::ptr::drop_in_place(ptr);
-                    if !self.heap.contains(ptr as *const u8) {
+                    if !self.heap.contains(ptr as *const u8) && !self.heap.nursery.to_space_contains(ptr as *const u8) {
                         drop(Box::from_raw(ptr));
                     }
                 }

@@ -118,7 +118,7 @@ pub(super) fn register_string_global(vm: &mut Vm) {
 
     let string_methods = [
         "indexOf", "includes", "toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase", "trim",
-        "charAt", "charCodeAt", "slice", "isWellFormed", "toWellFormed", "replace",
+        "charAt", "charCodeAt", "codePointAt", "slice", "isWellFormed", "toWellFormed", "replace",
         "match", "search", "lastIndexOf", "split", "concat", "startsWith", "endsWith",
         "repeat", "padStart", "padEnd", "localeCompare", "substring",
     ];
@@ -153,15 +153,24 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     vm.set_property(str_ctor, "fromCharCode", from_char_code_fn);
 
     let from_code_point_fn = vm.alloc_native_function("fromCodePoint", 1, |vm, _this, args| {
-        let mut s = String::new();
+        let mut u16_buf = Vec::with_capacity(args.len());
         for arg in args {
-            let n = vm.to_number_value(*arg).unwrap_or(0.0) as u32;
-            if let Some(ch) = char::from_u32(n) {
-                s.push(ch);
+            let num = vm.to_number_value(*arg)?;
+            if num < 0.0 || num > 1114111.0 || num.fract() != 0.0 || num.is_nan() {
+                return Err(VmError::RangeError(format!("Invalid code point {}", num)));
+            }
+            let cp = num as u32;
+            if cp <= 0xFFFF {
+                u16_buf.push(cp as u16);
             } else {
-                return Err(VmError::RangeError(format!("Invalid code point {}", n)));
+                let cp_sub = cp - 0x10000;
+                let high = ((cp_sub >> 10) + 0xD800) as u16;
+                let low = ((cp_sub & 0x3FF) + 0xDC00) as u16;
+                u16_buf.push(high);
+                u16_buf.push(low);
             }
         }
+        let s = String::from_utf16_lossy(&u16_buf);
         Ok(vm.alloc_string(s))
     });
     vm.set_property(str_ctor, "fromCodePoint", from_code_point_fn);

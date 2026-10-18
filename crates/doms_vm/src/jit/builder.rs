@@ -42,6 +42,10 @@ pub fn can_compile_native(chunk: &BytecodeChunk) -> bool {
             | OpCode::This
             | OpCode::GetLocal(_)
             | OpCode::SetLocal(_)
+            | OpCode::GetGlobal(_)
+            | OpCode::GetGlobalSafe(_)
+            | OpCode::SetGlobal(_)
+            | OpCode::SetGlobalDirect(_)
             | OpCode::Add
             | OpCode::Sub
             | OpCode::Mul
@@ -92,10 +96,6 @@ pub fn can_compile_native_osr(chunk: &BytecodeChunk, loop_target: usize) -> bool
     if chunk.instructions.is_empty() || loop_target >= chunk.instructions.len() {
         return false;
     }
-    // If the entire chunk is valid for native compilation, any loop or nested loop can execute natively!
-    if can_compile_native(chunk) {
-        return true;
-    }
     for ip in loop_target..chunk.instructions.len() {
         let op = &chunk.instructions[ip];
         match op {
@@ -117,6 +117,10 @@ pub fn can_compile_native_osr(chunk: &BytecodeChunk, loop_target: usize) -> bool
             | OpCode::This
             | OpCode::GetLocal(_)
             | OpCode::SetLocal(_)
+            | OpCode::GetGlobal(_)
+            | OpCode::GetGlobalSafe(_)
+            | OpCode::SetGlobal(_)
+            | OpCode::SetGlobalDirect(_)
             | OpCode::Add
             | OpCode::Sub
             | OpCode::Mul
@@ -142,19 +146,14 @@ pub fn can_compile_native_osr(chunk: &BytecodeChunk, loop_target: usize) -> bool
             | OpCode::StrictNotEq
             | OpCode::Call(_)
             | OpCode::CallWithThis(_)
-            | OpCode::Construct(_)
             | OpCode::Pop
             | OpCode::Dup
             | OpCode::Return
             | OpCode::Halt
-            | OpCode::CreateObject
-            | OpCode::CreateArray(_) => {}
-            OpCode::Jump(target) | OpCode::JumpIfFalse(target) | OpCode::JumpIfTrue(target) => {
-                if (*target as usize) < loop_target {
-                    return false;
-                }
-            }
-            OpCode::GetProp(_)
+            | OpCode::Jump(_)
+            | OpCode::JumpIfFalse(_)
+            | OpCode::JumpIfTrue(_)
+            | OpCode::GetProp(_)
             | OpCode::SetProp(_)
             | OpCode::GetElem
             | OpCode::SetElem => {}
@@ -200,6 +199,10 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
     builder_obj.symbol("jit_construct_trampoline", jit_construct_trampoline as *const u8);
     builder_obj.symbol("jit_array_length", jit_array_length as *const u8);
     builder_obj.symbol("jit_array_push_fast", jit_array_push_fast as *const u8);
+    builder_obj.symbol("jit_get_global", jit_get_global as *const u8);
+    builder_obj.symbol("jit_get_global_safe", jit_get_global_safe as *const u8);
+    builder_obj.symbol("jit_set_global", jit_set_global as *const u8);
+    builder_obj.symbol("jit_osr_yield", jit_osr_yield as *const u8);
     let mut module = JITModule::new(builder_obj);
 
     let mut strict_eq_sig = module.make_signature();
@@ -302,6 +305,30 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
     array_push_fast_sig.returns.push(AbiParam::new(types::I64));
     let array_push_fast_func_id = module.declare_function("jit_array_push_fast", Linkage::Import, &array_push_fast_sig).ok()?;
 
+    let mut get_global_sig = module.make_signature();
+    get_global_sig.params.push(AbiParam::new(types::I64));
+    get_global_sig.params.push(AbiParam::new(types::I64));
+    get_global_sig.returns.push(AbiParam::new(types::I64));
+    let get_global_func_id = module.declare_function("jit_get_global", Linkage::Import, &get_global_sig).ok()?;
+
+    let mut get_global_safe_sig = module.make_signature();
+    get_global_safe_sig.params.push(AbiParam::new(types::I64));
+    get_global_safe_sig.params.push(AbiParam::new(types::I64));
+    get_global_safe_sig.returns.push(AbiParam::new(types::I64));
+    let get_global_safe_func_id = module.declare_function("jit_get_global_safe", Linkage::Import, &get_global_safe_sig).ok()?;
+
+    let mut set_global_sig = module.make_signature();
+    set_global_sig.params.push(AbiParam::new(types::I64));
+    set_global_sig.params.push(AbiParam::new(types::I64));
+    set_global_sig.params.push(AbiParam::new(types::I64));
+    set_global_sig.returns.push(AbiParam::new(types::I64));
+    let set_global_func_id = module.declare_function("jit_set_global", Linkage::Import, &set_global_sig).ok()?;
+
+    let mut osr_yield_sig = module.make_signature();
+    osr_yield_sig.params.push(AbiParam::new(types::I32));
+    osr_yield_sig.returns.push(AbiParam::new(types::I64));
+    let osr_yield_func_id = module.declare_function("jit_osr_yield", Linkage::Import, &osr_yield_sig).ok()?;
+
     let mut sig = module.make_signature();
     sig.params.push(AbiParam::new(types::I64)); // args_ptr
     sig.params.push(AbiParam::new(types::I64)); // num_args
@@ -332,6 +359,10 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
     let construct_func_ref = module.declare_func_in_func(construct_func_id, &mut builder.func);
     let array_length_func_ref = module.declare_func_in_func(array_length_func_id, &mut builder.func);
     let array_push_fast_func_ref = module.declare_func_in_func(array_push_fast_func_id, &mut builder.func);
+    let get_global_func_ref = module.declare_func_in_func(get_global_func_id, &mut builder.func);
+    let get_global_safe_func_ref = module.declare_func_in_func(get_global_safe_func_id, &mut builder.func);
+    let set_global_func_ref = module.declare_func_in_func(set_global_func_id, &mut builder.func);
+    let osr_yield_func_ref = module.declare_func_in_func(osr_yield_func_id, &mut builder.func);
 
         // Find jump targets (basic block leaders)
         let num_insts = chunk.instructions.len();
@@ -951,7 +982,22 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                     }
                 }
                 OpCode::Jump(target) => {
-                    let target_block = blocks[&(target as usize)];
+                    let t = target as usize;
+                    if let Some(loop_target) = osr_target {
+                        if t < loop_target {
+                            let t_val = builder.ins().iconst(types::I32, t as i64);
+                            let _ = builder.ins().call(osr_yield_func_ref, &[t_val]);
+                            let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                            for i in 0..num_locals {
+                                let v = builder.use_var(local_vars[i]);
+                                builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                            }
+                            builder.ins().return_(&[deopt_val]);
+                            block_terminated = true;
+                            continue;
+                        }
+                    }
+                    let target_block = blocks[&t];
                     builder.ins().jump(target_block, &[]);
                     block_terminated = true;
                 }
@@ -969,8 +1015,30 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                         let f3 = builder.ins().bor(f1, f2);
                         let is_falsy = builder.ins().bor(f3, is_undef);
 
-                        let target_block = blocks[&(target as usize)];
+                        let t = target as usize;
                         let next_block = blocks[&(ip + 1)];
+                        if let Some(loop_target) = osr_target {
+                            if t < loop_target {
+                                let yield_block = builder.create_block();
+                                builder.ins().brif(is_falsy, yield_block, &[], next_block, &[]);
+
+                                builder.switch_to_block(yield_block);
+                                let t_val = builder.ins().iconst(types::I32, t as i64);
+                                let _ = builder.ins().call(osr_yield_func_ref, &[t_val]);
+                                let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                                for i in 0..num_locals {
+                                    let v = builder.use_var(local_vars[i]);
+                                    builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                                }
+                                builder.ins().return_(&[deopt_val]);
+                                builder.seal_block(yield_block);
+
+                                block_terminated = true;
+                                continue;
+                            }
+                        }
+
+                        let target_block = blocks[&t];
                         builder.ins().brif(is_falsy, target_block, &[], next_block, &[]);
                         block_terminated = true;
                     }
@@ -989,20 +1057,164 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                         let f3 = builder.ins().bor(f1, f2);
                         let is_falsy = builder.ins().bor(f3, is_undef);
 
-                        let target_block = blocks[&(target as usize)];
+                        let t = target as usize;
                         let next_block = blocks[&(ip + 1)];
+                        if let Some(loop_target) = osr_target {
+                            if t < loop_target {
+                                let yield_block = builder.create_block();
+                                builder.ins().brif(is_falsy, next_block, &[], yield_block, &[]);
+
+                                builder.switch_to_block(yield_block);
+                                let t_val = builder.ins().iconst(types::I32, t as i64);
+                                let _ = builder.ins().call(osr_yield_func_ref, &[t_val]);
+                                let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                                for i in 0..num_locals {
+                                    let v = builder.use_var(local_vars[i]);
+                                    builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                                }
+                                builder.ins().return_(&[deopt_val]);
+                                builder.seal_block(yield_block);
+
+                                block_terminated = true;
+                                continue;
+                            }
+                        }
+
+                        let target_block = blocks[&t];
                         builder.ins().brif(is_falsy, next_block, &[], target_block, &[]);
                         block_terminated = true;
                     }
                 }
-                OpCode::GetProp(_name_idx) => {
+                OpCode::GetGlobal(name_idx) => {
+                    if let Some(Constant::String(s)) = chunk.constants.get(name_idx as usize) {
+                        let name_ptr = builder.ins().iconst(types::I64, s.as_ptr() as usize as i64);
+                        let name_len = builder.ins().iconst(types::I64, s.len() as i64);
+                        let call = builder.ins().call(get_global_func_ref, &[name_ptr, name_len]);
+                        let res = builder.inst_results(call)[0];
+
+                        let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                        let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
+
+                        let ok_block = builder.create_block();
+                        let deopt_block = builder.create_block();
+
+                        builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
+
+                        builder.switch_to_block(deopt_block);
+                        for i in 0..num_locals {
+                            let v = builder.use_var(local_vars[i]);
+                            builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                        }
+                        builder.ins().return_(&[deopt_val]);
+                        builder.seal_block(deopt_block);
+
+                        builder.switch_to_block(ok_block);
+                        builder.seal_block(ok_block);
+
+                        builder.def_var(stack_vars[stack_depth], res);
+                        stack_depth += 1;
+                    } else {
+                        let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                        for i in 0..num_locals {
+                            let v = builder.use_var(local_vars[i]);
+                            builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                        }
+                        builder.ins().return_(&[deopt_val]);
+                        block_terminated = true;
+                    }
+                }
+                OpCode::GetGlobalSafe(name_idx) => {
+                    if let Some(Constant::String(s)) = chunk.constants.get(name_idx as usize) {
+                        let name_ptr = builder.ins().iconst(types::I64, s.as_ptr() as usize as i64);
+                        let name_len = builder.ins().iconst(types::I64, s.len() as i64);
+                        let call = builder.ins().call(get_global_safe_func_ref, &[name_ptr, name_len]);
+                        let res = builder.inst_results(call)[0];
+                        builder.def_var(stack_vars[stack_depth], res);
+                        stack_depth += 1;
+                    } else {
+                        let undef_val = builder.ins().iconst(types::I64, TAG_UNDEFINED as i64);
+                        builder.def_var(stack_vars[stack_depth], undef_val);
+                        stack_depth += 1;
+                    }
+                }
+                OpCode::SetGlobal(name_idx) | OpCode::SetGlobalDirect(name_idx) => {
+                    if stack_depth > 0 {
+                        let val = builder.use_var(stack_vars[stack_depth - 1]);
+                        if let Some(Constant::String(s)) = chunk.constants.get(name_idx as usize) {
+                            let name_ptr = builder.ins().iconst(types::I64, s.as_ptr() as usize as i64);
+                            let name_len = builder.ins().iconst(types::I64, s.len() as i64);
+                            let call = builder.ins().call(set_global_func_ref, &[name_ptr, name_len, val]);
+                            let res = builder.inst_results(call)[0];
+
+                            let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                            let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
+
+                            let ok_block = builder.create_block();
+                            let deopt_block = builder.create_block();
+
+                            builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
+
+                            builder.switch_to_block(deopt_block);
+                            for i in 0..num_locals {
+                                let v = builder.use_var(local_vars[i]);
+                                builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                            }
+                            builder.ins().return_(&[deopt_val]);
+                            builder.seal_block(deopt_block);
+
+                            builder.switch_to_block(ok_block);
+                            builder.seal_block(ok_block);
+                        }
+                    }
+                }
+                OpCode::GetProp(name_idx) => {
                     if stack_depth > 0 {
                         stack_depth -= 1;
                         let obj = builder.use_var(stack_vars[stack_depth]);
                         let slot = chunk.get_feedback_slot(ip);
-                        match slot {
-                            Some(FeedbackSlot::ArrayLength) => {
-                                let call = builder.ins().call(array_length_func_ref, &[obj]);
+                        let prop_name = chunk.constants.get(name_idx as usize).and_then(|c| match c {
+                            Constant::String(s) => Some(s.as_str()),
+                            _ => None,
+                        });
+                        if matches!(slot, Some(FeedbackSlot::ArrayLength)) || prop_name == Some("length") {
+                            let call = builder.ins().call(array_length_func_ref, &[obj]);
+                            let res = builder.inst_results(call)[0];
+
+                            let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                            let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
+
+                            let ok_block = builder.create_block();
+                            let deopt_block = builder.create_block();
+
+                            builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
+
+                            builder.switch_to_block(deopt_block);
+                            for i in 0..num_locals {
+                                let v = builder.use_var(local_vars[i]);
+                                builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                            }
+                            builder.ins().return_(&[deopt_val]);
+                            builder.seal_block(deopt_block);
+
+                            builder.switch_to_block(ok_block);
+                            builder.seal_block(ok_block);
+
+                            builder.def_var(stack_vars[stack_depth], res);
+                            stack_depth += 1;
+                        } else if matches!(slot, Some(FeedbackSlot::ArrayPush)) || prop_name == Some("push") {
+                            let push_fn = builder.ins().iconst(types::I64, TAG_ARRAY_PUSH_FN as i64);
+                            builder.def_var(stack_vars[stack_depth], push_fn);
+                            stack_depth += 1;
+                        } else {
+                            let slot_info = match slot {
+                                Some(FeedbackSlot::Monomorphic { shape_id, offset }) => Some((shape_id, offset)),
+                                Some(FeedbackSlot::Polymorphic { entries }) if !entries.is_empty() => Some(entries.last().copied().unwrap()),
+                                _ => None,
+                            };
+                            if let Some((shape_id, offset)) = slot_info {
+                                let s_val = builder.ins().iconst(types::I32, shape_id as i64);
+                                let o_val = builder.ins().iconst(types::I32, offset as i64);
+                                let call = builder.ins().call(get_prop_func_ref, &[obj, s_val, o_val]);
                                 let res = builder.inst_results(call)[0];
 
                                 let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
@@ -1014,6 +1226,10 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                                 builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
 
                                 builder.switch_to_block(deopt_block);
+                                for i in 0..num_locals {
+                                    let v = builder.use_var(local_vars[i]);
+                                    builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                                }
                                 builder.ins().return_(&[deopt_val]);
                                 builder.seal_block(deopt_block);
 
@@ -1022,58 +1238,26 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
 
                                 builder.def_var(stack_vars[stack_depth], res);
                                 stack_depth += 1;
-                            }
-                            Some(FeedbackSlot::ArrayPush) => {
-                                let push_fn = builder.ins().iconst(types::I64, TAG_ARRAY_PUSH_FN as i64);
-                                builder.def_var(stack_vars[stack_depth], push_fn);
-                                stack_depth += 1;
-                            }
-                            _ => {
-                                let slot_info = match slot {
-                                    Some(FeedbackSlot::Monomorphic { shape_id, offset }) => Some((shape_id, offset)),
-                                    Some(FeedbackSlot::Polymorphic { entries }) if !entries.is_empty() => Some(entries.last().copied().unwrap()),
-                                    _ => None,
-                                };
-                                if let Some((shape_id, offset)) = slot_info {
-                                    let s_val = builder.ins().iconst(types::I32, shape_id as i64);
-                                    let o_val = builder.ins().iconst(types::I32, offset as i64);
-                                    let call = builder.ins().call(get_prop_func_ref, &[obj, s_val, o_val]);
-                                    let res = builder.inst_results(call)[0];
+                            } else {
+                                let ok_block = builder.create_block();
+                                let deopt_block = builder.create_block();
+                                let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                                let one = builder.ins().iconst(types::I32, 1);
+                                builder.ins().brif(one, deopt_block, &[], ok_block, &[]);
 
-                                    let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
-                                    let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
-
-                                    let ok_block = builder.create_block();
-                                    let deopt_block = builder.create_block();
-
-                                    builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
-
-                                    builder.switch_to_block(deopt_block);
-                                    builder.ins().return_(&[deopt_val]);
-                                    builder.seal_block(deopt_block);
-
-                                    builder.switch_to_block(ok_block);
-                                    builder.seal_block(ok_block);
-
-                                    builder.def_var(stack_vars[stack_depth], res);
-                                    stack_depth += 1;
-                                } else {
-                                    let ok_block = builder.create_block();
-                                    let deopt_block = builder.create_block();
-                                    let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
-                                    let one = builder.ins().iconst(types::I32, 1);
-                                    builder.ins().brif(one, deopt_block, &[], ok_block, &[]);
-
-                                    builder.switch_to_block(deopt_block);
-                                    builder.ins().return_(&[deopt_val]);
-                                    builder.seal_block(deopt_block);
-
-                                    builder.switch_to_block(ok_block);
-                                    builder.seal_block(ok_block);
-
-                                    builder.def_var(stack_vars[stack_depth], deopt_val);
-                                    stack_depth += 1;
+                                builder.switch_to_block(deopt_block);
+                                for i in 0..num_locals {
+                                    let v = builder.use_var(local_vars[i]);
+                                    builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
                                 }
+                                builder.ins().return_(&[deopt_val]);
+                                builder.seal_block(deopt_block);
+
+                                builder.switch_to_block(ok_block);
+                                builder.seal_block(ok_block);
+
+                                builder.def_var(stack_vars[stack_depth], deopt_val);
+                                stack_depth += 1;
                             }
                         }
                     }
@@ -1103,6 +1287,10 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                             builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
 
                             builder.switch_to_block(deopt_block);
+                            for i in 0..num_locals {
+                                let v = builder.use_var(local_vars[i]);
+                                builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                            }
                             builder.ins().return_(&[deopt_val]);
                             builder.seal_block(deopt_block);
 
@@ -1119,6 +1307,10 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                             builder.ins().brif(one, deopt_block, &[], ok_block, &[]);
 
                             builder.switch_to_block(deopt_block);
+                            for i in 0..num_locals {
+                                let v = builder.use_var(local_vars[i]);
+                                builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                            }
                             builder.ins().return_(&[deopt_val]);
                             builder.seal_block(deopt_block);
 
@@ -1352,6 +1544,10 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                         }
 
                         builder.switch_to_block(deopt_block);
+                        for i in 0..num_locals {
+                            let v = builder.use_var(local_vars[i]);
+                            builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                        }
                         builder.ins().return_(&[deopt_val]);
                         builder.seal_block(deopt_block);
 
@@ -1374,7 +1570,7 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                         let this_val = builder.use_var(stack_vars[stack_depth - argc_usize - 2]);
                         stack_depth -= argc_usize + 2;
 
-                        let call_res = if argc_usize == 1 {
+                        let call_res = if argc_usize >= 1 {
                             let push_tag = builder.ins().iconst(types::I64, TAG_ARRAY_PUSH_FN as i64);
                             let is_push = builder.ins().icmp(IntCC::Equal, callee_val, push_tag);
 
@@ -1387,9 +1583,12 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
 
                             // Inlined push path
                             builder.switch_to_block(push_block);
-                            let arg0 = builder.ins().load(types::I64, MemFlagsData::trusted(), call_args_ptr, 0);
-                            let push_call = builder.ins().call(array_push_fast_func_ref, &[this_val, arg0]);
-                            let push_res = builder.inst_results(push_call)[0];
+                            let mut push_res = this_val;
+                            for i in 0..argc_usize {
+                                let arg_i = builder.ins().load(types::I64, MemFlagsData::trusted(), call_args_ptr, (i * 8) as i32);
+                                let push_call = builder.ins().call(array_push_fast_func_ref, &[this_val, arg_i]);
+                                push_res = builder.inst_results(push_call)[0];
+                            }
                             builder.def_var(res_var, push_res);
                             builder.ins().jump(merge_block, &[]);
                             builder.seal_block(push_block);
@@ -1423,6 +1622,10 @@ fn compile_native_internal(chunk: &BytecodeChunk, osr_target: Option<usize>) -> 
                         builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
 
                         builder.switch_to_block(deopt_block);
+                        for i in 0..num_locals {
+                            let v = builder.use_var(local_vars[i]);
+                            builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                        }
                         builder.ins().return_(&[deopt_val]);
                         builder.seal_block(deopt_block);
 

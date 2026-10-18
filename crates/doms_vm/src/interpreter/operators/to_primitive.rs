@@ -32,6 +32,7 @@ impl Vm {
         if let Some(ptr) = val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
+                ObjectKind::String(_) | ObjectKind::ConsString { .. } => Ok(val),
                 ObjectKind::StringObject(s) => Ok(self.alloc_string(s.clone())),
                 ObjectKind::NumberObject(n) => Ok(JsValue::from_double(*n)),
                 ObjectKind::BooleanObject(b) => Ok(JsValue::from_boolean(*b)),

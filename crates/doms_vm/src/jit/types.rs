@@ -109,9 +109,13 @@ impl JitFunction {
                 let res = unsafe { (func_ptr)(raw_args.as_ptr(), raw_args.len(), this_val.0) };
 
                 NURSERY_PTRS.with(|cell| {
-                    let ptrs = unsafe { &*cell.get() };
+                    let ptrs = unsafe { &mut *cell.get() };
                     if !ptrs.bump.is_null() {
-                        vm.heap.nursery.set_cursor(ptrs.bump);
+                        if ptrs.bump > vm.heap.nursery.cursor() {
+                            vm.heap.nursery.set_cursor(ptrs.bump);
+                        } else {
+                            ptrs.bump = vm.heap.nursery.cursor();
+                        }
                     }
                 });
                 CURRENT_VM.with(|c| c.set(prev_vm));
@@ -460,8 +464,12 @@ pub extern "C" fn jit_array_push_fast(obj: u64, val: u64) -> u64 {
 pub extern "C" fn jit_call_trampoline(callee: u64, _this_val: u64, args_ptr: *const u64, argc: usize) -> u64 {
     if callee == TAG_ARRAY_PUSH_FN {
         if argc > 0 && !args_ptr.is_null() {
-            let arg0 = unsafe { *args_ptr };
-            return jit_array_push_fast(_this_val, arg0);
+            let mut last_res = _this_val;
+            for i in 0..argc {
+                let arg = unsafe { *args_ptr.add(i) };
+                last_res = jit_array_push_fast(_this_val, arg);
+            }
+            return last_res;
         }
     }
 
@@ -492,8 +500,12 @@ pub extern "C" fn jit_call_trampoline(callee: u64, _this_val: u64, args_ptr: *co
         let obj = unsafe { &mut *(ptr as *mut crate::object::JsObject) };
         if let crate::object::ObjectKind::NativeFunction(ref nf) = obj.kind {
             if nf.name == "push" && argc > 0 && !args_ptr.is_null() {
-                let arg0 = unsafe { *args_ptr };
-                return jit_array_push_fast(_this_val, arg0);
+                let mut last_res = _this_val;
+                for i in 0..argc {
+                    let arg = unsafe { *args_ptr.add(i) };
+                    last_res = jit_array_push_fast(_this_val, arg);
+                }
+                return last_res;
             }
         }
         if let crate::object::ObjectKind::Function(ref mut f) = obj.kind {
@@ -555,6 +567,41 @@ pub extern "C" fn jit_call_trampoline(callee: u64, _this_val: u64, args_ptr: *co
             }
         }
     }
+
+    let vm_ptr = CURRENT_VM.with(|c| c.get());
+    if !vm_ptr.is_null() {
+        let vm = unsafe { &mut *vm_ptr };
+        NURSERY_PTRS.with(|cell| {
+            let ptrs = unsafe { &*cell.get() };
+            if !ptrs.bump.is_null() {
+                vm.heap.nursery.set_cursor(ptrs.bump);
+            }
+        });
+        let mut stack_args = [JsValue::undefined(); 16];
+        let to_copy = argc.min(16);
+        if to_copy > 0 && !args_ptr.is_null() {
+            let raw_slice = unsafe { std::slice::from_raw_parts(args_ptr, to_copy) };
+            for (i, &v) in raw_slice.iter().enumerate() {
+                stack_args[i] = JsValue(v);
+            }
+        }
+        let target_depth = vm.frames.len();
+        let call_res = vm.execute_call_internal(callee_val, JsValue(_this_val), &stack_args[..to_copy]);
+        let res = if let Ok(Some(r)) = call_res {
+            r
+        } else if call_res.is_ok() {
+            vm.run_until_depth(target_depth).unwrap_or(JsValue::undefined())
+        } else {
+            return JIT_DEOPT_SENTINEL;
+        };
+        NURSERY_PTRS.with(|cell| {
+            let ptrs = unsafe { &mut *cell.get() };
+            ptrs.bump = vm.heap.nursery.cursor();
+            ptrs.limit = vm.heap.nursery.limit();
+        });
+        return res.0;
+    }
+
     JIT_DEOPT_SENTINEL
 }
 
@@ -749,3 +796,101 @@ pub extern "C" fn jit_construct_trampoline(callee: u64, args_ptr: *const u64, ar
     }
     JIT_DEOPT_SENTINEL
 }
+
+/// Global get helper for JIT-compiled code.
+pub extern "C" fn jit_get_global(name_ptr: *const u8, name_len: usize) -> u64 {
+    CURRENT_VM.with(|c| {
+        let vm_ptr = c.get();
+        if vm_ptr.is_null() || name_ptr.is_null() {
+            return JIT_DEOPT_SENTINEL;
+        }
+        let vm = unsafe { &mut *vm_ptr };
+        let slice = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
+        let name = match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return JIT_DEOPT_SENTINEL,
+        };
+        match vm.resolve_identifier(name) {
+            Ok(Some(val)) => {
+                if val.is_uninitialized() {
+                    JIT_DEOPT_SENTINEL
+                } else {
+                    val.0
+                }
+            }
+            _ => JIT_DEOPT_SENTINEL,
+        }
+    })
+}
+
+/// Global get safe helper for JIT-compiled code (for typeof unbound).
+pub extern "C" fn jit_get_global_safe(name_ptr: *const u8, name_len: usize) -> u64 {
+    CURRENT_VM.with(|c| {
+        let vm_ptr = c.get();
+        if vm_ptr.is_null() || name_ptr.is_null() {
+            return JIT_DEOPT_SENTINEL;
+        }
+        let vm = unsafe { &mut *vm_ptr };
+        let slice = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
+        let name = match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return JIT_DEOPT_SENTINEL,
+        };
+        match vm.resolve_identifier(name) {
+            Ok(Some(val)) => {
+                if val.is_uninitialized() {
+                    TAG_UNDEFINED
+                } else {
+                    val.0
+                }
+            }
+            _ => TAG_UNDEFINED,
+        }
+    })
+}
+
+/// Global set helper for JIT-compiled code.
+pub extern "C" fn jit_set_global(name_ptr: *const u8, name_len: usize, val: u64) -> u64 {
+    CURRENT_VM.with(|c| {
+        let vm_ptr = c.get();
+        if vm_ptr.is_null() || name_ptr.is_null() {
+            return JIT_DEOPT_SENTINEL;
+        }
+        let vm = unsafe { &mut *vm_ptr };
+        let slice = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
+        let name = match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return JIT_DEOPT_SENTINEL,
+        };
+        if vm.const_bindings.contains(name) {
+            return JIT_DEOPT_SENTINEL;
+        }
+        let js_val = JsValue(val);
+        if let Some(lex) = vm.global_lexicals.get_mut(name) {
+            if lex.is_uninitialized() {
+                return JIT_DEOPT_SENTINEL;
+            }
+            *lex = js_val;
+            return val;
+        }
+        if vm.globals.contains_key(name) {
+            vm.globals.insert(name.to_string(), js_val);
+            let g_obj = vm.global_object;
+            let _ = vm.set_property_direct(g_obj, name, js_val);
+            return val;
+        }
+        JIT_DEOPT_SENTINEL
+    })
+}
+
+thread_local! {
+    pub static OSR_YIELDED_IP: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// OSR yield helper to set target IP in the current VM frame when exiting an OSR block.
+pub extern "C" fn jit_osr_yield(target_ip: u32) -> u64 {
+    OSR_YIELDED_IP.with(|c| c.set(Some(target_ip as usize)));
+    JIT_DEOPT_SENTINEL
+}
+
+

@@ -67,7 +67,9 @@ impl Nursery {
     /// Sets the bump pointer cursor.
     #[inline]
     pub fn set_cursor(&mut self, cursor: *mut u8) {
-        self.cursor = cursor;
+        if cursor > self.cursor {
+            self.cursor = cursor;
+        }
     }
 
     /// Returns the end limit of from-space.

@@ -606,12 +606,18 @@ impl Vm {
                     let t = target as usize;
                     let frame = self.frames.last_mut().unwrap();
                     if t <= frame.ip {
-                        if let Some(ret_val) = self.maybe_trigger_osr(&chunk, t, target_depth)? {
-                            if self.frames.len() == target_depth {
-                                return Ok(ret_val);
+                        match self.maybe_trigger_osr(&chunk, t, target_depth)? {
+                            OsrOutcome::Completed(ret_val) => {
+                                if self.frames.len() == target_depth {
+                                    return Ok(ret_val);
+                                }
+                                self.push(ret_val);
+                                continue;
                             }
-                            self.push(ret_val);
-                            continue;
+                            OsrOutcome::Yielded => {
+                                continue;
+                            }
+                            OsrOutcome::NotTriggered => {}
                         }
                     }
                     let frame = self.frames.last_mut().unwrap();
@@ -623,12 +629,18 @@ impl Vm {
                         let t = target as usize;
                         let frame = self.frames.last_mut().unwrap();
                         if t <= frame.ip {
-                            if let Some(ret_val) = self.maybe_trigger_osr(&chunk, t, target_depth)? {
-                                if self.frames.len() == target_depth {
-                                    return Ok(ret_val);
+                            match self.maybe_trigger_osr(&chunk, t, target_depth)? {
+                                OsrOutcome::Completed(ret_val) => {
+                                    if self.frames.len() == target_depth {
+                                        return Ok(ret_val);
+                                    }
+                                    self.push(ret_val);
+                                    continue;
                                 }
-                                self.push(ret_val);
-                                continue;
+                                OsrOutcome::Yielded => {
+                                    continue;
+                                }
+                                OsrOutcome::NotTriggered => {}
                             }
                         }
                         let frame = self.frames.last_mut().unwrap();
@@ -641,12 +653,18 @@ impl Vm {
                         let t = target as usize;
                         let frame = self.frames.last_mut().unwrap();
                         if t <= frame.ip {
-                            if let Some(ret_val) = self.maybe_trigger_osr(&chunk, t, target_depth)? {
-                                if self.frames.len() == target_depth {
-                                    return Ok(ret_val);
+                            match self.maybe_trigger_osr(&chunk, t, target_depth)? {
+                                OsrOutcome::Completed(ret_val) => {
+                                    if self.frames.len() == target_depth {
+                                        return Ok(ret_val);
+                                    }
+                                    self.push(ret_val);
+                                    continue;
                                 }
-                                self.push(ret_val);
-                                continue;
+                                OsrOutcome::Yielded => {
+                                    continue;
+                                }
+                                OsrOutcome::NotTriggered => {}
                             }
                         }
                         let frame = self.frames.last_mut().unwrap();
@@ -758,14 +776,23 @@ impl Vm {
 
         Ok(self.pop().unwrap_or_default())
     }
+}
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum OsrOutcome {
+    Completed(JsValue),
+    Yielded,
+    NotTriggered,
+}
+
+impl Vm {
     #[inline]
     fn maybe_trigger_osr(
         &mut self,
         chunk: &BytecodeChunk,
         target_ip: usize,
         _target_depth: usize,
-    ) -> Result<Option<JsValue>, VmError> {
+    ) -> Result<OsrOutcome, VmError> {
         let count = self.loop_hotness.entry((chunk.id, target_ip)).or_insert(0);
         *count = count.saturating_add(1);
         if *count >= crate::jit::OSR_HOT_THRESHOLD {
@@ -802,37 +829,48 @@ impl Vm {
                 let cur_this = self.frames.last().map(|f| f.this_val.0).unwrap_or(crate::value::TAG_UNDEFINED);
                 let res = unsafe { (func_ptr)(locals_ptr, locals_len, cur_this) };
 
-                    crate::jit::NURSERY_PTRS.with(|cell| {
-                        let ptrs = unsafe { &*cell.get() };
-                        if !ptrs.bump.is_null() {
+                crate::jit::NURSERY_PTRS.with(|cell| {
+                    let ptrs = unsafe { &mut *cell.get() };
+                    if !ptrs.bump.is_null() {
+                        if ptrs.bump > self.heap.nursery.cursor() {
                             self.heap.nursery.set_cursor(ptrs.bump);
+                        } else {
+                            ptrs.bump = self.heap.nursery.cursor();
                         }
-                    });
-                    crate::jit::CURRENT_VM.with(|c| c.set(prev_vm));
-                    if res != crate::jit::JIT_DEOPT_SENTINEL {
-                        let finished = self.frames.pop().unwrap();
-                        for (idx, name) in finished.local_names.iter().enumerate() {
-                            if let Some(val) = finished.locals.get(idx) {
-                                if self.global_lexicals.contains_key(name) {
-                                    self.global_lexicals.insert(name.clone(), *val);
-                                }
-                            }
-                        }
-                        while let Some(top) = self.catch_stack.last() {
-                            if top.frame_idx >= self.frames.len() {
-                                self.catch_stack.pop();
-                            } else {
-                                break;
-                            }
-                        }
-                        let ret_val = JsValue(res);
-                        self.stack.truncate(finished.base_sp);
-                        return Ok(Some(ret_val));
-                    } else {
-                        self.osr_cache.insert((chunk.id, target_ip), None);
                     }
+                });
+                crate::jit::CURRENT_VM.with(|c| c.set(prev_vm));
+                let yielded_ip = crate::jit::OSR_YIELDED_IP.with(|c| c.take());
+                if res != crate::jit::JIT_DEOPT_SENTINEL {
+                    let finished = self.frames.pop().unwrap();
+                    for (idx, name) in finished.local_names.iter().enumerate() {
+                        if let Some(val) = finished.locals.get(idx) {
+                            if self.global_lexicals.contains_key(name) {
+                                self.global_lexicals.insert(name.clone(), *val);
+                            }
+                        }
+                    }
+                    while let Some(top) = self.catch_stack.last() {
+                        if top.frame_idx >= self.frames.len() {
+                            self.catch_stack.pop();
+                        } else {
+                            break;
+                        }
+                    }
+                    let ret_val = JsValue(res);
+                    self.stack.truncate(finished.base_sp);
+                    return Ok(OsrOutcome::Completed(ret_val));
+                } else if let Some(target) = yielded_ip {
+                    if let Some(frame) = self.frames.last_mut() {
+                        frame.ip = target;
+                    }
+                    return Ok(OsrOutcome::Yielded);
+                } else {
+                    return Ok(OsrOutcome::NotTriggered);
                 }
             }
-            Ok(None)
         }
+        Ok(OsrOutcome::NotTriggered)
     }
+}
+
