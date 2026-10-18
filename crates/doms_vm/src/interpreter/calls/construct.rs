@@ -41,7 +41,7 @@ impl Vm {
                     let cur_callee = self.temp_roots[prev_temp];
                     let cur_nt = self.temp_roots[prev_temp + 1];
                     let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
-                    let proto = self.get_property(new_target_val, "prototype");
+                    let proto = self.get_property_result(new_target_val, "prototype")?;
                     self.temp_roots.push(proto);
                     let this_obj = self.alloc_object();
                     self.temp_roots.push(this_obj);
@@ -98,7 +98,7 @@ impl Vm {
                     let proto = if new_target_val == cur_callee {
                         f.prototype.unwrap_or_else(|| self.get_property(new_target_val, "prototype"))
                     } else {
-                        self.get_property(new_target_val, "prototype")
+                        self.get_property_result(new_target_val, "prototype")?
                     };
                     self.temp_roots.push(proto);
                     let shape_id = if new_target_val == cur_callee {

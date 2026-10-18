@@ -20,6 +20,7 @@ pub enum ObjectKind {
     ArrayBuffer(Arc<doms_parallel::SharedArrayBuffer>),
     SharedArrayBuffer(Arc<doms_parallel::SharedArrayBuffer>),
     DataView {
+        buffer_val: JsValue,
         buffer: Arc<doms_parallel::SharedArrayBuffer>,
         byte_offset: usize,
         byte_length: usize,

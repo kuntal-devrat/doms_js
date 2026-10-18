@@ -165,15 +165,6 @@ impl Vm {
                 }
             }
 
-            // Special properties on DataView
-            if let ObjectKind::DataView { buffer, byte_offset, byte_length } = &obj.kind {
-                match key {
-                    "byteLength" => return JsValue::from_int32(*byte_length as i32),
-                    "byteOffset" => return JsValue::from_int32(*byte_offset as i32),
-                    "buffer" => return self.alloc_array_buffer(Arc::clone(buffer)),
-                    _ => {}
-                }
-            }
 
             // Special properties on TypedArray
             if let ObjectKind::TypedArray(ta) = &obj.kind {

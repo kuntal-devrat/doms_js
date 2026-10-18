@@ -21,9 +21,9 @@ impl Vm {
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
-    pub fn alloc_data_view(&mut self, buffer: Arc<doms_parallel::SharedArrayBuffer>, byte_offset: usize, byte_length: usize) -> JsValue {
+    pub fn alloc_data_view(&mut self, buffer_val: JsValue, buffer: Arc<doms_parallel::SharedArrayBuffer>, byte_offset: usize, byte_length: usize) -> JsValue {
         let proto = self.globals.get("DataView").copied().map(|ctor| self.get_property(ctor, "prototype"));
-        let obj = JsObject::new_data_view(ShapeRegistry::ROOT_SHAPE_ID, proto, buffer, byte_offset, byte_length);
+        let obj = JsObject::new_data_view(ShapeRegistry::ROOT_SHAPE_ID, proto, buffer_val, buffer, byte_offset, byte_length);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }

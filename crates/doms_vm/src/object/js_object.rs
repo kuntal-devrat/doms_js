@@ -205,11 +205,12 @@ impl JsObject {
     pub fn new_data_view(
         shape_id: ShapeId,
         prototype: Option<JsValue>,
+        buffer_val: JsValue,
         buffer: Arc<doms_parallel::SharedArrayBuffer>,
         byte_offset: usize,
         byte_length: usize,
     ) -> Self {
-        Self::new_with_kind(shape_id, prototype, ObjectKind::DataView { buffer, byte_offset, byte_length })
+        Self::new_with_kind(shape_id, prototype, ObjectKind::DataView { buffer_val, buffer, byte_offset, byte_length })
     }
 
     pub fn new_shared_array_buffer(

@@ -526,6 +526,9 @@ impl JsObject {
                 }
             }
             ObjectKind::StringIterator { .. } => {}
+            ObjectKind::DataView { buffer_val, .. } => {
+                visitor(buffer_val);
+            }
             _ => {}
         }
     }
