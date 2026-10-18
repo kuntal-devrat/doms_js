@@ -118,7 +118,7 @@ impl SourceMap {
     }
 }
 
-// ── Base64 VLQ Decoder ──
+// Base64 VLQ decoder
 
 const BASE64_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -218,7 +218,7 @@ pub fn decode_mappings(mappings_str: &str) -> Result<Vec<Mapping>, String> {
     Ok(mappings)
 }
 
-// ── JSON Helpers ──
+// JSON helpers
 
 fn extract_string_field(json: &str, field: &str) -> Option<String> {
     let search = format!("\"{}\"", field);

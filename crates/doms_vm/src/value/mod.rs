@@ -15,7 +15,7 @@
 //!
 //! ```text
 //! Tag (bits 48-50)    Type             Payload (bits 0-47)
-//! ──────────────────────────────────────────────────────────
+//! ----------------------------------------------------------
 //! (any non-NaN)       f64 double       IEEE 754 double
 //! 0xFFF9              Int32            lower 32 bits = i32
 //! 0xFFFA              Boolean          bit 0 = true/false
@@ -35,7 +35,7 @@ mod conversions;
 mod extractors;
 mod formatting;
 
-// ── Tag constants (upper 16 bits) ──
+// Tag constants (upper 16 bits)
 
 pub const TAG_SSO_STRING: u64 = 0xFFF8_0000_0000_0000;
 pub const DOUBLE_LIMIT: u64 = 0xFFF8_0000_0000_0000;

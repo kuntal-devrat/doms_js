@@ -3,7 +3,7 @@
 use super::*;
 
 impl JsValue {
-    // ── Constructors ──
+    // Constructors
 
     /// Create a `JsValue` from an `f64` double.
     #[inline]

@@ -51,7 +51,7 @@ impl Default for DomsWasmSandbox {
     }
 }
 
-// ── C ABI / WebAssembly Exported Functions ──
+// C ABI and WebAssembly exported functions
 
 #[unsafe(no_mangle)]
 pub extern "C" fn doms_wasm_version() -> *const u8 {

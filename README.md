@@ -110,7 +110,7 @@ cargo build --release
 
 #### Run a JavaScript file
 ```bash
-./target/release/doms run tests/integration/demo_phase5.js
+./target/release/doms run tests/integration/web_standards_demo.js
 ```
 
 #### One-liner evaluation

@@ -61,7 +61,7 @@ impl Vm {
         None
     }
 
-    // ── String Coercion and JSON ──
+    // String coercion and JSON
 
     pub fn to_string_value(&self, val: JsValue) -> String {
         if val.is_sso_string() {

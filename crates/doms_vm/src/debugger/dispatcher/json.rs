@@ -1,7 +1,7 @@
 use super::*;
 
 impl CdpDispatcher {
-    // ── Simple JSON Parsing & Formatting Helpers ──
+    // JSON parsing and formatting helpers
 
     pub(super) fn parse_json_rpc(json: &str) -> (Option<String>, Option<String>, HashMap<String, String>) {
         let mut id = None;

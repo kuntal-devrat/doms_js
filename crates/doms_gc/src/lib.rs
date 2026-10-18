@@ -12,8 +12,7 @@
 //!   semi-space (scavenge). Objects that survive multiple scavenges are promoted to
 //!   the old generation.
 //!
-//! - **Old Generation (Tenured):** Mark-sweep-compact collector for long-lived objects.
-//!   (Phase 1 implementation — currently a simple mark-sweep.)
+//! - **Old Generation (Tenured):** Mark-sweep collector for long-lived objects.
 //!
 //! - **Large Object Space:** Objects larger than `LARGE_OBJECT_THRESHOLD` are allocated
 //!   directly here and never moved.

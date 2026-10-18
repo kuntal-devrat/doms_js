@@ -66,7 +66,7 @@ pub(super) fn write_websocket_frame(stream: &mut TcpStream, text: &str) -> std::
     stream.write_all(&frame)
 }
 
-// ── Pure SHA-1 & Base64 RFC 6455 Handshake ──
+// SHA-1 and Base64 RFC 6455 handshake
 
 pub(super) fn compute_websocket_accept(key: &str) -> String {
     let combined = format!("{}258EAFA5-E914-47DA-95CA-C5AB0DC85B11", key);

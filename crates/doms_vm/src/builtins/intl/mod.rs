@@ -335,7 +335,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
         vm.non_enumerable_props.insert((intl_obj, "[Symbol.toStringTag]".to_string()));
     }
 
-    // ── Intl.getCanonicalLocales(locales) ──
+    // Intl.getCanonicalLocales(locales)
     let get_canon_locales_fn = vm.alloc_native_function("getCanonicalLocales", 1, |vm, _this, args| {
         let arg = args.first().copied().unwrap_or(JsValue::undefined());
         let canons = canonicalize_locale_list(vm, arg)?;
@@ -345,7 +345,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
     vm.set_property(intl_obj, "getCanonicalLocales", get_canon_locales_fn);
     vm.non_enumerable_props.insert((intl_obj, "getCanonicalLocales".to_string()));
 
-    // ── Intl.Locale ──
+    // Intl.Locale
     let locale_proto = vm.alloc_object();
     let locale_ctor = vm.alloc_native_function("Locale", 1, |vm, this, args| {
         if !vm.is_constructing {
@@ -656,7 +656,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     setup_prototype_and_constructor(vm, locale_ctor, locale_proto, "Intl.Locale", "Locale", intl_obj);
 
-    // ── Intl.NumberFormat ──
+    // Intl.NumberFormat
     let num_format_proto = vm.alloc_object();
     let num_format_ctor = vm.alloc_native_function("NumberFormat", 0, |vm, this, args| {
         let instance = if vm.is_constructing {
@@ -761,7 +761,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     setup_prototype_and_constructor(vm, num_format_ctor, num_format_proto, "Intl.NumberFormat", "NumberFormat", intl_obj);
 
-    // ── Intl.DateTimeFormat ──
+    // Intl.DateTimeFormat
     let date_format_proto = vm.alloc_object();
     let date_format_ctor = vm.alloc_native_function("DateTimeFormat", 0, |vm, this, args| {
         let instance = if vm.is_constructing {
@@ -820,7 +820,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     setup_prototype_and_constructor(vm, date_format_ctor, date_format_proto, "Intl.DateTimeFormat", "DateTimeFormat", intl_obj);
 
-    // ── Intl.Collator ──
+    // Intl.Collator
     let collator_proto = vm.alloc_object();
     let collator_ctor = vm.alloc_native_function("Collator", 0, |vm, this, args| {
         let instance = if vm.is_constructing {
@@ -889,7 +889,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     setup_prototype_and_constructor(vm, collator_ctor, collator_proto, "Intl.Collator", "Collator", intl_obj);
 
-    // ── Intl.PluralRules ──
+    // Intl.PluralRules
     let pr_proto = vm.alloc_object();
     let pr_ctor = vm.alloc_native_function("PluralRules", 0, |vm, this, args| {
         if !vm.is_constructing {
@@ -955,7 +955,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     setup_prototype_and_constructor(vm, pr_ctor, pr_proto, "Intl.PluralRules", "PluralRules", intl_obj);
 
-    // ── Intl.ListFormat ──
+    // Intl.ListFormat
     let lf_proto = vm.alloc_object();
     let lf_ctor = vm.alloc_native_function("ListFormat", 0, |vm, this, args| {
         if !vm.is_constructing {
@@ -1130,7 +1130,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     setup_prototype_and_constructor(vm, lf_ctor, lf_proto, "Intl.ListFormat", "ListFormat", intl_obj);
 
-    // ── Intl.Segmenter ──
+    // Intl.Segmenter
     let seg_proto = vm.alloc_object();
     let seg_ctor = vm.alloc_native_function("Segmenter", 0, |vm, this, args| {
         if !vm.is_constructing {
@@ -1232,7 +1232,7 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
 
     setup_prototype_and_constructor(vm, seg_ctor, seg_proto, "Intl.Segmenter", "Segmenter", intl_obj);
 
-    // ── Intl.DisplayNames ──
+    // Intl.DisplayNames
     let dn_proto = vm.alloc_object();
     let dn_ctor = vm.alloc_native_function("DisplayNames", 2, |vm, this, args| {
         if !vm.is_constructing {

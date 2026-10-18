@@ -73,7 +73,7 @@ fn main() {
 
     ctx.eval(&init_script).expect("Initialize game script");
 
-    // ── Simulate 5 Game Loop Ticks ──
+    // Simulate 5 Game Loop Ticks
     println!("\n[Game Engine] Starting Game Loop Simulation (60 FPS, dt = 0.016s)...");
     let dt = 0.016;
 

@@ -3,7 +3,7 @@
 use super::*;
 
 impl Vm {
-    // ── Allocation Helpers ──
+    // Allocation helpers
 
     #[inline]
     pub fn track_ptr(&mut self, ptr: *mut JsObject) {
@@ -309,7 +309,7 @@ impl Vm {
             }
         };
 
-        // ── Phase 1: Evacuate root-reachable objects to to-space ──
+        // Evacuate root-reachable objects to to-space
         if let Some(pending) = self.pending_alloc {
             let ptr = pending as *mut u8;
             if self.heap.nursery.contains(ptr) {
@@ -599,7 +599,7 @@ impl Vm {
             }
         }
 
-        // ── Phase 2: Cheney scan of to-space (transitive closure) ──
+        // Cheney scan of to-space (transitive closure)
         let mut scan = to_start;
         while (scan as usize) < (to_cursor as usize) {
             let header = unsafe { &*(scan as *const doms_gc::GcHeader) };
@@ -612,7 +612,7 @@ impl Vm {
             scan = unsafe { scan.add(total_size) };
         }
 
-        // ── Phase 3: Walk self.objects: drop dead objects in from-space, update live pointers ──
+        // Update live object pointers and prune unreachable from-space objects
         self.objects.retain_mut(|ptr_ref| {
             let ptr = *ptr_ref;
             if self.heap.nursery.contains(ptr as *const u8) {
@@ -628,7 +628,7 @@ impl Vm {
             }
         });
 
-        // ── Phase 4: Finish scavenge (swaps spaces, resets cursor, clears old from-space) ──
+        // Finalize scavenge: swap semi-spaces and synchronize JIT nursery pointers
         self.heap.nursery.finish_scavenge(to_cursor);
         crate::jit::NURSERY_PTRS.with(|cell| {
             let ptrs = unsafe { &mut *cell.get() };

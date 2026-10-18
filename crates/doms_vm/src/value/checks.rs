@@ -3,7 +3,7 @@
 use super::*;
 
 impl JsValue {
-    // ── Type checks ──
+    // Type checks
 
     #[inline]
     pub fn is_double(&self) -> bool {
@@ -145,7 +145,7 @@ impl JsValue {
         !self.is_heap_ptr()
     }
 
-    // ── Raw access ──
+    // Raw access
 
     #[inline]
     pub fn raw_bits(&self) -> u64 {
@@ -166,7 +166,7 @@ impl JsValue {
         if self.is_double() { 0 } else { (self.0 >> 48) as u16 }
     }
 
-    // ── Truthiness ──
+    // Truthiness
 
     pub fn is_truthy(&self) -> bool {
         if self.is_null() || self.is_undefined() {
@@ -211,7 +211,7 @@ impl JsValue {
         true
     }
 
-    // ── typeof ──
+    // typeof
 
     pub fn js_typeof(&self) -> &'static str {
         if self.is_undefined() {

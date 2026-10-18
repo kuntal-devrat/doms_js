@@ -148,7 +148,7 @@ fn alloc_set_with_elements(vm: &mut Vm, elements: &[JsValue]) -> JsValue {
 }
 
 pub(super) fn register_set_builtins(vm: &mut Vm) {
-    // ── Set ──
+    // Set prototype and constructor
     let set_proto = vm.alloc_object();
 
     let set_add = vm.alloc_native_function("add", 1, |_vm, this, args| {
@@ -272,7 +272,7 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         Err(VmError::TypeError("Method get Set.prototype.size called on incompatible receiver".into()))
     });
 
-    // ── ES2024 Set Methods ──
+    // ES2024 Set methods
     let set_intersection = vm.alloc_native_function("intersection", 1, |vm, this, args| {
         let elements = get_set_elements(this)?;
         let other_val = args.first().copied().unwrap_or(JsValue::undefined());

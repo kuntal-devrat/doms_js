@@ -4,7 +4,7 @@ use super::*;
 use crate::interpreter::PreferredType;
 
 pub(super) fn register_regexp_builtins(vm: &mut Vm) {
-    // ── RegExp ──
+    // RegExp prototype and constructor
     let regexp_proto = vm.alloc_object();
     vm.regexp_proto = Some(regexp_proto);
 

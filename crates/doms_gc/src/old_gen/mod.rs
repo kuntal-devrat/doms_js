@@ -5,13 +5,6 @@
 //!
 //! 1. **Mark:** Walk from roots, mark all reachable objects.
 //! 2. **Sweep:** Free unmarked objects, returning memory to free lists.
-//! 3. **Compact:** (Phase 3) Move objects to reduce fragmentation.
-//!
-//! ## Current Status
-//!
-//! This is a **Phase 0 stub**. The full mark-sweep-compact implementation
-//! will arrive in Phase 1. For now, promoted objects are allocated in a
-//! simple Vec-backed region with no collection.
 
 use crate::header::{GC_ALIGN, GcHeader, HEADER_SIZE, TypeTag};
 use std::alloc::{Layout, alloc, dealloc};

@@ -19,7 +19,10 @@
 //! | [`promise`] | `Promise` and its prototype |
 //! | [`typed_array`] | Typed array constructors |
 //! | [`parallel`] | `SharedArrayBuffer`, `ArrayBuffer`, `DataView`, `Atomics`, `Worker` |
-//! | [`phase3`] | Collections, `RegExp`, `Intl`, `Temporal` shims |
+//! | [`collections`] | Keyed and weak collections (`Map`, `Set`, `WeakMap`, `WeakSet`, `WeakRef`, `FinalizationRegistry`) |
+//! | [`regexp`] | Regular expressions (`RegExp`) |
+//! | [`intl`] | Internationalization API (`Intl`) |
+//! | [`temporal`] | Date and time shims (`Temporal`) |
 //! | [`test262_harness`] | The `$262` Test262 harness object |
 //! | [`reflect`] | The `Reflect` namespace |
 //! | [`proxy`] | The `Proxy` constructor |
@@ -37,40 +40,46 @@ use std::sync::Arc;
 
 mod array;
 mod bigint;
+mod collections;
 mod console;
 mod function;
 mod globals;
 pub(crate) mod helpers;
+mod intl;
 pub(crate) mod iterator;
 mod json;
 mod math;
 pub(crate) mod object;
 mod parallel;
-mod phase3;
 mod promise;
 mod proxy;
 mod reflect;
+mod regexp;
 mod symbol;
+mod temporal;
 mod test262_harness;
 mod typed_array;
 mod uri;
 
 use array::register_array_builtins;
 use bigint::register_bigint;
+use collections::register_collections;
 use console::{native_console_log, register_console};
 use function::register_function_builtins;
 use globals::register_global_helpers;
 use helpers::{define_property_on_module_namespace, get_enumerable_keys, iterate_to_vec};
+use intl::register_intl_builtins;
 use iterator::register_iterator_builtins;
 use json::register_json;
 use math::register_math;
 use object::register_object_builtins;
 use parallel::register_parallel_and_typed_arrays;
-use phase3::register_phase3_builtins;
 use promise::register_promise;
 use proxy::register_proxy;
 use reflect::register_reflect;
+use regexp::register_regexp_builtins;
 use symbol::register_symbol;
+use temporal::register_temporal_builtins;
 use test262_harness::register_test262_harness;
 use typed_array::{IterKind, create_array_iterator};
 use uri::{uri_decode, uri_encode};
@@ -89,7 +98,10 @@ pub fn register_builtins(vm: &mut Vm) {
     register_global_helpers(vm);
     register_promise(vm);
     register_parallel_and_typed_arrays(vm);
-    register_phase3_builtins(vm);
+    register_collections(vm);
+    register_regexp_builtins(vm);
+    register_intl_builtins(vm);
+    register_temporal_builtins(vm);
     register_bigint(vm);
     register_reflect(vm);
     register_proxy(vm);

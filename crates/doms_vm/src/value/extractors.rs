@@ -3,7 +3,7 @@
 use super::*;
 
 impl JsValue {
-    // ── Extractors ──
+    // Extractors
 
     #[inline]
     pub fn as_double(&self) -> Option<f64> {

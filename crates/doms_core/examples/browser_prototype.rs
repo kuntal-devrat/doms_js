@@ -19,7 +19,7 @@ fn main() {
 
     let engine = Engine::new();
 
-    // ── 1. Create Browser Tab 1 (Foreground Tab) ──
+    // 1. Create Browser Tab 1 (Foreground Tab)
     println!("\n[Browser Engine] Initializing Tab 1 (Foreground Isolate)...");
     let mut tab1_isolate = engine.create_isolate();
     let mut tab1_ctx = tab1_isolate.create_context();
@@ -40,7 +40,7 @@ fn main() {
     "#;
     tab1_ctx.eval(dom_setup_js).expect("Setup DOM in Tab 1");
 
-    // ── 2. Create Browser Tab 2 (Background Tab) ──
+    // 2. Create Browser Tab 2 (Background Tab)
     println!("[Browser Engine] Initializing Tab 2 (Background Isolate)...");
     let mut tab2_isolate = engine.create_isolate();
     let mut tab2_ctx = tab2_isolate.create_context();
@@ -48,7 +48,7 @@ fn main() {
         .eval("var tabName = 'Background Analytics Tab';")
         .expect("Tab 2 setup");
 
-    // ── 3. Parallel Worker with SharedArrayBuffer & Atomics ──
+    // 3. Parallel Worker with SharedArrayBuffer & Atomics
     println!("[Browser Engine] Spawning Render Worker with 1KB SharedArrayBuffer Framebuffer...");
     let framebuffer = Arc::new(SharedArrayBuffer::new(1024)); // 1KB Framebuffer
     let worker_fb = Arc::clone(&framebuffer);
@@ -69,7 +69,7 @@ fn main() {
         println!("  [Worker Thread] Offscreen layout complete. Signal dispatched.");
     });
 
-    // ── 4. Tab 1 Interaction & DOM Creation ──
+    // 4. Tab 1 Interaction & DOM Creation
     println!("[Tab 1] Executing user application script...");
     let app_script = r#"
         var h1 = DOM.createElement('h1');

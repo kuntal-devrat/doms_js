@@ -3,10 +3,7 @@
 //! Objects larger than [`LARGE_OBJECT_THRESHOLD`] are allocated directly
 //! in the large object space. They are never moved (pinned), which avoids
 //! the cost of copying large buffers during scavenge.
-//!
-//! ## Current Status
-//!
-//! Phase 0 implementation using a simple `Vec` of allocations.
+
 
 use crate::header::{GC_ALIGN, GcHeader, HEADER_SIZE, TypeTag};
 use std::alloc::{Layout, alloc, dealloc};

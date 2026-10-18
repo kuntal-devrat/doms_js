@@ -1,9 +1,8 @@
-//! The `Map` global and `Map.prototype`.
 
 use super::*;
 
 pub(super) fn register_map_builtins(vm: &mut Vm) {
-    // ── Map ──
+    // Map prototype and constructor
     let map_proto = vm.alloc_object();
 
     let map_get = vm.alloc_native_function("get", 1, |_vm, this, args| {

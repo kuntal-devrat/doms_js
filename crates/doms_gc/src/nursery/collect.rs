@@ -22,7 +22,7 @@ impl Nursery {
         let mut to_cursor = self.to_start;
         let to_limit = unsafe { self.to_start.add(self.space_size) };
 
-        // Phase 1: Copy all root-referenced objects to to-space.
+        // Step 1: Copy all root-referenced objects to to-space.
         for root in roots.iter_mut() {
             if root.is_null() {
                 continue;
@@ -32,7 +32,7 @@ impl Nursery {
             }
         }
 
-        // Phase 2: Cheney scan — walk the copied objects in to-space and
+        // Step 2: Cheney scan — walk the copied objects in to-space and
         // copy their referenced objects too (breadth-first).
         let mut scan = self.to_start;
         while (scan as usize) < (to_cursor as usize) {
@@ -59,7 +59,7 @@ impl Nursery {
             scan = unsafe { scan.add(total_size) };
         }
 
-        // Phase 3: Swap from-space and to-space.
+        // Step 3: Swap from-space and to-space.
         std::mem::swap(&mut self.from_start, &mut self.to_start);
         self.cursor = to_cursor;
         self.limit = unsafe { self.from_start.add(self.space_size) };

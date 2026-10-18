@@ -38,7 +38,7 @@ fn test_eval_object_and_properties() {
 }
 
 #[test]
-fn test_phase3_builtins_and_collections() {
+fn test_map_and_set_collections() {
     let mut vm = Vm::new();
 
     // Map test
@@ -77,7 +77,7 @@ fn test_phase3_builtins_and_collections() {
 }
 
 #[test]
-fn test_phase3_jit_hot_execution() {
+fn test_jit_hot_loop_tiering() {
     let mut vm = Vm::new();
     // Function that adds two numbers: arg0 + arg1
     let mut chunk = BytecodeChunk::new();
@@ -127,7 +127,7 @@ fn test_phase3_jit_hot_execution() {
 }
 
 #[test]
-fn test_phase1_promises_and_weak_collections() {
+fn test_promises_and_weak_references() {
     let mut vm = Vm::new();
 
     // 1. WeakMap test
@@ -148,7 +148,7 @@ fn test_phase1_promises_and_weak_collections() {
 }
 
 #[test]
-fn test_phase2_symbols_and_global_registry() {
+fn test_symbols_and_global_registry() {
     let mut vm = Vm::new();
 
     // Unique symbols
@@ -172,7 +172,7 @@ fn test_phase2_symbols_and_global_registry() {
 }
 
 #[test]
-fn test_phase2_typed_arrays_and_dataview() {
+fn test_typed_arrays_and_dataview() {
     let mut vm = Vm::new();
 
     // ArrayBuffer and isView
@@ -216,7 +216,7 @@ fn test_phase2_typed_arrays_and_dataview() {
 }
 
 #[test]
-fn test_phase2_iterator_protocols() {
+fn test_iterator_protocols() {
     let mut vm = Vm::new();
 
     // Array.prototype[Symbol.iterator]
@@ -268,7 +268,7 @@ fn test_phase2_iterator_protocols() {
 }
 
 #[test]
-fn test_phase2_atomics() {
+fn test_atomics_operations() {
     let mut vm = Vm::new();
 
     let res = vm.eval(r#"
@@ -370,7 +370,7 @@ fn test_generational_gc_auto_scavenge_under_allocation_pressure() {
 }
 
 #[test]
-fn test_phase4_regexp_advanced() {
+fn test_regexp_features() {
     let mut vm = Vm::new();
 
     // 1. Unicode sets /v flag
@@ -435,7 +435,7 @@ fn test_phase4_regexp_advanced() {
 }
 
 #[test]
-fn test_phase4_intl_expanded() {
+fn test_intl_formatters() {
     let mut vm = Vm::new();
 
     // 1. Intl.getCanonicalLocales
@@ -502,7 +502,7 @@ fn test_phase4_intl_expanded() {
 }
 
 #[test]
-fn test_phase4_annex_b_escape_unescape() {
+fn test_annex_b_escape_unescape() {
     let mut vm = Vm::new();
     let res = vm.eval(r#"
         let enc = escape('Hello World!');

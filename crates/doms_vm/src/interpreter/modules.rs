@@ -3,7 +3,7 @@
 use super::*;
 
 impl Vm {
-    // ── Main Execution Engine ──
+    // Dynamic eval and module instantiation
 
     pub fn eval(&mut self, source: &str) -> Result<JsValue, VmError> {
         let program = doms_parser::parse(source)

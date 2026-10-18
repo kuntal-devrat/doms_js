@@ -95,7 +95,7 @@ pub trait Trace {
     }
 }
 
-// ── Blanket implementations for common types ──
+// Blanket implementations for common types
 
 impl Trace for () {
     #[inline]

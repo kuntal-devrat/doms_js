@@ -2,7 +2,6 @@
 
 use super::*;
 
-// ── Strict JSON Lexer & Parser ──
 
 pub(super) struct JsonParser<'a> {
     pub(super) chars: Vec<char>,

@@ -152,7 +152,7 @@ impl GcHeader {
         }
     }
 
-    // ── Flag queries ──
+    // Flag queries
 
     /// Check if this object has been forwarded during scavenge.
     #[inline]
@@ -178,7 +178,7 @@ impl GcHeader {
         self.flags & FLAG_TENURED != 0
     }
 
-    // ── Flag mutations ──
+    // Flag mutations
 
     /// Set the marked flag.
     #[inline]
@@ -225,7 +225,7 @@ impl GcHeader {
         new_age
     }
 
-    // ── Forwarding (used during nursery scavenge) ──
+    // Forwarding (used during nursery scavenge)
 
     /// Set the forwarding address. Marks the object as forwarded.
     ///

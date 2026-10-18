@@ -69,7 +69,7 @@ pub struct CallFrame {
     pub home_object: Option<JsValue>,
 }
 
-/// Compatibility enum for earlier Phase 0 API callers.
+/// Simplified primitive value representation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VmValue {
     Undefined,

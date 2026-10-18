@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn register_temporal_builtins(vm: &mut Vm) {
-    // ── Temporal ──
+    // Temporal namespace object
     let temporal_obj = vm.alloc_object();
 
     let instant_ctor = vm.alloc_native_function("Instant", 1, |vm, _this, args| {

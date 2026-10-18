@@ -1,5 +1,5 @@
-// DOMS.js Phase 5 Feature Demo
-console.log("=== DOMS.js Phase 5 Engine Demo ===");
+// DOMS.js Web Standards Demo
+console.log("=== DOMS.js Web Standards Demo ===");
 
 // 1. TextEncoder & TextDecoder
 var encoder = new TextEncoder();

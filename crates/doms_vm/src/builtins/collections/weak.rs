@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn register_weak_builtins(vm: &mut Vm) {
-    // ── WeakRef & FinalizationRegistry ──
+    // WeakRef & FinalizationRegistry
     let weakref_ctor = vm.alloc_native_function("WeakRef", 1, |vm, _this, args| {
         let target = args.first().copied().unwrap_or(JsValue::undefined());
         Ok(vm.alloc_weak_ref(target))
@@ -16,7 +16,7 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
     });
     vm.globals.insert("FinalizationRegistry".to_string(), fr_ctor);
 
-    // ── WeakMap ──
+    // WeakMap
     let wm_proto = vm.alloc_object();
 
     let wm_get = vm.alloc_native_function("get", 1, |_vm, this, args| {
@@ -178,7 +178,7 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
     vm.non_enumerable_props.insert((wm_proto, "constructor".to_string()));
     vm.globals.insert("WeakMap".to_string(), weakmap_ctor);
 
-    // ── WeakSet ──
+    // WeakSet
     let ws_proto = vm.alloc_object();
 
     let ws_add = vm.alloc_native_function("add", 1, |_vm, this, args| {

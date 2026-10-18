@@ -25,7 +25,7 @@ if [ ! -d "${WPT_DIR}" ]; then
     echo "Note: Full WPT clone not detected at ${WPT_DIR}."
     echo "To test full WPT suite, run: git clone --depth 1 https://github.com/web-platform-tests/wpt.git tests/wpt/wpt"
     echo "Running internal web standard integration verification suite..."
-    "${DOMS_BIN}" run "${WORKSPACE_ROOT}/tests/integration/demo_phase5.js"
+    "${DOMS_BIN}" run "${WORKSPACE_ROOT}/tests/integration/web_standards_demo.js"
     echo "All built-in Web Standard tests passed!"
     exit 0
 fi
