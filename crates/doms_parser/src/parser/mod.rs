@@ -213,6 +213,9 @@ impl<'a> Parser<'a> {
         let tok = self.advance()?;
         let name = match tok.kind {
             TokenKind::Ident(ref id) => {
+                if tok.has_escape && crate::lexer::is_reserved_word(id) {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(id.clone()), tok.line, tok.col));
+                }
                 if self.is_strict && (is_strict_reserved_word(id) || id == "eval" || id == "arguments") {
                     return Err(ParseError::UnexpectedToken(TokenKind::Ident(id.clone()), tok.line, tok.col));
                 }

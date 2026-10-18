@@ -79,7 +79,7 @@ impl Vm {
     fn run_until_depth_internal(&mut self, target_depth: usize) -> Result<JsValue, VmError> {
         while self.frames.len() > target_depth {
             if self.objects.len() >= self.gc_threshold {
-                self.scavenge_nursery();
+                self.gc_collect();
                 if self.objects.len() * 2 > self.gc_threshold {
                     self.gc_threshold = (self.objects.len() * 2).max(16384);
                 }

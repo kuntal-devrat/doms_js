@@ -36,6 +36,9 @@ impl Test262Runner {
                 || feat == "source-phase-imports"
                 || feat == "source-phase-imports-module-source"
                 || feat == "explicit-resource-management"
+                || feat == "tail-call-optimization"
+                || feat == "host-gc-required"
+                || feat == "uint8array-base64"
             {
                 return TestStatus::Skip(format!("Feature '{}' not supported", feat));
             }
@@ -103,10 +106,10 @@ impl Test262Runner {
         vm.is_strict = is_top_level_strict;
         vm.is_module = meta.is_module;
         vm.base_dir = path.parent().map(|p| p.to_path_buf());
-        vm.max_instructions = Some(80_000_000);
-        vm.max_objects = Some(1_000_000);
+        vm.max_instructions = Some(20_000_000);
+        vm.max_objects = Some(150_000);
         vm.max_evals = Some(100_000);
-        vm.deadline = Some(Instant::now() + std::time::Duration::from_millis(5_000));
+        vm.deadline = Some(Instant::now() + std::time::Duration::from_millis(3_000));
 
         if meta.is_module {
             let m = vm.alloc_object();

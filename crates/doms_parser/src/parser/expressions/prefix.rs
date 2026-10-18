@@ -13,7 +13,12 @@ impl<'a> Parser<'a> {
             TokenKind::False => Ok(Expression::Literal(Literal::Boolean(false))),
             TokenKind::Null => Ok(Expression::Literal(Literal::Null)),
             TokenKind::Undefined => Ok(Expression::Literal(Literal::Undefined)),
-            TokenKind::Ident(s) => self.parse_identifier_expr(s, tok.line, tok.col),
+            TokenKind::Ident(s) => {
+                if tok.has_escape && crate::lexer::is_reserved_word(&s) {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(s), tok.line, tok.col));
+                }
+                self.parse_identifier_expr(s, tok.line, tok.col)
+            }
             TokenKind::This => Ok(Expression::This),
             TokenKind::Super => {
                 if self.check(&TokenKind::LParen) {

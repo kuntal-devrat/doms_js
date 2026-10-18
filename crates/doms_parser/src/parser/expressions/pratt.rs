@@ -143,6 +143,9 @@ impl<'a> Parser<'a> {
                 TokenKind::AmpEq => Some(Some(BinaryOp::BitwiseAnd)),
                 TokenKind::PipeEq => Some(Some(BinaryOp::BitwiseOr)),
                 TokenKind::CaretEq => Some(Some(BinaryOp::BitwiseXor)),
+                TokenKind::AmpAmpEq => Some(Some(BinaryOp::LogicalAnd)),
+                TokenKind::PipePipeEq => Some(Some(BinaryOp::LogicalOr)),
+                TokenKind::QuestionQuestionEq => Some(Some(BinaryOp::NullishCoalescing)),
                 _ => None,
             };
 

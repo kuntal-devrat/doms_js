@@ -120,7 +120,7 @@ pub(super) fn register_string_global(vm: &mut Vm) {
         "indexOf", "includes", "toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase", "trim",
         "charAt", "charCodeAt", "codePointAt", "slice", "isWellFormed", "toWellFormed", "replace",
         "match", "search", "lastIndexOf", "split", "concat", "startsWith", "endsWith",
-        "repeat", "padStart", "padEnd", "localeCompare", "substring",
+        "repeat", "padStart", "padEnd", "localeCompare", "substring", "at", "replaceAll",
     ];
     for name in string_methods {
         if let Some(m) = vm.get_string_method(name) {

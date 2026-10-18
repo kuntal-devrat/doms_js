@@ -163,6 +163,15 @@ pub(super) fn register_bigint(vm: &mut Vm) {
         if bits == 0 {
             return Ok(vm.alloc_bigint(BigInt::zero()));
         }
+        if bits >= 100_000 {
+            if !bi.is_negative() && (bi.bits() as usize) < bits {
+                return Ok(vm.alloc_bigint(bi));
+            }
+            if bi.is_negative() && ((-&bi).bits() as usize) < bits {
+                return Ok(vm.alloc_bigint(bi));
+            }
+            return Err(VmError::RangeError("BigInt bit length exceeds maximum supported size".into()));
+        }
         let two_to_bits = BigInt::one() << bits;
         let mut mod_val = bi % &two_to_bits;
         if mod_val.is_negative() {
@@ -183,6 +192,12 @@ pub(super) fn register_bigint(vm: &mut Vm) {
         let bi = to_bigint_value(vm, bi_arg)?;
         if bits == 0 {
             return Ok(vm.alloc_bigint(BigInt::zero()));
+        }
+        if bits >= 100_000 {
+            if !bi.is_negative() && (bi.bits() as usize) <= bits {
+                return Ok(vm.alloc_bigint(bi));
+            }
+            return Err(VmError::RangeError("BigInt bit length exceeds maximum supported size".into()));
         }
         let two_to_bits = BigInt::one() << bits;
         let mut mod_val = bi % &two_to_bits;

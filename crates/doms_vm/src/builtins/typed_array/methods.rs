@@ -2,14 +2,14 @@
 
 use super::*;
 
-pub(super) fn validate_typed_array<'a>(this: JsValue) -> Result<&'a JsTypedArray, VmError> {
+pub(super) fn validate_typed_array(this: JsValue) -> Result<JsTypedArray, VmError> {
     if let Some(ptr) = this.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut JsObject) };
         if let ObjectKind::TypedArray(ta) = &obj.kind {
             if ta.buffer.is_detached() {
                 return Err(VmError::TypeError("TypedArray buffer is detached".into()));
             }
-            return Ok(ta);
+            return Ok(ta.clone());
         }
     }
     Err(VmError::TypeError("Method called on non-TypedArray".into()))
@@ -140,6 +140,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         if let Some(src_ptr) = cur_src.as_object_ptr() {
             let src_obj = unsafe { &*(src_ptr as *mut JsObject) };
             if let ObjectKind::TypedArray(src_ta) = &src_obj.kind {
+                let src_ta = src_ta.clone();
                 let src_is_big = matches!(src_ta.kind, TypedArrayKind::BigInt64 | TypedArrayKind::BigUint64);
                 let dst_is_big = matches!(dst_ta.kind, TypedArrayKind::BigInt64 | TypedArrayKind::BigUint64);
                 if src_is_big != dst_is_big {
@@ -151,13 +152,13 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
                     vm.temp_roots.truncate(prev_temp);
                     return Err(VmError::RangeError("Source is too large for target array".into()));
                 }
-                let mut vals = Vec::with_capacity(src_len);
+                let vals_start = vm.temp_roots.len();
                 for i in 0..src_len {
-                    if let Some(val) = vm.read_typed_array_element_vm(src_ta, i) {
-                        vals.push(val);
-                    }
+                    let val = vm.read_typed_array_element_vm(&src_ta, i).unwrap_or(JsValue::undefined());
+                    vm.temp_roots.push(val);
                 }
-                for (i, val) in vals.into_iter().enumerate() {
+                for i in 0..src_len {
+                    let val = vm.temp_roots[vals_start + i];
                     vm.write_typed_array_element_vm(&dst_ta, offset + i, val)?;
                 }
                 vm.temp_roots.truncate(prev_temp);
@@ -207,7 +208,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             byte_offset: 0,
         };
         for i in 0..count {
-            if let Some(val) = vm.read_typed_array_element_vm(ta, s + i) {
+            if let Some(val) = vm.read_typed_array_element_vm(&ta, s + i) {
                 vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
             }
         }
@@ -238,7 +239,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let target = args.first().copied().unwrap_or(JsValue::undefined());
         let from_idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
         for i in from_idx..ta.length {
-            if let Some(val) = vm.read_typed_array_element_vm(ta, i) {
+            if let Some(val) = vm.read_typed_array_element_vm(&ta, i) {
                 if vm.strict_equal(val, target) {
                     return Ok(JsValue::from_int32(i as i32));
                 }
@@ -269,7 +270,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             len - 1
         };
         for i in (0..=from_idx).rev() {
-            if let Some(val) = vm.read_typed_array_element_vm(ta, i) {
+            if let Some(val) = vm.read_typed_array_element_vm(&ta, i) {
                 if vm.strict_equal(val, target) {
                     return Ok(JsValue::from_int32(i as i32));
                 }
@@ -285,7 +286,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let target = args.first().copied().unwrap_or(JsValue::undefined());
         let from_idx = args.get(1).and_then(|v| v.to_int32()).unwrap_or(0).max(0) as usize;
         for i in from_idx..ta.length {
-            if let Some(val) = vm.read_typed_array_element_vm(ta, i) {
+            if let Some(val) = vm.read_typed_array_element_vm(&ta, i) {
                 if vm.same_value_zero(val, target) {
                     return Ok(JsValue::from_boolean(true));
                 }
@@ -301,7 +302,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let sep = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| ",".to_string());
         let mut parts = Vec::with_capacity(ta.length);
         for i in 0..ta.length {
-            if let Some(val) = vm.read_typed_array_element_vm(ta, i) {
+            if let Some(val) = vm.read_typed_array_element_vm(&ta, i) {
                 parts.push(vm.to_string_value(val));
             }
         }
@@ -342,7 +343,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let idx = args.first().and_then(|v| v.to_number()).unwrap_or(0.0) as i64;
         let k = if idx < 0 { len + idx } else { idx };
         if k >= 0 && k < len {
-            if let Some(val) = vm.read_typed_array_element_vm(ta, k as usize) {
+            if let Some(val) = vm.read_typed_array_element_vm(&ta, k as usize) {
                 return Ok(val);
             }
         }
@@ -354,15 +355,20 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
     let reverse_fn = vm.alloc_native_function("reverse", 0, |vm, this, _args| {
         let ta = validate_typed_array(this)?;
         let len = ta.length;
+        let prev_temp = vm.temp_roots.len();
+        for i in 0..len {
+            let val = vm.read_typed_array_element_vm(&ta, i).unwrap_or(JsValue::undefined());
+            vm.temp_roots.push(val);
+        }
         let mut elements = Vec::with_capacity(len);
         for i in 0..len {
-            elements.push(vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined()));
+            elements.push(vm.temp_roots[prev_temp + i]);
         }
         elements.reverse();
-        let ta_clone = ta.clone();
         for (i, val) in elements.into_iter().enumerate() {
-            vm.write_typed_array_element_vm(&ta_clone, i, val)?;
+            vm.write_typed_array_element_vm(&ta, i, val)?;
         }
+        vm.temp_roots.truncate(prev_temp);
         Ok(this)
     });
     vm.set_property(proto, "reverse", reverse_fn);
@@ -371,9 +377,14 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
     let to_reversed_fn = vm.alloc_native_function("toReversed", 0, |vm, this, _args| {
         let ta = validate_typed_array(this)?;
         let len = ta.length;
+        let prev_temp = vm.temp_roots.len();
+        for i in 0..len {
+            let val = vm.read_typed_array_element_vm(&ta, i).unwrap_or(JsValue::undefined());
+            vm.temp_roots.push(val);
+        }
         let mut elements = Vec::with_capacity(len);
         for i in 0..len {
-            elements.push(vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined()));
+            elements.push(vm.temp_roots[prev_temp + i]);
         }
         elements.reverse();
         let bpe = ta.kind.bytes_per_element();
@@ -388,6 +399,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         for (i, val) in elements.into_iter().enumerate() {
             vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
         }
+        vm.temp_roots.truncate(prev_temp);
         Ok(vm.alloc_typed_array(dst_ta))
     });
     vm.set_property(proto, "toReversed", to_reversed_fn);
@@ -413,7 +425,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             byte_offset: 0,
         };
         for i in 0..len {
-            let val = if i == k as usize { value } else { vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined()) };
+            let val = if i == k as usize { value } else { vm.read_typed_array_element_vm(&ta, i).unwrap_or(JsValue::undefined()) };
             vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
         }
         Ok(vm.alloc_typed_array(dst_ta))
@@ -432,14 +444,16 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let final_idx = if end < 0 { (len + end).max(0) } else { end.min(len) };
         let count = (final_idx - from).min(len - to);
         if count > 0 {
-            let mut vals = Vec::with_capacity(count as usize);
+            let prev_temp = vm.temp_roots.len();
             for i in 0..count {
-                vals.push(vm.read_typed_array_element_vm(ta, (from + i) as usize).unwrap_or(JsValue::undefined()));
+                let val = vm.read_typed_array_element_vm(&ta, (from + i) as usize).unwrap_or(JsValue::undefined());
+                vm.temp_roots.push(val);
             }
-            let ta_clone = ta.clone();
-            for (i, val) in vals.into_iter().enumerate() {
-                vm.write_typed_array_element_vm(&ta_clone, (to + i as i64) as usize, val)?;
+            for i in 0..count {
+                let val = vm.temp_roots[prev_temp + i as usize];
+                vm.write_typed_array_element_vm(&ta, (to + i as i64) as usize, val)?;
             }
+            vm.temp_roots.truncate(prev_temp);
         }
         Ok(this)
     });
@@ -465,7 +479,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -493,7 +508,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         vm.temp_roots.push(this);
         vm.temp_roots.push(callback);
         vm.temp_roots.push(this_arg);
-        let mut mapped_vals = Vec::with_capacity(len);
+        let mapped_start = vm.temp_roots.len();
         for i in 0..len {
             let cur_this = vm.temp_roots[prev_temp];
             let cur_cb = vm.temp_roots[prev_temp + 1];
@@ -501,7 +516,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -509,7 +525,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
                 JsValue::undefined()
             };
             let mapped = vm.call(cur_cb, cur_this_arg, &[val, JsValue::from_int32(i as i32), cur_this])?;
-            mapped_vals.push(mapped);
+            vm.temp_roots.push(mapped);
         }
         let cur_this = vm.temp_roots[prev_temp];
         let kind = if let Some(ptr) = cur_this.as_object_ptr() {
@@ -526,7 +542,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             length: len,
             byte_offset: 0,
         };
-        for (i, val) in mapped_vals.into_iter().enumerate() {
+        for i in 0..len {
+            let val = vm.temp_roots[mapped_start + i];
             vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
         }
         vm.temp_roots.truncate(prev_temp);
@@ -549,7 +566,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         vm.temp_roots.push(this);
         vm.temp_roots.push(callback);
         vm.temp_roots.push(this_arg);
-        let mut kept = Vec::new();
+        let kept_start = vm.temp_roots.len();
+        let mut count_kept = 0;
         for i in 0..len {
             let cur_this = vm.temp_roots[prev_temp];
             let cur_cb = vm.temp_roots[prev_temp + 1];
@@ -557,7 +575,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -566,19 +585,20 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             };
             let res = vm.call(cur_cb, cur_this_arg, &[val, JsValue::from_int32(i as i32), cur_this])?;
             if res.is_truthy() {
-                kept.push(val);
+                vm.temp_roots.push(val);
+                count_kept += 1;
             }
         }
-        let new_len = kept.len();
-        let new_sab = doms_parallel::SharedArrayBuffer::try_new(new_len * bpe)
+        let new_sab = doms_parallel::SharedArrayBuffer::try_new(count_kept * bpe)
             .map_err(|e| VmError::RuntimeError(e.into()))?;
         let mut dst_ta = JsTypedArray {
             buffer: Arc::new(new_sab),
             kind,
-            length: new_len,
+            length: count_kept,
             byte_offset: 0,
         };
-        for (i, val) in kept.into_iter().enumerate() {
+        for i in 0..count_kept {
+            let val = vm.temp_roots[kept_start + i];
             vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
         }
         vm.temp_roots.truncate(prev_temp);
@@ -606,7 +626,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -644,7 +665,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -682,7 +704,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -720,7 +743,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -758,7 +782,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -796,7 +821,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -826,7 +852,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let (mut accum, start_idx) = if has_init {
             (args[1], 0)
         } else if len > 0 {
-            (vm.read_typed_array_element_vm(ta, 0).unwrap_or(JsValue::undefined()), 1)
+            (vm.read_typed_array_element_vm(&ta, 0).unwrap_or(JsValue::undefined()), 1)
         } else {
             return Err(VmError::TypeError("Reduce of empty typed array with no initial value".into()));
         };
@@ -841,7 +867,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -868,7 +895,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let (mut accum, start_idx) = if has_init {
             (args[1], len as i64 - 1)
         } else if len > 0 {
-            (vm.read_typed_array_element_vm(ta, len - 1).unwrap_or(JsValue::undefined()), len as i64 - 2)
+            (vm.read_typed_array_element_vm(&ta, len - 1).unwrap_or(JsValue::undefined()), len as i64 - 2)
         } else {
             return Err(VmError::TypeError("Reduce of empty typed array with no initial value".into()));
         };
@@ -884,7 +911,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             let val = if let Some(ptr) = cur_this.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 if let ObjectKind::TypedArray(ta) = &obj.kind {
-                    vm.read_typed_array_element_vm(ta, i as usize).unwrap_or(JsValue::undefined())
+                    let ta_clone = ta.clone();
+                    vm.read_typed_array_element_vm(&ta_clone, i as usize).unwrap_or(JsValue::undefined())
                 } else {
                     JsValue::undefined()
                 }
@@ -906,29 +934,31 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let len = ta.length;
         let comparefn = args.first().copied().unwrap_or(JsValue::undefined());
         let has_cmp = vm.is_callable(comparefn);
-        let mut vals = Vec::with_capacity(len);
+        let prev_temp = vm.temp_roots.len();
+        let vals_start = prev_temp;
         for i in 0..len {
-            vals.push(vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined()));
+            let val = vm.read_typed_array_element_vm(&ta, i).unwrap_or(JsValue::undefined());
+            vm.temp_roots.push(val);
         }
         if has_cmp {
-            let prev_temp = vm.temp_roots.len();
+            let cmp_idx = vm.temp_roots.len();
             vm.temp_roots.push(comparefn);
             for i in 0..len {
                 for j in (i + 1)..len {
-                    let cmp = vm.temp_roots[prev_temp];
-                    let a = vals[i];
-                    let b = vals[j];
+                    let cmp = vm.temp_roots[cmp_idx];
+                    let a = vm.temp_roots[vals_start + i];
+                    let b = vm.temp_roots[vals_start + j];
                     let res = vm.call(cmp, JsValue::undefined(), &[a, b])?;
                     let n = res.to_number().unwrap_or(0.0);
                     if n > 0.0 {
-                        vals.swap(i, j);
+                        vm.temp_roots.swap(vals_start + i, vals_start + j);
                     }
                 }
             }
-            vm.temp_roots.truncate(prev_temp);
         } else {
             // Numeric ascending sort
-            vals.sort_by(|&a, &b| {
+            let mut slice: Vec<JsValue> = vm.temp_roots[vals_start..vals_start + len].to_vec();
+            slice.sort_by(|&a, &b| {
                 if let (Some(ba), Some(bb)) = (vm.as_bigint_val(a), vm.as_bigint_val(b)) {
                     ba.cmp(&bb)
                 } else {
@@ -945,11 +975,16 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
                     }
                 }
             });
+            for (idx, val) in slice.into_iter().enumerate() {
+                vm.temp_roots[vals_start + idx] = val;
+            }
         }
         let ta_clone = ta.clone();
-        for (i, val) in vals.into_iter().enumerate() {
+        for i in 0..len {
+            let val = vm.temp_roots[vals_start + i];
             vm.write_typed_array_element_vm(&ta_clone, i, val)?;
         }
+        vm.temp_roots.truncate(prev_temp);
         Ok(this)
     });
     vm.set_property(proto, "sort", sort_fn);
@@ -961,28 +996,30 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let bpe = ta.kind.bytes_per_element();
         let comparefn = args.first().copied().unwrap_or(JsValue::undefined());
         let has_cmp = vm.is_callable(comparefn);
-        let mut vals = Vec::with_capacity(len);
+        let prev_temp = vm.temp_roots.len();
+        let vals_start = prev_temp;
         for i in 0..len {
-            vals.push(vm.read_typed_array_element_vm(ta, i).unwrap_or(JsValue::undefined()));
+            let val = vm.read_typed_array_element_vm(&ta, i).unwrap_or(JsValue::undefined());
+            vm.temp_roots.push(val);
         }
         if has_cmp {
-            let prev_temp = vm.temp_roots.len();
+            let cmp_idx = vm.temp_roots.len();
             vm.temp_roots.push(comparefn);
             for i in 0..len {
                 for j in (i + 1)..len {
-                    let cmp = vm.temp_roots[prev_temp];
-                    let a = vals[i];
-                    let b = vals[j];
+                    let cmp = vm.temp_roots[cmp_idx];
+                    let a = vm.temp_roots[vals_start + i];
+                    let b = vm.temp_roots[vals_start + j];
                     let res = vm.call(cmp, JsValue::undefined(), &[a, b])?;
                     let n = res.to_number().unwrap_or(0.0);
                     if n > 0.0 {
-                        vals.swap(i, j);
+                        vm.temp_roots.swap(vals_start + i, vals_start + j);
                     }
                 }
             }
-            vm.temp_roots.truncate(prev_temp);
         } else {
-            vals.sort_by(|&a, &b| {
+            let mut slice: Vec<JsValue> = vm.temp_roots[vals_start..vals_start + len].to_vec();
+            slice.sort_by(|&a, &b| {
                 if let (Some(ba), Some(bb)) = (vm.as_bigint_val(a), vm.as_bigint_val(b)) {
                     ba.cmp(&bb)
                 } else {
@@ -999,6 +1036,9 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
                     }
                 }
             });
+            for (idx, val) in slice.into_iter().enumerate() {
+                vm.temp_roots[vals_start + idx] = val;
+            }
         }
         let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
             .map_err(|e| VmError::RuntimeError(e.into()))?;
@@ -1008,9 +1048,11 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             length: len,
             byte_offset: 0,
         };
-        for (i, val) in vals.into_iter().enumerate() {
+        for i in 0..len {
+            let val = vm.temp_roots[vals_start + i];
             vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
         }
+        vm.temp_roots.truncate(prev_temp);
         Ok(vm.alloc_typed_array(dst_ta))
     });
     vm.set_property(proto, "toSorted", to_sorted_fn);

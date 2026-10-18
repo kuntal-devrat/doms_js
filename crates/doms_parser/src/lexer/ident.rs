@@ -1,6 +1,6 @@
 //! Identifier and keyword scanning.
 
-use super::chars::{is_identifier_part, is_identifier_start, is_reserved_word};
+use super::chars::{is_identifier_part, is_identifier_start};
 use super::token::{LexError, TokenKind};
 use super::Lexer;
 
@@ -89,9 +89,6 @@ impl<'a> Lexer<'a> {
         }
 
         if has_escape {
-            if is_reserved_word(&s) {
-                return Err(LexError::UnexpectedChar('\\', line, col));
-            }
             return Ok((TokenKind::Ident(s), true));
         }
 

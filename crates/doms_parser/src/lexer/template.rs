@@ -87,7 +87,53 @@ impl<'a> Lexer<'a> {
                                     }
                                 }
                             } else {
-                                expr_str.push(ec);
+                                let trimmed = expr_str.trim_end();
+                                let is_regex = if trimmed.is_empty() {
+                                    true
+                                } else {
+                                    let last_char = trimmed.chars().last().unwrap();
+                                    match last_char {
+                                        '(' | '[' | '{' | ',' | ';' | ':' | '?' | '=' | '!' | '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '~' | '<' | '>' => true,
+                                        _ => {
+                                            trimmed.ends_with("return")
+                                                || trimmed.ends_with("case")
+                                                || trimmed.ends_with("delete")
+                                                || trimmed.ends_with("throw")
+                                                || trimmed.ends_with("void")
+                                                || trimmed.ends_with("typeof")
+                                                || trimmed.ends_with("yield")
+                                                || trimmed.ends_with("await")
+                                        }
+                                    }
+                                };
+                                if is_regex {
+                                    expr_str.push(ec);
+                                    let mut in_char_class = false;
+                                    while let Some(rc) = self.advance() {
+                                        expr_str.push(rc);
+                                        if rc == '\\' {
+                                            if let Some(esc) = self.advance() {
+                                                expr_str.push(esc);
+                                            }
+                                        } else if rc == '[' {
+                                            in_char_class = true;
+                                        } else if rc == ']' {
+                                            in_char_class = false;
+                                        } else if rc == '/' && !in_char_class {
+                                            while let Some(fc) = self.peek() {
+                                                if fc.is_ascii_alphabetic() {
+                                                    expr_str.push(fc);
+                                                    self.advance();
+                                                } else {
+                                                    break;
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    expr_str.push(ec);
+                                }
                             }
                         }
                         _ => {

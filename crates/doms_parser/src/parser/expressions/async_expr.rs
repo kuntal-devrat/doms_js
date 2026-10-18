@@ -52,6 +52,69 @@ impl<'a> Parser<'a> {
                     } else {
                         Ok(Expression::AsyncFunctionExpr { name, params, body })
                     }
+                } else if !self.current.has_preceding_line_terminator && self.check(&TokenKind::LParen) {
+                    let line = self.current.line;
+                    let col = self.current.col;
+                    self.advance()?; // consume '('
+                    let prev_async = self.in_async;
+                    self.in_async = true;
+                    let res = self.parse_paren_or_arrow(line, col)?;
+                    self.in_async = prev_async;
+                    match res {
+                        Expression::ArrowExpr { params, body } => {
+                            Ok(Expression::AsyncFunctionExpr {
+                                name: None,
+                                params,
+                                body,
+                            })
+                        }
+                        other => {
+                            Ok(Expression::Call {
+                                callee: Box::new(Expression::Identifier("async".to_string())),
+                                args: match other {
+                                    Expression::Sequence(exprs) => exprs,
+                                    Expression::Grouping(expr) => vec![*expr],
+                                    expr => vec![expr],
+                                },
+                            })
+                        }
+                    }
+                } else if !self.current.has_preceding_line_terminator && matches!(&self.current.kind, TokenKind::Ident(_)) {
+                    if let TokenKind::Ident(param_name) = &self.current.kind {
+                        let name = param_name.clone();
+                        let line = self.current.line;
+                        let col = self.current.col;
+                        self.advance()?; // consume param ident
+                        if !self.current.has_preceding_line_terminator && self.match_token(&TokenKind::FatArrow)? {
+                            let prev_in_func = self.in_function;
+                            let prev_in_static = self.in_static_block;
+                            let prev_async = self.in_async;
+                            self.in_function = true;
+                            self.in_static_block = false;
+                            self.in_async = true;
+                            let body = if self.check(&TokenKind::LBrace) {
+                                match self.parse_statement()? {
+                                    Statement::Block(stmts) => stmts,
+                                    other => vec![other],
+                                }
+                            } else {
+                                let expr = self.parse_expression(1)?;
+                                vec![Statement::Return(Some(expr))]
+                            };
+                            self.in_function = prev_in_func;
+                            self.in_static_block = prev_in_static;
+                            self.in_async = prev_async;
+                            Ok(Expression::AsyncFunctionExpr {
+                                name: None,
+                                params: vec![name],
+                                body,
+                            })
+                        } else {
+                            Err(ParseError::UnexpectedToken(TokenKind::Ident(name), line, col))
+                        }
+                    } else {
+                        Ok(Expression::Identifier("async".to_string()))
+                    }
                 } else {
                     Ok(Expression::Identifier("async".to_string()))
                 }

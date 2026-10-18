@@ -102,7 +102,14 @@ impl Test262Runner {
                     }
 
                     let comp = completed_c.fetch_add(1, Ordering::Relaxed) + 1;
-                    if comp % 100 == 0 || comp == total {
+                    if comp % 25 == 0 || comp == total {
+                        #[cfg(target_os = "linux")]
+                        unsafe {
+                            unsafe extern "C" {
+                                fn malloc_trim(pad: usize) -> i32;
+                            }
+                            malloc_trim(0);
+                        }
                         let p = passed_c.load(Ordering::Relaxed);
                         let f = failed_c.load(Ordering::Relaxed);
                         let pct = if comp > 0 { (p as f64 * 100.0) / comp as f64 } else { 0.0 };
@@ -188,9 +195,11 @@ impl Test262Runner {
                 HashMap::new()
             };
 
-            // Merge current run's categories (overwriting updated ones)
-            for (cat, st) in &sorted_cats {
-                merged_categories.insert((*cat).clone(), (*st).clone());
+            // Merge current run's categories (overwriting updated ones only on full suite runs)
+            if self.config.path_filter.is_none() && self.config.max_tests.is_none() {
+                for (cat, st) in &sorted_cats {
+                    merged_categories.insert((*cat).clone(), (*st).clone());
+                }
             }
 
             // Calculate overall cumulative stats across ALL recorded categories

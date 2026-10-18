@@ -23,6 +23,28 @@ fn main() {
             print_help();
         }
         "test262" => {
+            unsafe {
+                std::env::set_var("MALLOC_ARENA_MAX", "2");
+            }
+            #[cfg(target_os = "linux")]
+            {
+                #[repr(C)]
+                struct RLimit {
+                    rlim_cur: u64,
+                    rlim_max: u64,
+                }
+                unsafe extern "C" {
+                    fn setrlimit(resource: i32, rlim: *const RLimit) -> i32;
+                }
+                // Cap virtual address space to 2GB to protect the system and prevent freezes
+                let limit = RLimit {
+                    rlim_cur: 2048 * 1024 * 1024,
+                    rlim_max: 2048 * 1024 * 1024,
+                };
+                unsafe {
+                    setrlimit(9, &limit);
+                }
+            }
             let mut config = RunnerConfig::default();
             let mut i = 2;
             while i < args.len() {

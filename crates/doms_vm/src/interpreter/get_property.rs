@@ -184,7 +184,8 @@ impl Vm {
                     "BYTES_PER_ELEMENT" => return JsValue::from_int32(ta.kind.bytes_per_element() as i32),
                     _ => {
                         if let Ok(idx) = key.parse::<usize>() {
-                            if let Some(val) = self.read_typed_array_element_vm(ta, idx) {
+                            let ta = ta.clone();
+                            if let Some(val) = self.read_typed_array_element_vm(&ta, idx) {
                                 return val;
                             }
                         }

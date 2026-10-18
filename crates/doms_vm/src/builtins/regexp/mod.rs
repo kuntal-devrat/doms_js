@@ -480,11 +480,14 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
             let text_val = vm.alloc_string(text);
             return vm.call_method(this, "exec", &[text_val]);
         }
-        let _ = vm.set_property_result(this, "lastIndex", JsValue::from_int32(0));
+        let ok = vm.set_property_with_receiver(this, "lastIndex", JsValue::from_int32(0), this)?;
+        if !ok {
+            return Err(VmError::TypeError("Cannot assign to read-only property 'lastIndex'".into()));
+        }
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(this);
         let mut matches = Vec::new();
-        loop {
+        while matches.len() < 50_000 {
             let cur_this = vm.temp_roots[prev_temp];
             let text_val = vm.alloc_string(text.clone());
             let res = vm.call_method(cur_this, "exec", &[text_val])?;
@@ -497,7 +500,11 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
             let cur_this = vm.temp_roots[prev_temp];
             if s.is_empty() {
                 let this_index = vm.get_property(cur_this, "lastIndex").as_int32().unwrap_or(0);
-                let _ = vm.set_property_result(cur_this, "lastIndex", JsValue::from_int32(this_index + 1));
+                let ok = vm.set_property_with_receiver(cur_this, "lastIndex", JsValue::from_int32(this_index + 1), cur_this)?;
+                if !ok {
+                    vm.temp_roots.truncate(prev_temp);
+                    return Err(VmError::TypeError("Cannot assign to read-only property 'lastIndex'".into()));
+                }
             }
             let str_val = vm.alloc_string(s);
             matches.push(str_val);
@@ -518,6 +525,13 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         let replace_val = args.get(1).copied().unwrap_or(JsValue::undefined());
         if !this.is_object() {
             return Err(VmError::TypeError("RegExp.prototype[Symbol.replace] called on non-object".into()));
+        }
+        let global = vm.get_property(this, "global").is_truthy();
+        if global {
+            let ok = vm.set_property_with_receiver(this, "lastIndex", JsValue::from_int32(0), this)?;
+            if !ok {
+                return Err(VmError::TypeError("Cannot assign to read-only property 'lastIndex'".into()));
+            }
         }
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(this);

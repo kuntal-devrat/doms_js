@@ -181,6 +181,11 @@ impl Vm {
             if let Some(args_val) = frame.arguments {
                 mark_val(args_val, &mut worklist, &mut live);
             }
+            if let Some(ref raw_args) = frame.raw_args {
+                for arg in raw_args {
+                    mark_val(*arg, &mut worklist, &mut live);
+                }
+            }
             if let Some(nt) = frame.new_target {
                 mark_val(nt, &mut worklist, &mut live);
             }
@@ -481,6 +486,11 @@ impl Vm {
             if let Some(mut args_val) = frame.arguments {
                 copy_val(&mut args_val, &mut to_cursor);
                 frame.arguments = Some(args_val);
+            }
+            if let Some(ref mut raw_args) = frame.raw_args {
+                for arg in raw_args {
+                    copy_val(arg, &mut to_cursor);
+                }
             }
             if let Some(mut nt) = frame.new_target {
                 copy_val(&mut nt, &mut to_cursor);

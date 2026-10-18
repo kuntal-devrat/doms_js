@@ -64,12 +64,6 @@ impl Nursery {
         self.cursor = to_cursor;
         self.limit = unsafe { self.from_start.add(self.space_size) };
 
-        // Clear the old from-space (now to-space) for debugging.
-        // SAFETY: to_start (the old from-space) is valid for space_size bytes.
-        unsafe {
-            ptr::write_bytes(self.to_start, 0xDD, self.space_size);
-        }
-
         self.scavenge_count += 1;
         let survived = unsafe { to_cursor.offset_from(self.from_start) } as usize;
         self.bytes_allocated = survived;
@@ -96,9 +90,6 @@ impl Nursery {
         self.scavenge_count += 1;
         let survived = unsafe { to_cursor.offset_from(self.from_start) } as usize;
         self.bytes_allocated = survived;
-        unsafe {
-            ptr::write_bytes(self.to_start, 0xDD, self.space_size);
-        }
         survived
     }
 

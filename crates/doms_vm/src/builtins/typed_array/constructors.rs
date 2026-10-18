@@ -68,6 +68,7 @@ pub(super) fn construct_typed_array_kind(vm: &mut Vm, args: &[JsValue], kind: Ty
                 byte_offset,
             }));
         } else if let ObjectKind::TypedArray(src_ta) = &obj.kind {
+            let src_ta = src_ta.clone();
             let len = src_ta.length;
             let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
                 .map_err(|e| VmError::RuntimeError(e.into()))?;
@@ -78,7 +79,7 @@ pub(super) fn construct_typed_array_kind(vm: &mut Vm, args: &[JsValue], kind: Ty
                 byte_offset: 0,
             };
             for i in 0..len {
-                if let Some(val) = vm.read_typed_array_element_vm(src_ta, i) {
+                if let Some(val) = vm.read_typed_array_element_vm(&src_ta, i) {
                     vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
                 }
             }

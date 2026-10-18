@@ -344,7 +344,8 @@ fn to_canonical_array_index(key: JsValue) -> Option<usize> {
                                 }
                             }
                             if let ObjectKind::TypedArray(ta) = &jsobj.kind {
-                                if let Some(val) = self.read_typed_array_element_vm(ta, idx) {
+                                let ta = ta.clone();
+                                if let Some(val) = self.read_typed_array_element_vm(&ta, idx) {
                                     self.push(val);
                                     return Ok(());
                                 }

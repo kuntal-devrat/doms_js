@@ -34,7 +34,8 @@ impl Vm {
                 return self.get_property(obj, &key);
             }
             if let ObjectKind::TypedArray(ta) = &jsobj.kind {
-                if let Some(v) = self.read_typed_array_element_vm(ta, index) {
+                let ta = ta.clone();
+                if let Some(v) = self.read_typed_array_element_vm(&ta, index) {
                     return v;
                 }
             }
@@ -87,7 +88,8 @@ impl Vm {
                 return self.get_property_result(obj, &key);
             }
             if let ObjectKind::TypedArray(ta) = &jsobj.kind {
-                if let Some(v) = self.read_typed_array_element_vm(ta, index) {
+                let ta = ta.clone();
+                if let Some(v) = self.read_typed_array_element_vm(&ta, index) {
                     return Ok(v);
                 }
             }

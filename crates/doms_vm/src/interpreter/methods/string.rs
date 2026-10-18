@@ -288,6 +288,157 @@ impl Vm {
                     }
                 }
             })),
+            "at" => Some(self.alloc_native_function("at", 1, |vm, this, args| {
+                if this.is_nullish() {
+                    return Err(VmError::TypeError("String.prototype.at called on null or undefined".into()));
+                }
+                let s = vm.to_string_value(this);
+                let u16_chars: Vec<u16> = s.encode_utf16().collect();
+                let len = u16_chars.len() as i64;
+                let rel_idx = match args.first() {
+                    Some(v) => {
+                        let n = vm.to_number_value(*v)?;
+                        if n.is_nan() { 0 } else { n.trunc() as i64 }
+                    }
+                    None => 0,
+                };
+                let k = if rel_idx >= 0 { rel_idx } else { len + rel_idx };
+                if k < 0 || k >= len {
+                    return Ok(JsValue::undefined());
+                }
+                let ch = String::from_utf16_lossy(&[u16_chars[k as usize]]);
+                Ok(vm.alloc_string(ch))
+            })),
+            "replaceAll" => Some(self.alloc_native_function("replaceAll", 2, |vm, this, args| {
+                if this.is_nullish() {
+                    return Err(VmError::TypeError("String.prototype.replaceAll called on null or undefined".into()));
+                }
+                let this_str = vm.to_string_value(this);
+                let search_arg = args.first().copied().unwrap_or(JsValue::undefined());
+                let replace_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
+
+                let is_regexp = if let Some(ptr) = search_arg.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    matches!(obj.kind, ObjectKind::RegExp { .. })
+                } else {
+                    false
+                };
+
+                let is_replace_fn = vm.is_callable(replace_arg);
+
+                if is_regexp {
+                    let (pattern, flags) = if let Some(ptr) = search_arg.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        if let ObjectKind::RegExp { ref pattern, ref flags } = obj.kind {
+                            (pattern.clone(), flags.clone())
+                        } else {
+                            (String::new(), String::new())
+                        }
+                    } else {
+                        (String::new(), String::new())
+                    };
+
+                    if !flags.contains('g') {
+                        return Err(VmError::TypeError("String.prototype.replaceAll called with a non-global RegExp argument".into()));
+                    }
+
+                    let mut result = String::new();
+                    let mut search_from = 0;
+
+                    while search_from <= this_str.len() {
+                        if pattern.is_empty() {
+                            let matched_str = "";
+                            let replacement = if is_replace_fn {
+                                let arg0 = vm.alloc_string(matched_str.to_string());
+                                let arg1 = JsValue::from_int32(search_from as i32);
+                                let arg2 = vm.alloc_string(this_str.clone());
+                                let call_res = vm.call(replace_arg, JsValue::undefined(), &[arg0, arg1, arg2])?;
+                                vm.to_string_value(call_res)
+                            } else {
+                                vm.to_string_value(replace_arg)
+                            };
+                            result.push_str(&replacement);
+                            if search_from < this_str.len() {
+                                if let Some(ch) = this_str[search_from..].chars().next() {
+                                    result.push(ch);
+                                    search_from += ch.len_utf8();
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        } else if let Some(found_idx) = this_str[search_from..].find(&pattern) {
+                            let match_start = search_from + found_idx;
+                            let match_end = match_start + pattern.len();
+                            result.push_str(&this_str[search_from..match_start]);
+
+                            let replacement = if is_replace_fn {
+                                let arg0 = vm.alloc_string(pattern.clone());
+                                let arg1 = JsValue::from_int32(match_start as i32);
+                                let arg2 = vm.alloc_string(this_str.clone());
+                                let call_res = vm.call(replace_arg, JsValue::undefined(), &[arg0, arg1, arg2])?;
+                                vm.to_string_value(call_res)
+                            } else {
+                                vm.to_string_value(replace_arg)
+                            };
+                            result.push_str(&replacement);
+                            search_from = match_end;
+                        } else {
+                            result.push_str(&this_str[search_from..]);
+                            break;
+                        }
+                    }
+                    Ok(vm.alloc_string(result))
+                } else {
+                    let search_str = vm.to_string_value(search_arg);
+                    let mut result = String::new();
+                    let mut search_from = 0;
+                    while search_from <= this_str.len() {
+                        if search_str.is_empty() {
+                            let replacement = if is_replace_fn {
+                                let arg0 = vm.alloc_string("".to_string());
+                                let arg1 = JsValue::from_int32(search_from as i32);
+                                let arg2 = vm.alloc_string(this_str.clone());
+                                let call_res = vm.call(replace_arg, JsValue::undefined(), &[arg0, arg1, arg2])?;
+                                vm.to_string_value(call_res)
+                            } else {
+                                vm.to_string_value(replace_arg)
+                            };
+                            result.push_str(&replacement);
+                            if search_from < this_str.len() {
+                                if let Some(ch) = this_str[search_from..].chars().next() {
+                                    result.push(ch);
+                                    search_from += ch.len_utf8();
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        } else if let Some(found_idx) = this_str[search_from..].find(&search_str) {
+                            let match_start = search_from + found_idx;
+                            let match_end = match_start + search_str.len();
+                            result.push_str(&this_str[search_from..match_start]);
+                            let replacement = if is_replace_fn {
+                                let arg0 = vm.alloc_string(search_str.clone());
+                                let arg1 = JsValue::from_int32(match_start as i32);
+                                let arg2 = vm.alloc_string(this_str.clone());
+                                let call_res = vm.call(replace_arg, JsValue::undefined(), &[arg0, arg1, arg2])?;
+                                vm.to_string_value(call_res)
+                            } else {
+                                vm.to_string_value(replace_arg)
+                            };
+                            result.push_str(&replacement);
+                            search_from = match_end;
+                        } else {
+                            result.push_str(&this_str[search_from..]);
+                            break;
+                        }
+                    }
+                    Ok(vm.alloc_string(result))
+                }
+            })),
             "match" => Some(self.alloc_native_function("match", 1, |vm, this, args| {
                 let this_str = vm.to_string_value(this);
                 let re_arg = args.first().copied().unwrap_or(JsValue::undefined());
