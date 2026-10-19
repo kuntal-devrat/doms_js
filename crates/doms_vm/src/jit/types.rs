@@ -137,19 +137,19 @@ impl JitFunction {
 }
 
 /// Spec-compliant strict equality (`===`) helper for JIT-compiled code.
-pub extern "C" fn jit_strict_eq(a: u64, b: u64) -> u64 {
+pub unsafe extern "C" fn jit_strict_eq(a: u64, b: u64) -> u64 {
     let eq = crate::object::js_strict_equal(JsValue(a), JsValue(b));
     TAG_BOOLEAN | (eq as u64)
 }
 
 /// Spec-compliant strict inequality (`!==`) helper for JIT-compiled code.
-pub extern "C" fn jit_strict_neq(a: u64, b: u64) -> u64 {
+pub unsafe extern "C" fn jit_strict_neq(a: u64, b: u64) -> u64 {
     let eq = crate::object::js_strict_equal(JsValue(a), JsValue(b));
     TAG_BOOLEAN | ((!eq) as u64)
 }
 
 /// Monomorphic property get helper with shape guard.
-pub extern "C" fn jit_get_prop_monomorphic(obj: u64, expected_shape: u32, offset: u32) -> u64 {
+pub unsafe extern "C" fn jit_get_prop_monomorphic(obj: u64, expected_shape: u32, offset: u32) -> u64 {
     let val = JsValue(obj);
     if let Some(ptr) = val.as_object_ptr() {
         let jsobj = unsafe { &*(ptr as *const crate::object::JsObject) };
@@ -163,7 +163,7 @@ pub extern "C" fn jit_get_prop_monomorphic(obj: u64, expected_shape: u32, offset
 }
 
 /// Monomorphic property set helper with shape guard.
-pub extern "C" fn jit_set_prop_monomorphic(obj: u64, val: u64, expected_shape: u32, offset: u32) -> u64 {
+pub unsafe extern "C" fn jit_set_prop_monomorphic(obj: u64, val: u64, expected_shape: u32, offset: u32) -> u64 {
     let target = JsValue(obj);
     if let Some(ptr) = target.as_object_ptr() {
         let jsobj = unsafe { &mut *(ptr as *mut crate::object::JsObject) };
@@ -208,7 +208,7 @@ pub fn clear_jit_array_cache() {
 }
 
 /// Array element get helper for JIT code.
-pub extern "C" fn jit_get_elem(obj: u64, key: u64) -> u64 {
+pub unsafe extern "C" fn jit_get_elem(obj: u64, key: u64) -> u64 {
     let o = JsValue(obj);
     let k = JsValue(key);
     let idx = if k.is_int32() {
@@ -238,7 +238,7 @@ pub extern "C" fn jit_get_elem(obj: u64, key: u64) -> u64 {
 
 /// Fast direct dense array element get helper for JIT code.
 #[inline(always)]
-pub extern "C" fn jit_get_elem_dense(raw_obj: u64, idx_i32: i32) -> u64 {
+pub unsafe extern "C" fn jit_get_elem_dense(raw_obj: u64, idx_i32: i32) -> u64 {
     if idx_i32 < 0 {
         return JIT_DEOPT_SENTINEL;
     }
@@ -275,7 +275,7 @@ pub extern "C" fn jit_get_elem_dense(raw_obj: u64, idx_i32: i32) -> u64 {
 }
 
 /// Array element set helper for JIT code.
-pub extern "C" fn jit_set_elem(obj: u64, key: u64, val: u64) -> u64 {
+pub unsafe extern "C" fn jit_set_elem(obj: u64, key: u64, val: u64) -> u64 {
     let o = JsValue(obj);
     let k = JsValue(key);
     let v = JsValue(val);
@@ -307,7 +307,7 @@ pub extern "C" fn jit_set_elem(obj: u64, key: u64, val: u64) -> u64 {
 
 /// Fast direct dense array element set helper for JIT code.
 #[inline(always)]
-pub extern "C" fn jit_set_elem_dense(raw_obj: u64, idx_i32: i32, val: u64) -> u64 {
+pub unsafe extern "C" fn jit_set_elem_dense(raw_obj: u64, idx_i32: i32, val: u64) -> u64 {
     if idx_i32 < 0 {
         return JIT_DEOPT_SENTINEL;
     }
@@ -338,7 +338,7 @@ pub extern "C" fn jit_set_elem_dense(raw_obj: u64, idx_i32: i32, val: u64) -> u6
 }
 
 /// Array allocation helper for JIT code.
-pub extern "C" fn jit_alloc_array(count: usize) -> u64 {
+pub unsafe extern "C" fn jit_alloc_array(count: usize) -> u64 {
     CURRENT_VM.with(|c| {
         let vm_ptr = c.get();
         if !vm_ptr.is_null() {
@@ -352,7 +352,7 @@ pub extern "C" fn jit_alloc_array(count: usize) -> u64 {
 }
 
 /// Array allocation with initial elements helper for JIT code.
-pub extern "C" fn jit_alloc_array_with_elements(elements_ptr: *const u64, count: usize) -> u64 {
+pub unsafe extern "C" fn jit_alloc_array_with_elements(elements_ptr: *const u64, count: usize) -> u64 {
     CURRENT_VM.with(|c| {
         let vm_ptr = c.get();
         if !vm_ptr.is_null() {
@@ -373,7 +373,7 @@ pub extern "C" fn jit_alloc_array_with_elements(elements_ptr: *const u64, count:
 }
 
 /// Object allocation helper for JIT code.
-pub extern "C" fn jit_alloc_object() -> u64 {
+pub unsafe extern "C" fn jit_alloc_object() -> u64 {
     CURRENT_VM.with(|c| {
         let vm_ptr = c.get();
         if !vm_ptr.is_null() {
@@ -387,7 +387,7 @@ pub extern "C" fn jit_alloc_object() -> u64 {
 }
 
 /// Spec-compliant modulo helper for JIT-compiled code.
-pub extern "C" fn jit_mod(a: u64, b: u64) -> u64 {
+pub unsafe extern "C" fn jit_mod(a: u64, b: u64) -> u64 {
     let va = JsValue(a);
     let vb = JsValue(b);
     let na = if let Some(n) = va.as_number() { n } else { return JIT_DEOPT_SENTINEL; };
@@ -399,7 +399,7 @@ pub const TAG_ARRAY_PUSH_FN: u64 = 0xFFFA_0000_0000_0001;
 
 /// Fast array length helper for JIT code.
 #[inline(always)]
-pub extern "C" fn jit_array_length(obj: u64) -> u64 {
+pub unsafe extern "C" fn jit_array_length(obj: u64) -> u64 {
     let o = JsValue(obj);
     if let Some(ptr) = o.as_object_ptr() {
         let jsobj = unsafe { &*(ptr as *const crate::object::JsObject) };
@@ -424,7 +424,7 @@ pub extern "C" fn jit_array_length(obj: u64) -> u64 {
 
 /// Fast inlined array push helper for JIT code.
 #[inline(always)]
-pub extern "C" fn jit_array_push_fast(obj: u64, val: u64) -> u64 {
+pub unsafe extern "C" fn jit_array_push_fast(obj: u64, val: u64) -> u64 {
     let o = JsValue(obj);
     if let Some(ptr) = o.as_object_ptr() {
         let jsobj = unsafe { &mut *(ptr as *mut crate::object::JsObject) };
@@ -461,13 +461,13 @@ pub extern "C" fn jit_array_push_fast(obj: u64, val: u64) -> u64 {
 }
 
 /// Native C-ABI call trampoline for JIT-to-JIT calls.
-pub extern "C" fn jit_call_trampoline(callee: u64, _this_val: u64, args_ptr: *const u64, argc: usize) -> u64 {
+pub unsafe extern "C" fn jit_call_trampoline(callee: u64, _this_val: u64, args_ptr: *const u64, argc: usize) -> u64 {
     if callee == TAG_ARRAY_PUSH_FN {
         if argc > 0 && !args_ptr.is_null() {
             let mut last_res = _this_val;
             for i in 0..argc {
                 let arg = unsafe { *args_ptr.add(i) };
-                last_res = jit_array_push_fast(_this_val, arg);
+                last_res = unsafe { jit_array_push_fast(_this_val, arg) };
             }
             return last_res;
         }
@@ -503,7 +503,7 @@ pub extern "C" fn jit_call_trampoline(callee: u64, _this_val: u64, args_ptr: *co
                 let mut last_res = _this_val;
                 for i in 0..argc {
                     let arg = unsafe { *args_ptr.add(i) };
-                    last_res = jit_array_push_fast(_this_val, arg);
+                    last_res = unsafe { jit_array_push_fast(_this_val, arg) };
                 }
                 return last_res;
             }
@@ -606,7 +606,7 @@ pub extern "C" fn jit_call_trampoline(callee: u64, _this_val: u64, args_ptr: *co
 }
 
 /// Native C-ABI constructor trampoline for JIT code with nursery bump allocation.
-pub extern "C" fn jit_construct_trampoline(callee: u64, args_ptr: *const u64, argc: usize) -> u64 {
+pub unsafe extern "C" fn jit_construct_trampoline(callee: u64, args_ptr: *const u64, argc: usize) -> u64 {
     let callee_val = JsValue(callee);
     if let Some(ptr) = callee_val.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut crate::object::JsObject) };
@@ -798,7 +798,7 @@ pub extern "C" fn jit_construct_trampoline(callee: u64, args_ptr: *const u64, ar
 }
 
 /// Global get helper for JIT-compiled code.
-pub extern "C" fn jit_get_global(name_ptr: *const u8, name_len: usize) -> u64 {
+pub unsafe extern "C" fn jit_get_global(name_ptr: *const u8, name_len: usize) -> u64 {
     CURRENT_VM.with(|c| {
         let vm_ptr = c.get();
         if vm_ptr.is_null() || name_ptr.is_null() {
@@ -824,7 +824,7 @@ pub extern "C" fn jit_get_global(name_ptr: *const u8, name_len: usize) -> u64 {
 }
 
 /// Global get safe helper for JIT-compiled code (for typeof unbound).
-pub extern "C" fn jit_get_global_safe(name_ptr: *const u8, name_len: usize) -> u64 {
+pub unsafe extern "C" fn jit_get_global_safe(name_ptr: *const u8, name_len: usize) -> u64 {
     CURRENT_VM.with(|c| {
         let vm_ptr = c.get();
         if vm_ptr.is_null() || name_ptr.is_null() {
@@ -850,7 +850,7 @@ pub extern "C" fn jit_get_global_safe(name_ptr: *const u8, name_len: usize) -> u
 }
 
 /// Global set helper for JIT-compiled code.
-pub extern "C" fn jit_set_global(name_ptr: *const u8, name_len: usize, val: u64) -> u64 {
+pub unsafe extern "C" fn jit_set_global(name_ptr: *const u8, name_len: usize, val: u64) -> u64 {
     CURRENT_VM.with(|c| {
         let vm_ptr = c.get();
         if vm_ptr.is_null() || name_ptr.is_null() {
@@ -888,7 +888,7 @@ thread_local! {
 }
 
 /// OSR yield helper to set target IP in the current VM frame when exiting an OSR block.
-pub extern "C" fn jit_osr_yield(target_ip: u32) -> u64 {
+pub unsafe extern "C" fn jit_osr_yield(target_ip: u32) -> u64 {
     OSR_YIELDED_IP.with(|c| c.set(Some(target_ip as usize)));
     JIT_DEOPT_SENTINEL
 }
