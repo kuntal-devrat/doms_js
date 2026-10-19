@@ -99,7 +99,7 @@ impl Vm {
                         let scopes = self.frames[f_idx].scopes.clone();
                         for scope_obj in scopes.into_iter().rev() {
                             if scope_obj.is_object() && self.has_property(scope_obj, &name).unwrap_or(false) {
-                                if self.non_configurable_props.contains(&(scope_obj, name.clone())) {
+                                if !self.is_own_property_configurable(scope_obj, &name) {
                                     if is_strict {
                                         self.handle_exception_at_depth(
                                             VmError::TypeError(format!("Cannot delete property '{}'", name)),
@@ -136,7 +136,7 @@ impl Vm {
                     } else if let Some(ptr) = self.global_object.as_object_ptr() {
                         let obj = unsafe { &mut *(ptr as *mut JsObject) };
                         if self.shapes.has_property(obj.shape_id, &name) {
-                            if self.non_configurable_props.contains(&(self.global_object, name.clone())) {
+                            if !self.is_own_property_configurable(self.global_object, &name) {
                                 if is_strict {
                                     self.handle_exception_at_depth(
                                         VmError::TypeError(format!("Cannot delete property '{}'", name)),

@@ -22,14 +22,13 @@ pub fn get_own_property_descriptor_internal(
         match prop_key {
             PropertyKeyVal::Symbol(sym) => {
                 let sym = *sym;
-                let key_name = format!("[Symbol:{:x}]", sym.raw_bits());
                 if let Some(accs) = &obj.symbol_accessors {
                     if let Some(acc) = accs.get(&sym) {
                         let desc = vm.alloc_object();
                         vm.set_property(desc, "get", acc.getter.unwrap_or(JsValue::undefined()));
                         vm.set_property(desc, "set", acc.setter.unwrap_or(JsValue::undefined()));
-                        let is_enum = !vm.non_enumerable_props.contains(&(target, key_name.clone()));
-                        let is_conf = !vm.non_configurable_props.contains(&(target, key_name));
+                        let is_enum = acc.enumerable;
+                        let is_conf = acc.configurable;
                         vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
                         vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
                         return Ok(desc);
@@ -41,21 +40,9 @@ pub fn get_own_property_descriptor_internal(
                         vm.set_property(desc, "value", *val);
                         let is_tag = vm.symbol_to_string_tag.is_some_and(|t| t == sym);
                         let is_iter = vm.symbol_iterator.is_some_and(|i| i == sym);
-                        let is_writ = if vm.non_writable_props.contains(&(target, key_name.clone())) {
-                            false
-                        } else {
-                            !is_tag
-                        };
-                        let is_enum = if vm.non_enumerable_props.contains(&(target, key_name.clone())) {
-                            false
-                        } else {
-                            !is_tag && !is_iter
-                        };
-                        let is_conf = if vm.module_namespace_objects.contains(&target) || vm.non_configurable_props.contains(&(target, key_name)) {
-                            false
-                        } else {
-                            true
-                        };
+                        let is_writ = !is_tag;
+                        let is_enum = !is_tag && !is_iter;
+                        let is_conf = !vm.module_namespace_objects.contains(&target);
                         vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
                         vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
                         vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
@@ -69,9 +56,9 @@ pub fn get_own_property_descriptor_internal(
                         let desc = vm.alloc_object();
                         vm.set_property(desc, "get", acc.getter.unwrap_or(JsValue::undefined()));
                         vm.set_property(desc, "set", acc.setter.unwrap_or(JsValue::undefined()));
-                        let is_enum = !vm.non_enumerable_props.contains(&(target, prop_name.clone()));
+                        let is_enum = acc.enumerable;
                         vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
-                        let is_conf = !vm.non_configurable_props.contains(&(target, prop_name.clone()));
+                        let is_conf = acc.configurable;
                         vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
                         return Ok(desc);
                     }
@@ -80,7 +67,7 @@ pub fn get_own_property_descriptor_internal(
                     ObjectKind::Array(elements) => {
                         if prop_name == "length" {
                             let desc = vm.alloc_object();
-                            let is_writ = !vm.non_writable_props.contains(&(target, "length".to_string()));
+                            let is_writ = obj.is_array_length_writable();
                             let len_val = if let Some(info) = vm.shapes.get_property_info(obj.shape_id, "length") {
                                 if let Some(val) = obj.get_slot(info.offset) {
                                     val
@@ -106,9 +93,11 @@ pub fn get_own_property_descriptor_internal(
                                 if !elem.is_hole() {
                                     let desc = vm.alloc_object();
                                     vm.set_property(desc, "value", *elem);
-                                    let is_writ = !vm.non_writable_props.contains(&(target, prop_name.clone()));
-                                    let is_enum = !vm.non_enumerable_props.contains(&(target, prop_name.clone()));
-                                    let is_conf = !vm.non_configurable_props.contains(&(target, prop_name.clone()));
+                                    let (is_writ, is_enum, is_conf) = if let Some(info) = vm.shapes.get_property_info(obj.shape_id, prop_name) {
+                                        (info.attributes.writable, info.attributes.enumerable, info.attributes.configurable)
+                                    } else {
+                                        (true, true, true)
+                                    };
                                     vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
                                     vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
                                     vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
@@ -163,17 +152,17 @@ pub fn get_own_property_descriptor_internal(
                     let is_writ = if vm.module_namespace_objects.contains(&target) {
                         true
                     } else {
-                        info.attributes.writable && !vm.non_writable_props.contains(&(target, prop_name.clone()))
+                        info.attributes.writable
                     };
                     let is_enum = if vm.module_namespace_objects.contains(&target) {
                         true
                     } else {
-                        info.attributes.enumerable && !vm.non_enumerable_props.contains(&(target, prop_name.clone()))
+                        info.attributes.enumerable
                     };
                     let is_conf = if vm.module_namespace_objects.contains(&target) {
                         false
                     } else {
-                        info.attributes.configurable && !vm.non_configurable_props.contains(&(target, prop_name.clone()))
+                        info.attributes.configurable
                     };
                     vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
                     vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));

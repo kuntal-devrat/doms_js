@@ -204,7 +204,7 @@ pub(super) fn register_math(vm: &mut Vm) {
 
     for (name, func) in methods {
         vm.set_property(math_obj, name, func);
-        vm.non_enumerable_props.insert((math_obj, name.to_string()));
+        vm.set_property_non_enumerable(math_obj, name.to_string());
     }
 
     let math_constants = [
@@ -219,18 +219,18 @@ pub(super) fn register_math(vm: &mut Vm) {
     ];
     for (name, val) in math_constants {
         vm.set_property(math_obj, name, JsValue::from_double(val));
-        vm.non_writable_props.insert((math_obj, name.to_string()));
-        vm.non_enumerable_props.insert((math_obj, name.to_string()));
-        vm.non_configurable_props.insert((math_obj, name.to_string()));
+        vm.set_property_non_writable(math_obj, name.to_string());
+        vm.set_property_non_enumerable(math_obj, name.to_string());
+        vm.set_property_non_configurable(math_obj, name.to_string());
     }
 
     if let Some(tag_sym) = vm.symbol_to_string_tag {
         let tag_val = vm.alloc_string("Math".into());
         vm.set_symbol_property(math_obj, tag_sym, tag_val);
         let key_name = format!("[Symbol:{:x}]", tag_sym.raw_bits());
-        vm.non_writable_props.insert((math_obj, key_name.clone()));
-        vm.non_enumerable_props.insert((math_obj, key_name.clone()));
-        vm.non_configurable_props.insert((math_obj, key_name));
+        vm.set_property_non_writable(math_obj, key_name.clone());
+        vm.set_property_non_enumerable(math_obj, key_name.clone());
+        vm.set_property_non_configurable(math_obj, key_name);
     }
 
     vm.globals.insert("Math".to_string(), math_obj);

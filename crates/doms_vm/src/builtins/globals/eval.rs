@@ -128,7 +128,7 @@ pub(super) fn register_eval(vm: &mut Vm) {
                         for (i, name) in caller_local_names.iter().enumerate() {
                             let val = caller_locals.get(i).copied().unwrap_or(JsValue::undefined());
                             vm.set_property(env, name, val);
-                            vm.non_configurable_props.insert((env, name.clone()));
+                            vm.set_property_non_configurable(env, name.clone());
                         }
                         if let Some(caller_f) = vm.frames.last_mut() {
                             if !caller_f.in_param_init {

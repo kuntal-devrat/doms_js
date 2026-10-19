@@ -132,6 +132,6 @@ pub(super) fn register_constructor(
     }
 
     vm.set_property(object_proto, "constructor", object_constructor);
-    vm.non_enumerable_props.insert((object_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(object_proto, "constructor".to_string());
     (object_proto, object_constructor, keys_fn, values_fn, entries_fn, assign_fn)
 }

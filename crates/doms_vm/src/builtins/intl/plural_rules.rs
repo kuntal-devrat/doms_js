@@ -35,7 +35,7 @@ pub(super) fn register_plural_rules(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_string(cat.to_string()))
     });
     vm.set_property(pr_proto, "select", pr_select_fn);
-    vm.non_enumerable_props.insert((pr_proto, "select".to_string()));
+    vm.set_property_non_enumerable(pr_proto, "select".to_string());
 
     let pr_resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, this, _| {
         let opts = vm.alloc_object();
@@ -57,7 +57,7 @@ pub(super) fn register_plural_rules(vm: &mut Vm, intl_obj: JsValue) {
         Ok(opts)
     });
     vm.set_property(pr_proto, "resolvedOptions", pr_resolved_opts);
-    vm.non_enumerable_props.insert((pr_proto, "resolvedOptions".to_string()));
+    vm.set_property_non_enumerable(pr_proto, "resolvedOptions".to_string());
 
     let supported_locales_fn4 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
         let loc = args.first().copied().unwrap_or(JsValue::undefined());
@@ -66,7 +66,7 @@ pub(super) fn register_plural_rules(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(items))
     });
     vm.set_property(pr_ctor, "supportedLocalesOf", supported_locales_fn4);
-    vm.non_enumerable_props.insert((pr_ctor, "supportedLocalesOf".to_string()));
+    vm.set_property_non_enumerable(pr_ctor, "supportedLocalesOf".to_string());
 
     setup_prototype_and_constructor(vm, pr_ctor, pr_proto, "Intl.PluralRules", "PluralRules", intl_obj);
 

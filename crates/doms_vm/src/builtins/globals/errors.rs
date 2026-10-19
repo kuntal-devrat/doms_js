@@ -38,16 +38,16 @@ pub(super) fn register_error_types(vm: &mut Vm) {
         let proto = vm.alloc_object();
         let name_val = vm.alloc_string(err_name.clone());
         vm.set_property(proto, "name", name_val);
-        vm.non_enumerable_props.insert((proto, "name".to_string()));
+        vm.set_property_non_enumerable(proto, "name".to_string());
 
         let empty_msg = vm.alloc_string("".to_string());
         vm.set_property(proto, "message", empty_msg);
-        vm.non_enumerable_props.insert((proto, "message".to_string()));
+        vm.set_property_non_enumerable(proto, "message".to_string());
 
         if err_type == "Error" {
             error_proto = proto;
             vm.set_property(proto, "toString", error_to_string);
-            vm.non_enumerable_props.insert((proto, "toString".to_string()));
+            vm.set_property_non_enumerable(proto, "toString".to_string());
         } else if let Some(ptr) = proto.as_object_ptr() {
             let proto_obj = unsafe { &mut *(ptr as *mut JsObject) };
             proto_obj.prototype = Some(error_proto);
@@ -118,7 +118,7 @@ pub(super) fn register_error_types(vm: &mut Vm) {
                 }
                 let errors_arr = vm.alloc_array(elements);
                 vm.set_property(err_val, "errors", errors_arr);
-                vm.non_enumerable_props.insert((err_val, "errors".to_string()));
+                vm.set_property_non_enumerable(err_val, "errors".to_string());
             }
             if let Some(opts) = opts_arg {
                 if opts.is_object() {
@@ -126,7 +126,7 @@ pub(super) fn register_error_types(vm: &mut Vm) {
                     if has_cause {
                         let cause = vm.get_property_result(opts, "cause")?;
                         vm.set_property(err_val, "cause", cause);
-                        vm.non_enumerable_props.insert((err_val, "cause".to_string()));
+                        vm.set_property_non_enumerable(err_val, "cause".to_string());
                     }
                 }
             }
@@ -143,11 +143,11 @@ pub(super) fn register_error_types(vm: &mut Vm) {
         }
 
         vm.set_property(proto, "constructor", ctor);
-        vm.non_enumerable_props.insert((proto, "constructor".to_string()));
+        vm.set_property_non_enumerable(proto, "constructor".to_string());
         vm.set_property(ctor, "prototype", proto);
-        vm.non_enumerable_props.insert((ctor, "prototype".to_string()));
-        vm.non_writable_props.insert((ctor, "prototype".to_string()));
-        vm.non_configurable_props.insert((ctor, "prototype".to_string()));
+        vm.set_property_non_enumerable(ctor, "prototype".to_string());
+        vm.set_property_non_writable(ctor, "prototype".to_string());
+        vm.set_property_non_configurable(ctor, "prototype".to_string());
         vm.globals.insert(err_type.to_string(), ctor);
     }
 

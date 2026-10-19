@@ -33,7 +33,7 @@ pub(super) fn register_segmenter(vm: &mut Vm, intl_obj: JsValue) {
     if let Some(sym) = vm.symbol_to_string_tag {
         let tag_val = vm.alloc_string("Segments".to_string());
         vm.set_symbol_property(segments_proto, sym, tag_val);
-        vm.non_enumerable_props.insert((segments_proto, "[Symbol.toStringTag]".to_string()));
+        vm.set_property_non_enumerable(segments_proto, "[Symbol.toStringTag]".to_string());
     }
 
     let seg_segment_fn = vm.alloc_native_function("segment", 1, |vm, this, args| {
@@ -58,7 +58,7 @@ pub(super) fn register_segmenter(vm: &mut Vm, intl_obj: JsValue) {
         Ok(segments_obj)
     });
     vm.set_property(seg_proto, "segment", seg_segment_fn);
-    vm.non_enumerable_props.insert((seg_proto, "segment".to_string()));
+    vm.set_property_non_enumerable(seg_proto, "segment".to_string());
     vm.set_property(seg_proto, "_segmentsProto", segments_proto);
 
     let segments_containing_fn = vm.alloc_native_function("containing", 1, |vm, this, args| {
@@ -78,7 +78,7 @@ pub(super) fn register_segmenter(vm: &mut Vm, intl_obj: JsValue) {
         Ok(seg_res)
     });
     vm.set_property(segments_proto, "containing", segments_containing_fn);
-    vm.non_enumerable_props.insert((segments_proto, "containing".to_string()));
+    vm.set_property_non_enumerable(segments_proto, "containing".to_string());
 
     let seg_resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, this, _| {
         let opts = vm.alloc_object();
@@ -93,7 +93,7 @@ pub(super) fn register_segmenter(vm: &mut Vm, intl_obj: JsValue) {
         Ok(opts)
     });
     vm.set_property(seg_proto, "resolvedOptions", seg_resolved_opts);
-    vm.non_enumerable_props.insert((seg_proto, "resolvedOptions".to_string()));
+    vm.set_property_non_enumerable(seg_proto, "resolvedOptions".to_string());
 
     let supported_locales_fn6 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
         let loc = args.first().copied().unwrap_or(JsValue::undefined());
@@ -102,7 +102,7 @@ pub(super) fn register_segmenter(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(items))
     });
     vm.set_property(seg_ctor, "supportedLocalesOf", supported_locales_fn6);
-    vm.non_enumerable_props.insert((seg_ctor, "supportedLocalesOf".to_string()));
+    vm.set_property_non_enumerable(seg_ctor, "supportedLocalesOf".to_string());
 
     setup_prototype_and_constructor(vm, seg_ctor, seg_proto, "Intl.Segmenter", "Segmenter", intl_obj);
 

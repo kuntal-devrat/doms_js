@@ -23,7 +23,7 @@ impl Vm {
                 if self.script_var_names.contains(name) {
                     return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
                 }
-                if self.non_configurable_props.contains(&(self.global_object, name.clone()))
+                if !self.is_own_property_configurable(self.global_object, name)
                     || name == "undefined" || name == "NaN" || name == "Infinity"
                 {
                     return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
@@ -53,9 +53,9 @@ impl Vm {
                 if self.global_lexicals.contains_key(name) {
                     return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
                 }
-                if self.non_configurable_props.contains(&(self.global_object, name.clone())) {
-                    let is_writable = !self.non_writable_props.contains(&(self.global_object, name.clone()));
-                    let is_enum = !self.non_enumerable_props.contains(&(self.global_object, name.clone()));
+                if !self.is_own_property_configurable(self.global_object, name) {
+                    let is_writable = self.is_own_property_writable(self.global_object, name);
+                    let is_enum = self.is_own_property_enumerable(self.global_object, name);
                     let has_accessor = if let Some(ptr) = self.global_object.as_object_ptr() {
                         let obj = unsafe { &*(ptr as *mut JsObject) };
                         obj.accessors.as_ref().map(|a| a.contains_key(name)).unwrap_or(false)
@@ -100,9 +100,14 @@ impl Vm {
             if !has {
                 self.globals.insert(name.clone(), JsValue::undefined());
                 if !self.is_module && self.global_object.is_object() {
-                    self.set_property(self.global_object, name, JsValue::undefined());
                     if !in_eval {
-                        self.non_configurable_props.insert((self.global_object, name.clone()));
+                        self.define_builtin_property(self.global_object, name, JsValue::undefined(), crate::shape::PropertyAttributes {
+                            writable: true,
+                            enumerable: true,
+                            configurable: false,
+                        });
+                    } else {
+                        self.set_property(self.global_object, name, JsValue::undefined());
                     }
                 }
             } else if !self.globals.contains_key(name) {
@@ -116,7 +121,7 @@ impl Vm {
             if !in_eval {
                 self.script_var_names.insert(name.clone());
                 if !self.is_module && self.global_object.is_object() {
-                    self.non_configurable_props.insert((self.global_object, name.clone()));
+                    self.set_property_non_configurable(self.global_object, name);
                 }
             }
             if !self.globals.contains_key(name) {
@@ -141,7 +146,7 @@ impl Vm {
                         JsValue::uninitialized()
                     };
                     self.set_property_direct(mod_obj, name, val);
-                    self.non_configurable_props.insert((mod_obj, name.clone()));
+                    self.set_property_non_configurable(mod_obj, name);
                 }
             }
         }

@@ -38,7 +38,7 @@ pub fn register_wrap_for_valid_iterator_proto(vm: &mut Vm, iter_proto: JsValue) 
         Err(VmError::TypeError("%WrapForValidIteratorPrototype%.next requires [[Iterated]] internal slot".into()))
     });
     vm.set_property(wrap_proto, "next", next_fn);
-    vm.non_enumerable_props.insert((wrap_proto, "next".to_string()));
+    vm.set_property_non_enumerable(wrap_proto, "next".to_string());
 
     let return_fn = vm.alloc_native_function("return", 0, |vm, this, args| {
         if let Some(ptr) = this.as_object_ptr() {
@@ -68,7 +68,7 @@ pub fn register_wrap_for_valid_iterator_proto(vm: &mut Vm, iter_proto: JsValue) 
         Err(VmError::TypeError("%WrapForValidIteratorPrototype%.return requires [[Iterated]] internal slot".into()))
     });
     vm.set_property(wrap_proto, "return", return_fn);
-    vm.non_enumerable_props.insert((wrap_proto, "return".to_string()));
+    vm.set_property_non_enumerable(wrap_proto, "return".to_string());
 
     wrap_proto
 }

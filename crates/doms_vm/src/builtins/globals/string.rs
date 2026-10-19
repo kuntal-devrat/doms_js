@@ -44,11 +44,11 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     });
 
     vm.set_property(string_proto, "constructor", str_ctor);
-    vm.non_enumerable_props.insert((string_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(string_proto, "constructor".to_string());
     vm.set_property(str_ctor, "prototype", string_proto);
-    vm.non_enumerable_props.insert((str_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((str_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((str_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(str_ctor, "prototype".to_string());
+    vm.set_property_non_writable(str_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(str_ctor, "prototype".to_string());
 
     let html_methods: [(&str, &str, &str, bool); 13] = [
         ("anchor", "a", "name", true),
@@ -72,7 +72,7 @@ pub(super) fn register_string_global(vm: &mut Vm) {
             create_html(vm, this, &tag_c, &attr_c, if has_attr { args.first().copied() } else { None })
         }));
         vm.set_property(string_proto, m_name, fn_val);
-        vm.non_enumerable_props.insert((string_proto, m_name.to_string()));
+        vm.set_property_non_enumerable(string_proto, m_name.to_string());
     }
 
     let str_substr = vm.alloc_native_function("substr", 2, |vm, this, args| {
@@ -96,7 +96,7 @@ pub(super) fn register_string_global(vm: &mut Vm) {
         Ok(vm.alloc_string(sub))
     });
     vm.set_property(string_proto, "substr", str_substr);
-    vm.non_enumerable_props.insert((string_proto, "substr".to_string()));
+    vm.set_property_non_enumerable(string_proto, "substr".to_string());
 
     let str_trim_start = vm.alloc_native_function("trimStart", 0, |vm, this, _args| {
         let s = vm.to_string_value(this);
@@ -104,8 +104,8 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     });
     vm.set_property(string_proto, "trimStart", str_trim_start);
     vm.set_property(string_proto, "trimLeft", str_trim_start);
-    vm.non_enumerable_props.insert((string_proto, "trimStart".to_string()));
-    vm.non_enumerable_props.insert((string_proto, "trimLeft".to_string()));
+    vm.set_property_non_enumerable(string_proto, "trimStart".to_string());
+    vm.set_property_non_enumerable(string_proto, "trimLeft".to_string());
 
     let str_trim_end = vm.alloc_native_function("trimEnd", 0, |vm, this, _args| {
         let s = vm.to_string_value(this);
@@ -113,8 +113,8 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     });
     vm.set_property(string_proto, "trimEnd", str_trim_end);
     vm.set_property(string_proto, "trimRight", str_trim_end);
-    vm.non_enumerable_props.insert((string_proto, "trimEnd".to_string()));
-    vm.non_enumerable_props.insert((string_proto, "trimRight".to_string()));
+    vm.set_property_non_enumerable(string_proto, "trimEnd".to_string());
+    vm.set_property_non_enumerable(string_proto, "trimRight".to_string());
 
     let string_methods = [
         "indexOf", "includes", "toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase", "trim",
@@ -125,7 +125,7 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     for name in string_methods {
         if let Some(m) = vm.get_string_method(name) {
             vm.set_property(string_proto, name, m);
-            vm.non_enumerable_props.insert((string_proto, name.to_string()));
+            vm.set_property_non_enumerable(string_proto, name.to_string());
         }
     }
 

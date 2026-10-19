@@ -65,7 +65,7 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_string(formatted))
     });
     vm.set_property(lf_proto, "format", lf_format_fn);
-    vm.non_enumerable_props.insert((lf_proto, "format".to_string()));
+    vm.set_property_non_enumerable(lf_proto, "format".to_string());
 
     let lf_format_to_parts_fn = vm.alloc_native_function("formatToParts", 1, |vm, this, args| {
         let list_val = args.first().copied().unwrap_or(JsValue::undefined());
@@ -147,7 +147,7 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(parts))
     });
     vm.set_property(lf_proto, "formatToParts", lf_format_to_parts_fn);
-    vm.non_enumerable_props.insert((lf_proto, "formatToParts".to_string()));
+    vm.set_property_non_enumerable(lf_proto, "formatToParts".to_string());
 
     let lf_resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, this, _| {
         let opts = vm.alloc_object();
@@ -166,7 +166,7 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(opts)
     });
     vm.set_property(lf_proto, "resolvedOptions", lf_resolved_opts);
-    vm.non_enumerable_props.insert((lf_proto, "resolvedOptions".to_string()));
+    vm.set_property_non_enumerable(lf_proto, "resolvedOptions".to_string());
 
     let supported_locales_fn5 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
         let loc = args.first().copied().unwrap_or(JsValue::undefined());
@@ -175,7 +175,7 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(items))
     });
     vm.set_property(lf_ctor, "supportedLocalesOf", supported_locales_fn5);
-    vm.non_enumerable_props.insert((lf_ctor, "supportedLocalesOf".to_string()));
+    vm.set_property_non_enumerable(lf_ctor, "supportedLocalesOf".to_string());
 
     setup_prototype_and_constructor(vm, lf_ctor, lf_proto, "Intl.ListFormat", "ListFormat", intl_obj);
 

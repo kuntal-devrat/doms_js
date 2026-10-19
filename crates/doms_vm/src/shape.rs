@@ -15,6 +15,7 @@ pub struct PropertyAttributes {
 
 impl PropertyAttributes {
     pub const DEFAULT: Self = Self { writable: true, enumerable: true, configurable: true };
+    pub const BUILTIN: Self = Self { writable: true, enumerable: false, configurable: true };
     pub const BUILTIN_METHOD: Self = Self { writable: true, enumerable: false, configurable: true };
     pub const NON_WRITABLE_NON_ENUMERABLE: Self = Self { writable: false, enumerable: false, configurable: false };
     pub const FROZEN: Self = Self { writable: false, enumerable: true, configurable: false };

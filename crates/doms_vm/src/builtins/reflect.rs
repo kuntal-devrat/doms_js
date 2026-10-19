@@ -261,8 +261,8 @@ pub(super) fn register_reflect(vm: &mut Vm) {
         let tag_val = vm.alloc_string("Reflect".into());
         vm.set_symbol_property(reflect_obj, tag_sym, tag_val);
         let key_name = format!("[Symbol:{:x}]", tag_sym.raw_bits());
-        vm.non_writable_props.insert((reflect_obj, key_name.clone()));
-        vm.non_enumerable_props.insert((reflect_obj, key_name));
+        vm.set_property_non_writable(reflect_obj, key_name.clone());
+        vm.set_property_non_enumerable(reflect_obj, key_name);
     }
 
     vm.globals.insert("Reflect".to_string(), reflect_obj);

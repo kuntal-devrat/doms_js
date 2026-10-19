@@ -73,10 +73,10 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         obj.define_getter("byteOffset".to_string(), byte_offset_getter);
         obj.define_getter("length".to_string(), length_getter);
     }
-    vm.non_enumerable_props.insert((proto, "buffer".to_string()));
-    vm.non_enumerable_props.insert((proto, "byteLength".to_string()));
-    vm.non_enumerable_props.insert((proto, "byteOffset".to_string()));
-    vm.non_enumerable_props.insert((proto, "length".to_string()));
+    vm.set_property_non_enumerable(proto, "buffer".to_string());
+    vm.set_property_non_enumerable(proto, "byteLength".to_string());
+    vm.set_property_non_enumerable(proto, "byteOffset".to_string());
+    vm.set_property_non_enumerable(proto, "length".to_string());
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_getter = vm.alloc_native_function("get [Symbol.toStringTag]", 0, |vm, this, _args| {
@@ -113,7 +113,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         }))
     });
     vm.set_property(proto, "subarray", subarray_fn);
-    vm.non_enumerable_props.insert((proto, "subarray".to_string()));
+    vm.set_property_non_enumerable(proto, "subarray".to_string());
 
     let set_fn = vm.alloc_native_function("set", 1, |vm, this, args| {
         let _ = validate_typed_array(this)?;
@@ -188,7 +188,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(proto, "set", set_fn);
-    vm.non_enumerable_props.insert((proto, "set".to_string()));
+    vm.set_property_non_enumerable(proto, "set".to_string());
 
     let slice_fn = vm.alloc_native_function("slice", 2, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -215,7 +215,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(vm.alloc_typed_array(dst_ta))
     });
     vm.set_property(proto, "slice", slice_fn);
-    vm.non_enumerable_props.insert((proto, "slice".to_string()));
+    vm.set_property_non_enumerable(proto, "slice".to_string());
 
     let fill_fn = vm.alloc_native_function("fill", 1, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -232,7 +232,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(this)
     });
     vm.set_property(proto, "fill", fill_fn);
-    vm.non_enumerable_props.insert((proto, "fill".to_string()));
+    vm.set_property_non_enumerable(proto, "fill".to_string());
 
     let index_of_fn = vm.alloc_native_function("indexOf", 1, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -248,7 +248,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::from_int32(-1))
     });
     vm.set_property(proto, "indexOf", index_of_fn);
-    vm.non_enumerable_props.insert((proto, "indexOf".to_string()));
+    vm.set_property_non_enumerable(proto, "indexOf".to_string());
 
     let last_index_of_fn = vm.alloc_native_function("lastIndexOf", 1, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -279,7 +279,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::from_int32(-1))
     });
     vm.set_property(proto, "lastIndexOf", last_index_of_fn);
-    vm.non_enumerable_props.insert((proto, "lastIndexOf".to_string()));
+    vm.set_property_non_enumerable(proto, "lastIndexOf".to_string());
 
     let includes_fn = vm.alloc_native_function("includes", 1, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -295,7 +295,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::from_boolean(false))
     });
     vm.set_property(proto, "includes", includes_fn);
-    vm.non_enumerable_props.insert((proto, "includes".to_string()));
+    vm.set_property_non_enumerable(proto, "includes".to_string());
 
     let join_fn = vm.alloc_native_function("join", 1, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -309,11 +309,11 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(vm.alloc_string(parts.join(&sep)))
     });
     vm.set_property(proto, "join", join_fn);
-    vm.non_enumerable_props.insert((proto, "join".to_string()));
+    vm.set_property_non_enumerable(proto, "join".to_string());
     vm.set_property(proto, "toString", join_fn);
-    vm.non_enumerable_props.insert((proto, "toString".to_string()));
+    vm.set_property_non_enumerable(proto, "toString".to_string());
     vm.set_property(proto, "toLocaleString", join_fn);
-    vm.non_enumerable_props.insert((proto, "toLocaleString".to_string()));
+    vm.set_property_non_enumerable(proto, "toLocaleString".to_string());
 
     let values_fn = vm.alloc_native_function("values", 0, |vm, this, _args| {
         validate_typed_array(this)?;
@@ -328,11 +328,11 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         create_array_iterator(vm, this, IterKind::Entries)
     });
     vm.set_property(proto, "values", values_fn);
-    vm.non_enumerable_props.insert((proto, "values".to_string()));
+    vm.set_property_non_enumerable(proto, "values".to_string());
     vm.set_property(proto, "keys", keys_fn);
-    vm.non_enumerable_props.insert((proto, "keys".to_string()));
+    vm.set_property_non_enumerable(proto, "keys".to_string());
     vm.set_property(proto, "entries", entries_fn);
-    vm.non_enumerable_props.insert((proto, "entries".to_string()));
+    vm.set_property_non_enumerable(proto, "entries".to_string());
     if let Some(sym_iter) = vm.symbol_iterator {
         vm.set_symbol_property(proto, sym_iter, values_fn);
     }
@@ -350,7 +350,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(proto, "at", at_fn);
-    vm.non_enumerable_props.insert((proto, "at".to_string()));
+    vm.set_property_non_enumerable(proto, "at".to_string());
 
     let reverse_fn = vm.alloc_native_function("reverse", 0, |vm, this, _args| {
         let ta = validate_typed_array(this)?;
@@ -372,7 +372,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(this)
     });
     vm.set_property(proto, "reverse", reverse_fn);
-    vm.non_enumerable_props.insert((proto, "reverse".to_string()));
+    vm.set_property_non_enumerable(proto, "reverse".to_string());
 
     let to_reversed_fn = vm.alloc_native_function("toReversed", 0, |vm, this, _args| {
         let ta = validate_typed_array(this)?;
@@ -403,7 +403,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(vm.alloc_typed_array(dst_ta))
     });
     vm.set_property(proto, "toReversed", to_reversed_fn);
-    vm.non_enumerable_props.insert((proto, "toReversed".to_string()));
+    vm.set_property_non_enumerable(proto, "toReversed".to_string());
 
     let with_fn = vm.alloc_native_function("with", 2, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -431,7 +431,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(vm.alloc_typed_array(dst_ta))
     });
     vm.set_property(proto, "with", with_fn);
-    vm.non_enumerable_props.insert((proto, "with".to_string()));
+    vm.set_property_non_enumerable(proto, "with".to_string());
 
     let copy_within_fn = vm.alloc_native_function("copyWithin", 2, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -458,7 +458,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(this)
     });
     vm.set_property(proto, "copyWithin", copy_within_fn);
-    vm.non_enumerable_props.insert((proto, "copyWithin".to_string()));
+    vm.set_property_non_enumerable(proto, "copyWithin".to_string());
 
     let for_each_fn = vm.alloc_native_function("forEach", 1, |vm, this, args| {
         let callback = args.first().copied().unwrap_or(JsValue::undefined());
@@ -493,7 +493,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(proto, "forEach", for_each_fn);
-    vm.non_enumerable_props.insert((proto, "forEach".to_string()));
+    vm.set_property_non_enumerable(proto, "forEach".to_string());
 
     let map_fn = vm.alloc_native_function("map", 1, |vm, this, args| {
         let callback = args.first().copied().unwrap_or(JsValue::undefined());
@@ -550,7 +550,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(vm.alloc_typed_array(dst_ta))
     });
     vm.set_property(proto, "map", map_fn);
-    vm.non_enumerable_props.insert((proto, "map".to_string()));
+    vm.set_property_non_enumerable(proto, "map".to_string());
 
     let filter_fn = vm.alloc_native_function("filter", 1, |vm, this, args| {
         let callback = args.first().copied().unwrap_or(JsValue::undefined());
@@ -605,7 +605,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(vm.alloc_typed_array(dst_ta))
     });
     vm.set_property(proto, "filter", filter_fn);
-    vm.non_enumerable_props.insert((proto, "filter".to_string()));
+    vm.set_property_non_enumerable(proto, "filter".to_string());
 
     let some_fn = vm.alloc_native_function("some", 1, |vm, this, args| {
         let callback = args.first().copied().unwrap_or(JsValue::undefined());
@@ -644,7 +644,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::from_boolean(false))
     });
     vm.set_property(proto, "some", some_fn);
-    vm.non_enumerable_props.insert((proto, "some".to_string()));
+    vm.set_property_non_enumerable(proto, "some".to_string());
 
     let every_fn = vm.alloc_native_function("every", 1, |vm, this, args| {
         let callback = args.first().copied().unwrap_or(JsValue::undefined());
@@ -683,7 +683,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::from_boolean(true))
     });
     vm.set_property(proto, "every", every_fn);
-    vm.non_enumerable_props.insert((proto, "every".to_string()));
+    vm.set_property_non_enumerable(proto, "every".to_string());
 
     let find_fn = vm.alloc_native_function("find", 1, |vm, this, args| {
         let predicate = args.first().copied().unwrap_or(JsValue::undefined());
@@ -722,7 +722,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(proto, "find", find_fn);
-    vm.non_enumerable_props.insert((proto, "find".to_string()));
+    vm.set_property_non_enumerable(proto, "find".to_string());
 
     let find_index_fn = vm.alloc_native_function("findIndex", 1, |vm, this, args| {
         let predicate = args.first().copied().unwrap_or(JsValue::undefined());
@@ -761,7 +761,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::from_int32(-1))
     });
     vm.set_property(proto, "findIndex", find_index_fn);
-    vm.non_enumerable_props.insert((proto, "findIndex".to_string()));
+    vm.set_property_non_enumerable(proto, "findIndex".to_string());
 
     let find_last_fn = vm.alloc_native_function("findLast", 1, |vm, this, args| {
         let predicate = args.first().copied().unwrap_or(JsValue::undefined());
@@ -800,7 +800,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(proto, "findLast", find_last_fn);
-    vm.non_enumerable_props.insert((proto, "findLast".to_string()));
+    vm.set_property_non_enumerable(proto, "findLast".to_string());
 
     let find_last_index_fn = vm.alloc_native_function("findLastIndex", 1, |vm, this, args| {
         let predicate = args.first().copied().unwrap_or(JsValue::undefined());
@@ -839,7 +839,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(JsValue::from_int32(-1))
     });
     vm.set_property(proto, "findLastIndex", find_last_index_fn);
-    vm.non_enumerable_props.insert((proto, "findLastIndex".to_string()));
+    vm.set_property_non_enumerable(proto, "findLastIndex".to_string());
 
     let reduce_fn = vm.alloc_native_function("reduce", 1, |vm, this, args| {
         let callback = args.first().copied().unwrap_or(JsValue::undefined());
@@ -882,7 +882,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(accum)
     });
     vm.set_property(proto, "reduce", reduce_fn);
-    vm.non_enumerable_props.insert((proto, "reduce".to_string()));
+    vm.set_property_non_enumerable(proto, "reduce".to_string());
 
     let reduce_right_fn = vm.alloc_native_function("reduceRight", 1, |vm, this, args| {
         let callback = args.first().copied().unwrap_or(JsValue::undefined());
@@ -927,7 +927,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(accum)
     });
     vm.set_property(proto, "reduceRight", reduce_right_fn);
-    vm.non_enumerable_props.insert((proto, "reduceRight".to_string()));
+    vm.set_property_non_enumerable(proto, "reduceRight".to_string());
 
     let sort_fn = vm.alloc_native_function("sort", 1, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -988,7 +988,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(this)
     });
     vm.set_property(proto, "sort", sort_fn);
-    vm.non_enumerable_props.insert((proto, "sort".to_string()));
+    vm.set_property_non_enumerable(proto, "sort".to_string());
 
     let to_sorted_fn = vm.alloc_native_function("toSorted", 1, |vm, this, args| {
         let ta = validate_typed_array(this)?;
@@ -1056,5 +1056,5 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         Ok(vm.alloc_typed_array(dst_ta))
     });
     vm.set_property(proto, "toSorted", to_sorted_fn);
-    vm.non_enumerable_props.insert((proto, "toSorted".to_string()));
+    vm.set_property_non_enumerable(proto, "toSorted".to_string());
 }

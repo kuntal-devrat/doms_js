@@ -155,8 +155,8 @@ impl Vm {
         if self.module_namespace_objects.contains(&target) {
             return Ok(false);
         }
-        let key_name = format!("[Symbol:{:x}]", key.raw_bits());
-        if self.non_writable_props.contains(&(target, key_name.clone())) {
+        let is_to_string_tag = self.symbol_to_string_tag.is_some_and(|t| t == key);
+        if is_to_string_tag && (self.is_module || self.module_namespace_objects.contains(&target)) {
             return Ok(false);
         }
         if !target.is_js_object() {
@@ -202,9 +202,6 @@ impl Vm {
                                 }
                             }
                         }
-                        if self.non_writable_props.contains(&(proto_val, key_name.clone())) {
-                            return Ok(false);
-                        }
                         curr_proto = proto_obj.prototype;
                     } else {
                         break;
@@ -232,9 +229,6 @@ impl Vm {
                 if accs.contains_key(&key) {
                     return Ok(false);
                 }
-            }
-            if self.non_writable_props.contains(&(receiver, key_name.clone())) {
-                return Ok(false);
             }
             let has_sym = r_obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
             if !r_obj.is_extensible() && !has_sym {

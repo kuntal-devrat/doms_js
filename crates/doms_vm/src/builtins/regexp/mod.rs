@@ -64,11 +64,11 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         Ok(vm.alloc_regexp(pattern, flags))
     });
     vm.set_property(regexp_ctor, "prototype", regexp_proto);
-    vm.non_enumerable_props.insert((regexp_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((regexp_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((regexp_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(regexp_ctor, "prototype".to_string());
+    vm.set_property_non_writable(regexp_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(regexp_ctor, "prototype".to_string());
     vm.set_property(regexp_proto, "constructor", regexp_ctor);
-    vm.non_enumerable_props.insert((regexp_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(regexp_proto, "constructor".to_string());
 
     let re_exec_fn = vm.alloc_native_function("exec", 1, |vm, this, args| {
         let text = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
@@ -640,19 +640,19 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
 
     if let Some(sym) = vm.symbol_match {
         vm.set_symbol_property(regexp_proto, sym, re_match_fn);
-        vm.non_enumerable_props.insert((regexp_proto, "[Symbol.match]".to_string()));
+        vm.set_property_non_enumerable(regexp_proto, "[Symbol.match]".to_string());
     }
     if let Some(sym) = vm.symbol_replace {
         vm.set_symbol_property(regexp_proto, sym, re_replace_fn);
-        vm.non_enumerable_props.insert((regexp_proto, "[Symbol.replace]".to_string()));
+        vm.set_property_non_enumerable(regexp_proto, "[Symbol.replace]".to_string());
     }
     if let Some(sym) = vm.symbol_search {
         vm.set_symbol_property(regexp_proto, sym, re_search_fn);
-        vm.non_enumerable_props.insert((regexp_proto, "[Symbol.search]".to_string()));
+        vm.set_property_non_enumerable(regexp_proto, "[Symbol.search]".to_string());
     }
     if let Some(sym) = vm.symbol_split {
         vm.set_symbol_property(regexp_proto, sym, re_split_fn);
-        vm.non_enumerable_props.insert((regexp_proto, "[Symbol.split]".to_string()));
+        vm.set_property_non_enumerable(regexp_proto, "[Symbol.split]".to_string());
     }
 
     vm.set_property(regexp_proto, "compile", re_compile_fn);
@@ -675,7 +675,7 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         "global", "ignoreCase", "multiline", "dotAll", "unicode", "unicodeSets", "sticky",
         "hasIndices", "source", "flags", "exec", "test", "toString", "compile", "constructor"
     ] {
-        vm.non_enumerable_props.insert((regexp_proto, prop.to_string()));
+        vm.set_property_non_enumerable(regexp_proto, prop.to_string());
     }
 
     // Annex B.2.5.2 - B.2.5.8 Legacy RegExp constructor properties
@@ -688,7 +688,7 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                     Ok(vm.alloc_string(vm.regexp_last_match.parens[$idx].clone()))
                 });
                 ctor_obj.define_getter($name.to_string(), getter);
-                vm.non_enumerable_props.insert((regexp_ctor, $name.to_string()));
+                vm.set_property_non_enumerable(regexp_ctor, $name.to_string());
             }};
         }
 
@@ -716,8 +716,8 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         ctor_obj.define_setter("input".to_string(), input_setter);
         ctor_obj.define_getter("$_".to_string(), input_getter);
         ctor_obj.define_setter("$_".to_string(), input_setter);
-        vm.non_enumerable_props.insert((regexp_ctor, "input".to_string()));
-        vm.non_enumerable_props.insert((regexp_ctor, "$_".to_string()));
+        vm.set_property_non_enumerable(regexp_ctor, "input".to_string());
+        vm.set_property_non_enumerable(regexp_ctor, "$_".to_string());
 
         // lastMatch / $&
         let last_match_getter = vm.alloc_native_function("get lastMatch", 0, |vm, _this, _| {
@@ -725,8 +725,8 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         });
         ctor_obj.define_getter("lastMatch".to_string(), last_match_getter);
         ctor_obj.define_getter("$&".to_string(), last_match_getter);
-        vm.non_enumerable_props.insert((regexp_ctor, "lastMatch".to_string()));
-        vm.non_enumerable_props.insert((regexp_ctor, "$&".to_string()));
+        vm.set_property_non_enumerable(regexp_ctor, "lastMatch".to_string());
+        vm.set_property_non_enumerable(regexp_ctor, "$&".to_string());
 
         // lastParen / $+
         let last_paren_getter = vm.alloc_native_function("get lastParen", 0, |vm, _this, _| {
@@ -734,8 +734,8 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         });
         ctor_obj.define_getter("lastParen".to_string(), last_paren_getter);
         ctor_obj.define_getter("$+".to_string(), last_paren_getter);
-        vm.non_enumerable_props.insert((regexp_ctor, "lastParen".to_string()));
-        vm.non_enumerable_props.insert((regexp_ctor, "$+".to_string()));
+        vm.set_property_non_enumerable(regexp_ctor, "lastParen".to_string());
+        vm.set_property_non_enumerable(regexp_ctor, "$+".to_string());
 
         // leftContext / $`
         let left_context_getter = vm.alloc_native_function("get leftContext", 0, |vm, _this, _| {
@@ -743,8 +743,8 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         });
         ctor_obj.define_getter("leftContext".to_string(), left_context_getter);
         ctor_obj.define_getter("$`".to_string(), left_context_getter);
-        vm.non_enumerable_props.insert((regexp_ctor, "leftContext".to_string()));
-        vm.non_enumerable_props.insert((regexp_ctor, "$`".to_string()));
+        vm.set_property_non_enumerable(regexp_ctor, "leftContext".to_string());
+        vm.set_property_non_enumerable(regexp_ctor, "$`".to_string());
 
         // rightContext / $'
         let right_context_getter = vm.alloc_native_function("get rightContext", 0, |vm, _this, _| {
@@ -752,8 +752,8 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         });
         ctor_obj.define_getter("rightContext".to_string(), right_context_getter);
         ctor_obj.define_getter("$'".to_string(), right_context_getter);
-        vm.non_enumerable_props.insert((regexp_ctor, "rightContext".to_string()));
-        vm.non_enumerable_props.insert((regexp_ctor, "$'".to_string()));
+        vm.set_property_non_enumerable(regexp_ctor, "rightContext".to_string());
+        vm.set_property_non_enumerable(regexp_ctor, "$'".to_string());
     }
 
     vm.globals.insert("RegExp".to_string(), regexp_ctor);

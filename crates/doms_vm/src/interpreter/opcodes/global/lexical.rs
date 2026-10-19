@@ -14,7 +14,7 @@ impl Vm {
             _ => return Err(VmError::TypeError("Global name must be string".into())),
         };
         if name == "undefined" || name == "NaN" || name == "Infinity"
-            || self.non_configurable_props.contains(&(self.global_object, name.clone()))
+            || !self.is_own_property_configurable(self.global_object, &name)
             || self.global_lexicals.contains_key(&name)
             || self.var_names.contains(&name)
         {
@@ -39,7 +39,7 @@ impl Vm {
             _ => return Err(VmError::TypeError("Global name must be string".into())),
         };
         if name == "undefined" || name == "NaN" || name == "Infinity"
-            || self.non_configurable_props.contains(&(self.global_object, name.clone()))
+            || !self.is_own_property_configurable(self.global_object, &name)
             || self.global_lexicals.contains_key(&name)
             || self.var_names.contains(&name)
         {

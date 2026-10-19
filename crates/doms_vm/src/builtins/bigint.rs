@@ -127,11 +127,11 @@ pub(super) fn register_bigint(vm: &mut Vm) {
     });
 
     vm.set_property(bigint_proto, "toString", to_string_fn);
-    vm.non_enumerable_props.insert((bigint_proto, "toString".to_string()));
+    vm.set_property_non_enumerable(bigint_proto, "toString".to_string());
     vm.set_property(bigint_proto, "valueOf", value_of_fn);
-    vm.non_enumerable_props.insert((bigint_proto, "valueOf".to_string()));
+    vm.set_property_non_enumerable(bigint_proto, "valueOf".to_string());
     vm.set_property(bigint_proto, "toLocaleString", to_locale_string_fn);
-    vm.non_enumerable_props.insert((bigint_proto, "toLocaleString".to_string()));
+    vm.set_property_non_enumerable(bigint_proto, "toLocaleString".to_string());
 
     if let Some(tag_sym) = vm.symbol_to_string_tag {
         let tag_val = vm.alloc_string("BigInt".to_string());
@@ -148,11 +148,11 @@ pub(super) fn register_bigint(vm: &mut Vm) {
     });
 
     vm.set_property(bigint_proto, "constructor", bigint_ctor);
-    vm.non_enumerable_props.insert((bigint_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(bigint_proto, "constructor".to_string());
     vm.set_property(bigint_ctor, "prototype", bigint_proto);
-    vm.non_enumerable_props.insert((bigint_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((bigint_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((bigint_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(bigint_ctor, "prototype".to_string());
+    vm.set_property_non_writable(bigint_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(bigint_ctor, "prototype".to_string());
 
     let as_int_n = vm.alloc_native_function("asIntN", 2, |vm, _this, args| {
         let bits_arg = args.first().copied().unwrap_or(JsValue::undefined());
@@ -208,9 +208,9 @@ pub(super) fn register_bigint(vm: &mut Vm) {
     });
 
     vm.set_property(bigint_ctor, "asIntN", as_int_n);
-    vm.non_enumerable_props.insert((bigint_ctor, "asIntN".to_string()));
+    vm.set_property_non_enumerable(bigint_ctor, "asIntN".to_string());
     vm.set_property(bigint_ctor, "asUintN", as_uint_n);
-    vm.non_enumerable_props.insert((bigint_ctor, "asUintN".to_string()));
+    vm.set_property_non_enumerable(bigint_ctor, "asUintN".to_string());
 
     vm.globals.insert("BigInt".to_string(), bigint_ctor);
     if vm.global_object.is_object() {

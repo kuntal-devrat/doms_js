@@ -214,7 +214,7 @@ impl Vm {
             }
         }
 
-        if !self.non_writable_props.is_empty() && self.non_writable_props.contains(&(obj, name.to_string())) {
+        if !self.is_own_property_writable(obj, &name) {
             let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
             if is_strict {
                 self.handle_exception_at_depth(

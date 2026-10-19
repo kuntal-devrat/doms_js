@@ -121,7 +121,7 @@ pub fn define_property_internal(
                                 }
                             } else {
                                 for i in (new_len..old_len).rev() {
-                                    if vm.non_configurable_props.contains(&(target, i.to_string())) {
+                                    if !vm.is_own_property_configurable(target, &i.to_string()) {
                                         non_conf_conflict = Some(i);
                                         break;
                                     }
@@ -136,7 +136,6 @@ pub fn define_property_internal(
                         if non_conf_conflict.is_some() {
                             if has_writ && !vm.get_property(desc, "writable").is_truthy() {
                                 obj.set_array_length_non_writable();
-                                vm.non_writable_props.insert((target, "length".to_string()));
                             }
                             return Err(VmError::TypeError("Cannot delete non-configurable array element".into()));
                         }
@@ -145,7 +144,6 @@ pub fn define_property_internal(
                         let w = vm.get_property(desc, "writable").is_truthy();
                         if !w {
                             obj.set_array_length_non_writable();
-                            vm.non_writable_props.insert((target, "length".to_string()));
                         } else if !is_length_writable {
                             return Err(VmError::TypeError("Cannot make non-writable length writable".into()));
                         }
@@ -353,38 +351,8 @@ pub fn define_property_internal(
         }
     }
 
-    if has_conf {
-        if !conf_val {
-            vm.non_configurable_props.insert((target, key_name.clone()));
-        } else {
-            vm.non_configurable_props.remove(&(target, key_name.clone()));
-        }
-    } else if !current_exists {
-        vm.non_configurable_props.insert((target, key_name.clone()));
-    }
-
-    if has_enum {
-        if !enum_val {
-            vm.non_enumerable_props.insert((target, key_name.clone()));
-        } else {
-            vm.non_enumerable_props.remove(&(target, key_name.clone()));
-        }
-    } else if !current_exists {
-        vm.non_enumerable_props.insert((target, key_name.clone()));
-    }
-
     if !is_accessor {
-        if has_writ {
-            if !writ_val {
-                vm.non_writable_props.insert((target, key_name.clone()));
-                if let PropertyKeyVal::String(prop_name) = &prop_key {
-                    vm.sync_mapped_arguments_delete(target, prop_name);
-                }
-            } else {
-                vm.non_writable_props.remove(&(target, key_name.clone()));
-            }
-        } else if !current_exists {
-            vm.non_writable_props.insert((target, key_name.clone()));
+        if (has_writ && !writ_val) || (!has_writ && !current_exists) {
             if let PropertyKeyVal::String(prop_name) = &prop_key {
                 vm.sync_mapped_arguments_delete(target, prop_name);
             }

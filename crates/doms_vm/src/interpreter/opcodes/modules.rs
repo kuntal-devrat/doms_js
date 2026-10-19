@@ -35,7 +35,7 @@ impl Vm {
                     self.current_exports.insert(name.clone(), val);
                     if let Some(mod_obj) = self.current_module_obj {
                         self.set_property_direct(mod_obj, &name, val);
-                        self.non_configurable_props.insert((mod_obj, name.clone()));
+                        self.set_property_non_configurable(mod_obj, &name);
                     }
         Ok(())
     }
@@ -60,7 +60,6 @@ impl Vm {
                                         // Ambiguous export - omit from module namespace object
                                         self.current_exports.remove(&name);
                                         if let Some(cur) = self.current_module_obj {
-                                            self.non_configurable_props.remove(&(cur, name.clone()));
                                             self.module_reexports.remove(&(cur, name.clone()));
                                             if let Some(cur_ptr) = cur.as_object_ptr() {
                                                 let cur_obj = unsafe { &mut *(cur_ptr as *mut JsObject) };
@@ -74,7 +73,7 @@ impl Vm {
                                     self.current_exports.insert(name.clone(), val);
                                     if let Some(cur) = self.current_module_obj {
                                         self.set_property_direct(cur, &name, val);
-                                        self.non_configurable_props.insert((cur, name.clone()));
+                                        self.set_property_non_configurable(cur, &name);
                                         self.module_reexports.insert((cur, name.clone()), (mod_obj, name.clone()));
                                     }
                                 }
@@ -110,9 +109,6 @@ impl Vm {
                         if let Some(tag_sym) = self.symbol_to_string_tag {
                             let tag_val = self.alloc_string("Module".to_string());
                             self.set_symbol_property(m, tag_sym, tag_val);
-                            self.non_configurable_props.insert((m, "[Symbol.toStringTag]".to_string()));
-                            self.non_enumerable_props.insert((m, "[Symbol.toStringTag]".to_string()));
-                            self.non_writable_props.insert((m, "[Symbol.toStringTag]".to_string()));
                         }
                         self.module_namespace_objects.insert(m);
                         self.modules.insert(canonical_key.clone(), m);
@@ -160,7 +156,7 @@ impl Vm {
                                     let exports = std::mem::replace(&mut self.current_exports, old_exports);
                                     for (k, v) in exports {
                                         self.set_property_direct(m, &k, v);
-                                        self.non_configurable_props.insert((m, k.clone()));
+                                        self.set_property_non_configurable(m, &k);
                                     }
                                     self.prevent_extensions_object(m);
                                 }
@@ -195,9 +191,6 @@ impl Vm {
                         if let Some(tag_sym) = self.symbol_to_string_tag {
                             let tag_val = self.alloc_string("Module".to_string());
                             self.set_symbol_property(m, tag_sym, tag_val);
-                            self.non_configurable_props.insert((m, "[Symbol.toStringTag]".to_string()));
-                            self.non_enumerable_props.insert((m, "[Symbol.toStringTag]".to_string()));
-                            self.non_writable_props.insert((m, "[Symbol.toStringTag]".to_string()));
                         }
                         self.module_namespace_objects.insert(m);
                         self.modules.insert(canonical_key.clone(), m);
@@ -245,7 +238,7 @@ impl Vm {
                                     let exports = std::mem::replace(&mut self.current_exports, old_exports);
                                     for (k, v) in exports {
                                         self.set_property(m, &k, v);
-                                        self.non_configurable_props.insert((m, k.clone()));
+                                        self.set_property_non_configurable(m, &k);
                                     }
                                     self.prevent_extensions_object(m);
                                 }
@@ -306,7 +299,7 @@ impl Vm {
             self.module_reexports.insert((cur_mod, exp_name.clone()), (tgt_mod, target_name.clone()));
             let init_val = self.get_property(tgt_mod, &target_name);
             self.set_property_direct(cur_mod, &exp_name, init_val);
-            self.non_configurable_props.insert((cur_mod, exp_name.clone()));
+            self.set_property_non_configurable(cur_mod, &exp_name);
             self.current_exports.insert(exp_name, init_val);
         }
         Ok(())

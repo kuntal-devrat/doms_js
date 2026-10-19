@@ -50,9 +50,6 @@ pub struct Vm {
     pub global_object: JsValue,
     pub global_lexicals: HashMap<String, JsValue>,
     pub const_bindings: HashSet<String>,
-    pub non_configurable_props: HashSet<(JsValue, String)>,
-    pub non_writable_props: HashSet<(JsValue, String)>,
-    pub non_enumerable_props: HashSet<(JsValue, String)>,
     pub var_names: HashSet<String>,
     pub script_var_names: HashSet<String>,
     pub in_eval: bool,
@@ -146,9 +143,6 @@ impl Vm {
             global_object: JsValue::undefined(),
             global_lexicals: HashMap::new(),
             const_bindings: HashSet::new(),
-            non_configurable_props: HashSet::new(),
-            non_writable_props: HashSet::new(),
-            non_enumerable_props: HashSet::new(),
             var_names: HashSet::new(),
             script_var_names: HashSet::new(),
             in_eval: false,
@@ -255,6 +249,16 @@ impl Vm {
     /// Check if an own property is writable.
     #[inline]
     pub fn is_own_property_writable(&self, target: JsValue, key: &str) -> bool {
+        if key == "length" {
+            if let Some(ptr) = target.as_object_ptr() {
+                if self.is_valid_heap_object(ptr) {
+                    let obj = unsafe { &*(ptr as *const JsObject) };
+                    if matches!(obj.kind, ObjectKind::Array(_)) {
+                        return obj.is_array_length_writable();
+                    }
+                }
+            }
+        }
         if let Some(info) = self.get_own_property_info(target, key) {
             return info.attributes.writable;
         }
@@ -264,6 +268,16 @@ impl Vm {
     /// Check if an own property is configurable.
     #[inline]
     pub fn is_own_property_configurable(&self, target: JsValue, key: &str) -> bool {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &*(ptr as *const JsObject) };
+                if let Some(accs) = &obj.accessors {
+                    if let Some(acc) = accs.get(key) {
+                        return acc.configurable;
+                    }
+                }
+            }
+        }
         if let Some(info) = self.get_own_property_info(target, key) {
             return info.attributes.configurable;
         }
@@ -273,10 +287,89 @@ impl Vm {
     /// Check if an own property is enumerable.
     #[inline]
     pub fn is_own_property_enumerable(&self, target: JsValue, key: &str) -> bool {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &*(ptr as *const JsObject) };
+                if let Some(accs) = &obj.accessors {
+                    if let Some(acc) = accs.get(key) {
+                        return acc.enumerable;
+                    }
+                }
+            }
+        }
         if let Some(info) = self.get_own_property_info(target, key) {
             return info.attributes.enumerable;
         }
         true
+    }
+
+    /// Set an existing or new property to be non-enumerable directly on its shape or accessor.
+    pub fn set_property_non_enumerable(&mut self, target: JsValue, key: impl AsRef<str>) {
+        let key = key.as_ref();
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let Some(accs) = &mut obj.accessors {
+                    if let Some(acc) = accs.get_mut(key) {
+                        acc.enumerable = false;
+                        return;
+                    }
+                }
+                if let Some(info) = self.shapes.get_property_info(obj.shape_id, key) {
+                    let mut attrs = info.attributes;
+                    attrs.enumerable = false;
+                    let new_shape_id = self.shapes.transition_redefine(obj.shape_id, key, attrs);
+                    obj.shape_id = new_shape_id;
+                }
+            }
+        }
+    }
+
+    /// Set an existing property to be non-writable directly on its shape or array flag.
+    pub fn set_property_non_writable(&mut self, target: JsValue, key: impl AsRef<str>) {
+        let key = key.as_ref();
+        if key == "length" {
+            if let Some(ptr) = target.as_object_ptr() {
+                if self.is_valid_heap_object(ptr) {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    obj.set_array_length_non_writable();
+                }
+            }
+            return;
+        }
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let Some(info) = self.shapes.get_property_info(obj.shape_id, key) {
+                    let mut attrs = info.attributes;
+                    attrs.writable = false;
+                    let new_shape_id = self.shapes.transition_redefine(obj.shape_id, key, attrs);
+                    obj.shape_id = new_shape_id;
+                }
+            }
+        }
+    }
+
+    /// Set an existing property to be non-configurable directly on its shape or accessor.
+    pub fn set_property_non_configurable(&mut self, target: JsValue, key: impl AsRef<str>) {
+        let key = key.as_ref();
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let Some(accs) = &mut obj.accessors {
+                    if let Some(acc) = accs.get_mut(key) {
+                        acc.configurable = false;
+                        return;
+                    }
+                }
+                if let Some(info) = self.shapes.get_property_info(obj.shape_id, key) {
+                    let mut attrs = info.attributes;
+                    attrs.configurable = false;
+                    let new_shape_id = self.shapes.transition_redefine(obj.shape_id, key, attrs);
+                    obj.shape_id = new_shape_id;
+                }
+            }
+        }
     }
 
     /// Define a builtin property with explicit ECMAScript PropertyAttributes.

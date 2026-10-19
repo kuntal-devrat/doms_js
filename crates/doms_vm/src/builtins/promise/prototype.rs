@@ -51,15 +51,15 @@ pub(super) fn create_prototype(vm: &mut Vm, promise_ctor: JsValue) -> JsValue {
     vm.set_property(promise_proto, "catch", catch_fn);
     vm.set_property(promise_proto, "finally", finally_fn);
     vm.set_property(promise_proto, "constructor", promise_ctor);
-    vm.non_enumerable_props.insert((promise_proto, "then".to_string()));
-    vm.non_enumerable_props.insert((promise_proto, "catch".to_string()));
-    vm.non_enumerable_props.insert((promise_proto, "finally".to_string()));
-    vm.non_enumerable_props.insert((promise_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(promise_proto, "then".to_string());
+    vm.set_property_non_enumerable(promise_proto, "catch".to_string());
+    vm.set_property_non_enumerable(promise_proto, "finally".to_string());
+    vm.set_property_non_enumerable(promise_proto, "constructor".to_string());
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_val = vm.alloc_string("Promise".to_string());
         vm.set_symbol_property(promise_proto, sym_tag, tag_val);
-        vm.non_enumerable_props.insert((promise_proto, "[Symbol.toStringTag]".to_string()));
+        vm.set_property_non_enumerable(promise_proto, "[Symbol.toStringTag]".to_string());
     }
     promise_proto
 }

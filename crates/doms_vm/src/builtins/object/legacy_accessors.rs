@@ -43,7 +43,7 @@ pub(super) fn register_legacy_accessors(vm: &mut Vm, object_proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(object_proto, "__lookupGetter__", lookup_getter);
-    vm.non_enumerable_props.insert((object_proto, "__lookupGetter__".to_string()));
+    vm.set_property_non_enumerable(object_proto, "__lookupGetter__".to_string());
 
     let lookup_setter = vm.alloc_native_function("__lookupSetter__", 1, |vm, this, args| {
         let o = if this.is_object() { this } else { vm.to_object_value(this)? };
@@ -85,7 +85,7 @@ pub(super) fn register_legacy_accessors(vm: &mut Vm, object_proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(object_proto, "__lookupSetter__", lookup_setter);
-    vm.non_enumerable_props.insert((object_proto, "__lookupSetter__".to_string()));
+    vm.set_property_non_enumerable(object_proto, "__lookupSetter__".to_string());
 
     let define_getter_fn = vm.alloc_native_function("__defineGetter__", 2, |vm, this, args| {
         let o = if this.is_object() { this } else { vm.to_object_value(this)? };
@@ -110,7 +110,7 @@ pub(super) fn register_legacy_accessors(vm: &mut Vm, object_proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(object_proto, "__defineGetter__", define_getter_fn);
-    vm.non_enumerable_props.insert((object_proto, "__defineGetter__".to_string()));
+    vm.set_property_non_enumerable(object_proto, "__defineGetter__".to_string());
 
     let define_setter_fn = vm.alloc_native_function("__defineSetter__", 2, |vm, this, args| {
         let o = if this.is_object() { this } else { vm.to_object_value(this)? };
@@ -135,5 +135,5 @@ pub(super) fn register_legacy_accessors(vm: &mut Vm, object_proto: JsValue) {
         Ok(JsValue::undefined())
     });
     vm.set_property(object_proto, "__defineSetter__", define_setter_fn);
-    vm.non_enumerable_props.insert((object_proto, "__defineSetter__".to_string()));
+    vm.set_property_non_enumerable(object_proto, "__defineSetter__".to_string());
 }

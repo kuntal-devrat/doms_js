@@ -536,15 +536,15 @@ pub(super) fn register_atomics(vm: &mut Vm) {
 
     for (name, func) in methods {
         vm.set_property(atomics_obj, name, func);
-        vm.non_enumerable_props.insert((atomics_obj, name.to_string()));
+        vm.set_property_non_enumerable(atomics_obj, name.to_string());
     }
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_val = vm.alloc_string("Atomics".into());
         vm.set_symbol_property(atomics_obj, sym_tag, tag_val);
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_writable_props.insert((atomics_obj, key_name.clone()));
-        vm.non_enumerable_props.insert((atomics_obj, key_name));
+        vm.set_property_non_writable(atomics_obj, key_name.clone());
+        vm.set_property_non_enumerable(atomics_obj, key_name);
     }
 
     vm.globals.insert("Atomics".to_string(), atomics_obj);

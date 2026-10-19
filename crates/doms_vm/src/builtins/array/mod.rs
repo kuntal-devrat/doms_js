@@ -25,16 +25,16 @@ pub(super) fn register_array_builtins(vm: &mut Vm) {
         "with", "entries", "keys", "values", "constructor", "toString", "toLocaleString",
     ];
     for m in proto_methods {
-        vm.non_enumerable_props.insert((array_proto, m.to_string()));
+        vm.set_property_non_enumerable(array_proto, m.to_string());
     }
 
     vm.set_property(array_constructor, "isArray", is_array_fn);
     vm.set_property(array_constructor, "prototype", array_proto);
     for s in ["isArray", "from", "of", "prototype"] {
-        vm.non_enumerable_props.insert((array_constructor, s.to_string()));
+        vm.set_property_non_enumerable(array_constructor, s.to_string());
     }
-    vm.non_writable_props.insert((array_constructor, "prototype".to_string()));
-    vm.non_configurable_props.insert((array_constructor, "prototype".to_string()));
+    vm.set_property_non_writable(array_constructor, "prototype".to_string());
+    vm.set_property_non_configurable(array_constructor, "prototype".to_string());
 
     add_species_getter(vm, array_constructor);
     vm.globals.insert("Array".to_string(), array_constructor);

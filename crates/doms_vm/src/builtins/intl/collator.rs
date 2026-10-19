@@ -40,7 +40,7 @@ pub(super) fn register_collator(vm: &mut Vm, intl_obj: JsValue) {
         Ok(JsValue::from_int32(cmp))
     });
     vm.set_property(collator_proto, "compare", coll_compare_fn);
-    vm.non_enumerable_props.insert((collator_proto, "compare".to_string()));
+    vm.set_property_non_enumerable(collator_proto, "compare".to_string());
 
     let coll_resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, this, _| {
         let opts = vm.alloc_object();
@@ -60,7 +60,7 @@ pub(super) fn register_collator(vm: &mut Vm, intl_obj: JsValue) {
         Ok(opts)
     });
     vm.set_property(collator_proto, "resolvedOptions", coll_resolved_opts);
-    vm.non_enumerable_props.insert((collator_proto, "resolvedOptions".to_string()));
+    vm.set_property_non_enumerable(collator_proto, "resolvedOptions".to_string());
 
     let supported_locales_fn3 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
         let loc = args.first().copied().unwrap_or(JsValue::undefined());
@@ -69,7 +69,7 @@ pub(super) fn register_collator(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(items))
     });
     vm.set_property(collator_ctor, "supportedLocalesOf", supported_locales_fn3);
-    vm.non_enumerable_props.insert((collator_ctor, "supportedLocalesOf".to_string()));
+    vm.set_property_non_enumerable(collator_ctor, "supportedLocalesOf".to_string());
 
     setup_prototype_and_constructor(vm, collator_ctor, collator_proto, "Intl.Collator", "Collator", intl_obj);
 

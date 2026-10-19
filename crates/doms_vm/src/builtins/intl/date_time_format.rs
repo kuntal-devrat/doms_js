@@ -34,7 +34,7 @@ pub(super) fn register_date_time_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_string(s))
     });
     vm.set_property(date_format_proto, "format", df_format_fn);
-    vm.non_enumerable_props.insert((date_format_proto, "format".to_string()));
+    vm.set_property_non_enumerable(date_format_proto, "format".to_string());
 
     let df_resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, this, _| {
         let opts = vm.alloc_object();
@@ -50,7 +50,7 @@ pub(super) fn register_date_time_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(opts)
     });
     vm.set_property(date_format_proto, "resolvedOptions", df_resolved_opts);
-    vm.non_enumerable_props.insert((date_format_proto, "resolvedOptions".to_string()));
+    vm.set_property_non_enumerable(date_format_proto, "resolvedOptions".to_string());
 
     let supported_locales_fn2 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
         let loc = args.first().copied().unwrap_or(JsValue::undefined());
@@ -59,7 +59,7 @@ pub(super) fn register_date_time_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(items))
     });
     vm.set_property(date_format_ctor, "supportedLocalesOf", supported_locales_fn2);
-    vm.non_enumerable_props.insert((date_format_ctor, "supportedLocalesOf".to_string()));
+    vm.set_property_non_enumerable(date_format_ctor, "supportedLocalesOf".to_string());
 
     setup_prototype_and_constructor(vm, date_format_ctor, date_format_proto, "Intl.DateTimeFormat", "DateTimeFormat", intl_obj);
 

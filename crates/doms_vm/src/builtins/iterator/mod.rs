@@ -72,14 +72,14 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
         Err(VmError::TypeError("%ArrayIteratorPrototype%.next called on incompatible receiver".into()))
     });
     vm.set_property(array_iter_proto, "next", array_iter_next);
-    vm.non_enumerable_props.insert((array_iter_proto, "next".to_string()));
+    vm.set_property_non_enumerable(array_iter_proto, "next".to_string());
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_str = vm.alloc_string("Array Iterator".into());
         vm.set_symbol_property(array_iter_proto, sym_tag, tag_str);
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_enumerable_props.insert((array_iter_proto, key_name.clone()));
-        vm.non_writable_props.insert((array_iter_proto, key_name));
+        vm.set_property_non_enumerable(array_iter_proto, key_name.clone());
+        vm.set_property_non_writable(array_iter_proto, key_name);
     }
 
     // 5. %MapIteratorPrototype%
@@ -115,14 +115,14 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
         Err(VmError::TypeError("%MapIteratorPrototype%.next called on incompatible receiver".into()))
     });
     vm.set_property(map_iter_proto, "next", map_iter_next);
-    vm.non_enumerable_props.insert((map_iter_proto, "next".to_string()));
+    vm.set_property_non_enumerable(map_iter_proto, "next".to_string());
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_str = vm.alloc_string("Map Iterator".into());
         vm.set_symbol_property(map_iter_proto, sym_tag, tag_str);
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_enumerable_props.insert((map_iter_proto, key_name.clone()));
-        vm.non_writable_props.insert((map_iter_proto, key_name));
+        vm.set_property_non_enumerable(map_iter_proto, key_name.clone());
+        vm.set_property_non_writable(map_iter_proto, key_name);
     }
 
     // 6. %SetIteratorPrototype%
@@ -157,14 +157,14 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
         Err(VmError::TypeError("%SetIteratorPrototype%.next called on incompatible receiver".into()))
     });
     vm.set_property(set_iter_proto, "next", set_iter_next);
-    vm.non_enumerable_props.insert((set_iter_proto, "next".to_string()));
+    vm.set_property_non_enumerable(set_iter_proto, "next".to_string());
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_str = vm.alloc_string("Set Iterator".into());
         vm.set_symbol_property(set_iter_proto, sym_tag, tag_str);
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_enumerable_props.insert((set_iter_proto, key_name.clone()));
-        vm.non_writable_props.insert((set_iter_proto, key_name));
+        vm.set_property_non_enumerable(set_iter_proto, key_name.clone());
+        vm.set_property_non_writable(set_iter_proto, key_name);
     }
 
     // 7. %StringIteratorPrototype%
@@ -191,14 +191,14 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
         Err(VmError::TypeError("%StringIteratorPrototype%.next called on incompatible receiver".into()))
     });
     vm.set_property(string_iter_proto, "next", string_iter_next);
-    vm.non_enumerable_props.insert((string_iter_proto, "next".to_string()));
+    vm.set_property_non_enumerable(string_iter_proto, "next".to_string());
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_str = vm.alloc_string("String Iterator".into());
         vm.set_symbol_property(string_iter_proto, sym_tag, tag_str);
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_enumerable_props.insert((string_iter_proto, key_name.clone()));
-        vm.non_writable_props.insert((string_iter_proto, key_name));
+        vm.set_property_non_enumerable(string_iter_proto, key_name.clone());
+        vm.set_property_non_writable(string_iter_proto, key_name);
     }
 
     // 8. %GeneratorPrototype%
@@ -208,8 +208,8 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
         let tag_str = vm.alloc_string("Generator".into());
         vm.set_symbol_property(gen_proto, sym_tag, tag_str);
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_enumerable_props.insert((gen_proto, key_name.clone()));
-        vm.non_writable_props.insert((gen_proto, key_name));
+        vm.set_property_non_enumerable(gen_proto, key_name.clone());
+        vm.set_property_non_writable(gen_proto, key_name);
     }
 
     // 9. Iterator Constructor
@@ -227,9 +227,9 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
 
     // Iterator.prototype
     vm.set_property(iter_ctor, "prototype", iter_proto);
-    vm.non_enumerable_props.insert((iter_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((iter_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((iter_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(iter_ctor, "prototype".to_string());
+    vm.set_property_non_writable(iter_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(iter_ctor, "prototype".to_string());
 
     // Register prototype methods on iter_proto
     register_iterator_prototype_methods(vm, iter_proto, iter_ctor);
@@ -240,26 +240,26 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
         iterator_from(vm, o)
     });
     vm.set_property(iter_ctor, "from", from_fn);
-    vm.non_enumerable_props.insert((iter_ctor, "from".to_string()));
+    vm.set_property_non_enumerable(iter_ctor, "from".to_string());
 
     // Static method: Iterator.concat
     let concat_fn = vm.alloc_native_function("concat", 0, |vm, _this, args| {
         iterator_concat(vm, args)
     });
     vm.set_property(iter_ctor, "concat", concat_fn);
-    vm.non_enumerable_props.insert((iter_ctor, "concat".to_string()));
+    vm.set_property_non_enumerable(iter_ctor, "concat".to_string());
 
     // Static method: Iterator.zip
     let zip_fn = vm.alloc_native_function("zip", 1, |vm, _this, args| {
         iterator_zip(vm, args)
     });
     vm.set_property(iter_ctor, "zip", zip_fn);
-    vm.non_enumerable_props.insert((iter_ctor, "zip".to_string()));
+    vm.set_property_non_enumerable(iter_ctor, "zip".to_string());
 
     // Global binding: Iterator
     vm.globals.insert("Iterator".to_string(), iter_ctor);
     if vm.global_object.is_object() {
         vm.set_property(vm.global_object, "Iterator", iter_ctor);
-        vm.non_enumerable_props.insert((vm.global_object, "Iterator".to_string()));
+        vm.set_property_non_enumerable(vm.global_object, "Iterator".to_string());
     }
 }

@@ -12,7 +12,7 @@ pub(super) fn get_enumerable_keys(vm: &Vm, arg: JsValue) -> Vec<String> {
                 for i in 0..elements.len() {
                     if !elements[i].is_hole() {
                         let k = i.to_string();
-                        if !vm.non_enumerable_props.contains(&(arg, k.clone())) && !raw_names.contains(&k) {
+                        if vm.is_own_property_enumerable(arg, &k) && !raw_names.contains(&k) {
                             raw_names.push(k);
                         }
                     }
@@ -21,7 +21,7 @@ pub(super) fn get_enumerable_keys(vm: &Vm, arg: JsValue) -> Vec<String> {
             ObjectKind::String(s) | ObjectKind::StringObject(s) => {
                 for i in 0..s.chars().count() {
                     let k = i.to_string();
-                    if !vm.non_enumerable_props.contains(&(arg, k.clone())) && !raw_names.contains(&k) {
+                    if !raw_names.contains(&k) {
                         raw_names.push(k);
                     }
                 }
@@ -29,7 +29,7 @@ pub(super) fn get_enumerable_keys(vm: &Vm, arg: JsValue) -> Vec<String> {
             ObjectKind::TypedArray(ta) => {
                 for i in 0..ta.length {
                     let k = i.to_string();
-                    if !vm.non_enumerable_props.contains(&(arg, k.clone())) && !raw_names.contains(&k) {
+                    if !raw_names.contains(&k) {
                         raw_names.push(k);
                     }
                 }
@@ -37,14 +37,14 @@ pub(super) fn get_enumerable_keys(vm: &Vm, arg: JsValue) -> Vec<String> {
             _ => {}
         }
         if let Some(accs) = &obj.accessors {
-            for k in accs.keys() {
-                if !vm.non_enumerable_props.contains(&(arg, k.clone())) && !raw_names.contains(k) {
+            for (k, acc) in accs.iter() {
+                if acc.enumerable && !raw_names.contains(k) {
                     raw_names.push(k.clone());
                 }
             }
         }
         for prop in vm.shapes.all_properties(obj.shape_id) {
-            if !vm.non_enumerable_props.contains(&(arg, prop.clone())) && !raw_names.contains(&prop) {
+            if vm.is_own_property_enumerable(arg, &prop) && !raw_names.contains(&prop) {
                 raw_names.push(prop);
             }
         }

@@ -149,7 +149,7 @@ pub(super) fn register_number_global(vm: &mut Vm) {
         ("toPrecision", num_to_precision),
     ] {
         vm.set_property(number_proto, m, f);
-        vm.non_enumerable_props.insert((number_proto, m.to_string()));
+        vm.set_property_non_enumerable(number_proto, m.to_string());
     }
 
     let num_ctor = vm.alloc_native_function("Number", 1, |vm, _this, args| {
@@ -166,11 +166,11 @@ pub(super) fn register_number_global(vm: &mut Vm) {
         }
     });
     vm.set_property(number_proto, "constructor", num_ctor);
-    vm.non_enumerable_props.insert((number_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(number_proto, "constructor".to_string());
     vm.set_property(num_ctor, "prototype", number_proto);
-    vm.non_enumerable_props.insert((num_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((num_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((num_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(num_ctor, "prototype".to_string());
+    vm.set_property_non_writable(num_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(num_ctor, "prototype".to_string());
 
     let num_constants: [(&str, f64); 8] = [
         ("NaN", f64::NAN),
@@ -184,9 +184,9 @@ pub(super) fn register_number_global(vm: &mut Vm) {
     ];
     for (name, val) in num_constants {
         vm.set_property(num_ctor, name, JsValue::from_double(val));
-        vm.non_writable_props.insert((num_ctor, name.to_string()));
-        vm.non_enumerable_props.insert((num_ctor, name.to_string()));
-        vm.non_configurable_props.insert((num_ctor, name.to_string()));
+        vm.set_property_non_writable(num_ctor, name.to_string());
+        vm.set_property_non_enumerable(num_ctor, name.to_string());
+        vm.set_property_non_configurable(num_ctor, name.to_string());
     }
     vm.globals.insert("Number".to_string(), num_ctor);
     if vm.global_object.is_object() {

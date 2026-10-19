@@ -111,12 +111,16 @@ pub fn register_builtins(vm: &mut Vm) {
     // Ensure all built-in properties on global_object are reflected and non-enumerable
     for (name, val) in &vm.globals.clone() {
         if vm.global_object.is_object() {
-            vm.set_property(vm.global_object, name, *val);
-            vm.non_enumerable_props.insert((vm.global_object, name.clone()));
-            if name == "undefined" || name == "NaN" || name == "Infinity" {
-                vm.non_configurable_props.insert((vm.global_object, name.clone()));
-                vm.non_writable_props.insert((vm.global_object, name.clone()));
-            }
+            let attrs = if name == "undefined" || name == "NaN" || name == "Infinity" {
+                crate::shape::PropertyAttributes {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                }
+            } else {
+                crate::shape::PropertyAttributes::BUILTIN
+            };
+            vm.define_builtin_property(vm.global_object, name, *val, attrs);
         }
     }
 
@@ -159,13 +163,18 @@ pub fn register_builtins(vm: &mut Vm) {
 
     for target in builtin_targets {
         if let Some(ptr) = target.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            for prop in vm.shapes.all_properties(obj.shape_id) {
-                vm.non_enumerable_props.insert((target, prop));
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            let props = vm.shapes.all_properties(obj.shape_id);
+            for prop in props {
+                if let Some(info) = vm.shapes.get_property_info(obj.shape_id, &prop) {
+                    let mut attrs = info.attributes;
+                    attrs.enumerable = false;
+                    obj.shape_id = vm.shapes.transition_redefine(obj.shape_id, &prop, attrs);
+                }
             }
-            if let Some(accs) = &obj.accessors {
-                for prop in accs.keys() {
-                    vm.non_enumerable_props.insert((target, prop.clone()));
+            if let Some(accs) = &mut obj.accessors {
+                for acc in accs.values_mut() {
+                    acc.enumerable = false;
                 }
             }
         }

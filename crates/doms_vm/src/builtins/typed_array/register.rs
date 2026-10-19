@@ -109,12 +109,12 @@ pub(crate) fn register_typed_arrays(vm: &mut Vm) {
 
     // Connect %TypedArray% <-> %TypedArray%.prototype
     vm.set_property(typed_array_ctor, "prototype", typed_array_proto);
-    vm.non_enumerable_props.insert((typed_array_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((typed_array_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((typed_array_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(typed_array_ctor, "prototype".to_string());
+    vm.set_property_non_writable(typed_array_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(typed_array_ctor, "prototype".to_string());
 
     vm.set_property(typed_array_proto, "constructor", typed_array_ctor);
-    vm.non_enumerable_props.insert((typed_array_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(typed_array_proto, "constructor".to_string());
 
     // 3. Register methods and getters on %TypedArray%.prototype
     methods::register_prototype_methods(vm, typed_array_proto);
@@ -123,9 +123,9 @@ pub(crate) fn register_typed_arrays(vm: &mut Vm) {
     let from_fn = vm.alloc_native_function("from", 1, typed_array_from);
     let of_fn = vm.alloc_native_function("of", 0, typed_array_of);
     vm.set_property(typed_array_ctor, "from", from_fn);
-    vm.non_enumerable_props.insert((typed_array_ctor, "from".to_string()));
+    vm.set_property_non_enumerable(typed_array_ctor, "from".to_string());
     vm.set_property(typed_array_ctor, "of", of_fn);
-    vm.non_enumerable_props.insert((typed_array_ctor, "of".to_string()));
+    vm.set_property_non_enumerable(typed_array_ctor, "of".to_string());
     helpers::add_species_getter(vm, typed_array_ctor);
 
     // 5. Register each concrete typed array constructor
@@ -164,22 +164,22 @@ pub(crate) fn register_typed_arrays(vm: &mut Vm) {
         }
 
         vm.set_property(ctor, "BYTES_PER_ELEMENT", JsValue::from_int32(bpe as i32));
-        vm.non_enumerable_props.insert((ctor, "BYTES_PER_ELEMENT".to_string()));
-        vm.non_writable_props.insert((ctor, "BYTES_PER_ELEMENT".to_string()));
-        vm.non_configurable_props.insert((ctor, "BYTES_PER_ELEMENT".to_string()));
+        vm.set_property_non_enumerable(ctor, "BYTES_PER_ELEMENT".to_string());
+        vm.set_property_non_writable(ctor, "BYTES_PER_ELEMENT".to_string());
+        vm.set_property_non_configurable(ctor, "BYTES_PER_ELEMENT".to_string());
 
         vm.set_property(proto, "BYTES_PER_ELEMENT", JsValue::from_int32(bpe as i32));
-        vm.non_enumerable_props.insert((proto, "BYTES_PER_ELEMENT".to_string()));
-        vm.non_writable_props.insert((proto, "BYTES_PER_ELEMENT".to_string()));
-        vm.non_configurable_props.insert((proto, "BYTES_PER_ELEMENT".to_string()));
+        vm.set_property_non_enumerable(proto, "BYTES_PER_ELEMENT".to_string());
+        vm.set_property_non_writable(proto, "BYTES_PER_ELEMENT".to_string());
+        vm.set_property_non_configurable(proto, "BYTES_PER_ELEMENT".to_string());
 
         vm.set_property(proto, "constructor", ctor);
-        vm.non_enumerable_props.insert((proto, "constructor".to_string()));
+        vm.set_property_non_enumerable(proto, "constructor".to_string());
 
         vm.set_property(ctor, "prototype", proto);
-        vm.non_enumerable_props.insert((ctor, "prototype".to_string()));
-        vm.non_writable_props.insert((ctor, "prototype".to_string()));
-        vm.non_configurable_props.insert((ctor, "prototype".to_string()));
+        vm.set_property_non_enumerable(ctor, "prototype".to_string());
+        vm.set_property_non_writable(ctor, "prototype".to_string());
+        vm.set_property_non_configurable(ctor, "prototype".to_string());
 
         vm.globals.insert(name.to_string(), ctor);
         if vm.global_object.is_object() {

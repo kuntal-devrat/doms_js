@@ -664,7 +664,7 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
         Err(VmError::TypeError("%IteratorHelperPrototype%.next called on incompatible receiver".into()))
     });
     vm.set_property(helper_proto, "next", next_fn);
-    vm.non_enumerable_props.insert((helper_proto, "next".to_string()));
+    vm.set_property_non_enumerable(helper_proto, "next".to_string());
 
     let return_fn = vm.alloc_native_function("return", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
@@ -716,14 +716,14 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
         Err(VmError::TypeError("%IteratorHelperPrototype%.return called on incompatible receiver".into()))
     });
     vm.set_property(helper_proto, "return", return_fn);
-    vm.non_enumerable_props.insert((helper_proto, "return".to_string()));
+    vm.set_property_non_enumerable(helper_proto, "return".to_string());
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_str = vm.alloc_string("Iterator Helper".into());
         vm.set_symbol_property(helper_proto, sym_tag, tag_str);
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_enumerable_props.insert((helper_proto, key_name.clone()));
-        vm.non_writable_props.insert((helper_proto, key_name));
+        vm.set_property_non_enumerable(helper_proto, key_name.clone());
+        vm.set_property_non_writable(helper_proto, key_name);
     }
 
     helper_proto

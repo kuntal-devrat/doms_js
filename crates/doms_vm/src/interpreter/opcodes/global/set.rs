@@ -208,7 +208,7 @@ impl Vm {
                             )?;
                             return Ok(None);
                         }
-                        if self.non_writable_props.contains(&(self.global_object, name.clone())) {
+                        if !self.is_own_property_writable(self.global_object, &name) {
                             let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
                             if is_strict {
                                 self.handle_exception_at_depth(

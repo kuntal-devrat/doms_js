@@ -154,15 +154,15 @@ pub(super) fn register_dataview(vm: &mut Vm) {
 
     // 2. DataView.prototype.constructor
     vm.set_property(dv_proto, "constructor", dv_ctor);
-    vm.non_enumerable_props.insert((dv_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(dv_proto, "constructor".to_string());
 
     // 3. DataView.prototype[Symbol.toStringTag]
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_val = vm.alloc_string("DataView".into());
         vm.set_symbol_property(dv_proto, sym_tag, tag_val);
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_writable_props.insert((dv_proto, key_name.clone()));
-        vm.non_enumerable_props.insert((dv_proto, key_name));
+        vm.set_property_non_writable(dv_proto, key_name.clone());
+        vm.set_property_non_enumerable(dv_proto, key_name);
     }
 
     // 4. Accessors: buffer, byteLength, byteOffset
@@ -218,9 +218,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         obj.define_accessor("byteLength".to_string(), Some(byte_length_getter), None);
         obj.define_accessor("byteOffset".to_string(), Some(byte_offset_getter), None);
     }
-    vm.non_enumerable_props.insert((dv_proto, "buffer".to_string()));
-    vm.non_enumerable_props.insert((dv_proto, "byteLength".to_string()));
-    vm.non_enumerable_props.insert((dv_proto, "byteOffset".to_string()));
+    vm.set_property_non_enumerable(dv_proto, "buffer".to_string());
+    vm.set_property_non_enumerable(dv_proto, "byteLength".to_string());
+    vm.set_property_non_enumerable(dv_proto, "byteOffset".to_string());
 
     // 5. Prototype methods
     let dv_get_i8 = vm.alloc_native_function("getInt8", 1, |vm, this, args| {
@@ -455,11 +455,11 @@ pub(super) fn register_dataview(vm: &mut Vm) {
 
     for (name, func) in methods {
         vm.set_property(dv_proto, name, func);
-        vm.non_enumerable_props.insert((dv_proto, name.to_string()));
+        vm.set_property_non_enumerable(dv_proto, name.to_string());
     }
 
     vm.set_property(dv_ctor, "prototype", dv_proto);
-    vm.non_enumerable_props.insert((dv_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(dv_ctor, "prototype".to_string());
     vm.globals.insert("DataView".to_string(), dv_ctor);
     if vm.global_object.is_object() {
         vm.set_property(vm.global_object, "DataView", dv_ctor);

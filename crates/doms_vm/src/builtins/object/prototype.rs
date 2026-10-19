@@ -92,7 +92,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
         }
     });
     vm.set_property(object_proto, "toLocaleString", to_locale_string_fn);
-    vm.non_enumerable_props.insert((object_proto, "toLocaleString".to_string()));
+    vm.set_property_non_enumerable(object_proto, "toLocaleString".to_string());
 
     let proto_getter = vm.alloc_native_function("get __proto__", 0, |vm, this, _args| {
         if this.is_nullish() {
@@ -128,5 +128,5 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         obj.define_accessor("__proto__".to_string(), Some(proto_getter), Some(proto_setter));
     }
-    vm.non_enumerable_props.insert((object_proto, "__proto__".to_string()));
+    vm.set_property_non_enumerable(object_proto, "__proto__".to_string());
 }

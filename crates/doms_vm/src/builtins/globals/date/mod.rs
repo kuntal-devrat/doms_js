@@ -15,7 +15,7 @@ pub(super) fn register_date_global(vm: &mut Vm) {
     date_methods.extend(strings::create_string_methods(vm));
     for (name, fn_val) in date_methods {
         vm.set_property(date_proto, name, fn_val);
-        vm.non_enumerable_props.insert((date_proto, name.to_string()));
+        vm.set_property_non_enumerable(date_proto, name.to_string());
     }
 
     constructor::register_constructor_and_statics(vm, date_proto);

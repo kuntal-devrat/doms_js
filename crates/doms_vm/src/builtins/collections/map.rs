@@ -166,28 +166,28 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
     });
 
     vm.set_property(map_proto, "get", map_get);
-    vm.non_enumerable_props.insert((map_proto, "get".to_string()));
+    vm.set_property_non_enumerable(map_proto, "get".to_string());
     vm.set_property(map_proto, "set", map_set);
-    vm.non_enumerable_props.insert((map_proto, "set".to_string()));
+    vm.set_property_non_enumerable(map_proto, "set".to_string());
     vm.set_property(map_proto, "has", map_has);
-    vm.non_enumerable_props.insert((map_proto, "has".to_string()));
+    vm.set_property_non_enumerable(map_proto, "has".to_string());
     vm.set_property(map_proto, "delete", map_delete);
-    vm.non_enumerable_props.insert((map_proto, "delete".to_string()));
+    vm.set_property_non_enumerable(map_proto, "delete".to_string());
     vm.set_property(map_proto, "clear", map_clear);
-    vm.non_enumerable_props.insert((map_proto, "clear".to_string()));
+    vm.set_property_non_enumerable(map_proto, "clear".to_string());
     vm.set_property(map_proto, "forEach", map_for_each);
-    vm.non_enumerable_props.insert((map_proto, "forEach".to_string()));
+    vm.set_property_non_enumerable(map_proto, "forEach".to_string());
     vm.set_property(map_proto, "entries", map_entries);
-    vm.non_enumerable_props.insert((map_proto, "entries".to_string()));
+    vm.set_property_non_enumerable(map_proto, "entries".to_string());
     vm.set_property(map_proto, "keys", map_keys);
-    vm.non_enumerable_props.insert((map_proto, "keys".to_string()));
+    vm.set_property_non_enumerable(map_proto, "keys".to_string());
     vm.set_property(map_proto, "values", map_values);
-    vm.non_enumerable_props.insert((map_proto, "values".to_string()));
+    vm.set_property_non_enumerable(map_proto, "values".to_string());
     if let Some(ptr) = map_proto.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         obj.define_getter("size".to_string(), map_size_getter);
     }
-    vm.non_enumerable_props.insert((map_proto, "size".to_string()));
+    vm.set_property_non_enumerable(map_proto, "size".to_string());
     if let Some(sym_iter) = vm.symbol_iterator {
         vm.set_symbol_property(map_proto, sym_iter, map_entries);
     }
@@ -297,11 +297,11 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
     });
     vm.set_property(map_ctor, "groupBy", map_group_by);
     vm.set_property(map_ctor, "prototype", map_proto);
-    vm.non_enumerable_props.insert((map_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((map_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((map_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(map_ctor, "prototype".to_string());
+    vm.set_property_non_writable(map_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(map_ctor, "prototype".to_string());
     vm.set_property(map_proto, "constructor", map_ctor);
-    vm.non_enumerable_props.insert((map_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(map_proto, "constructor".to_string());
     add_species_getter(vm, map_ctor);
     vm.globals.insert("Map".to_string(), map_ctor);
 

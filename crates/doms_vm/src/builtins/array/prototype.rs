@@ -8,8 +8,8 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
     let array_proto = vm.alloc_object();
     vm.array_proto = Some(array_proto);
     vm.set_property(array_proto, "length", JsValue::from_int32(0));
-    vm.non_enumerable_props.insert((array_proto, "length".to_string()));
-    vm.non_configurable_props.insert((array_proto, "length".to_string()));
+    vm.set_property_non_enumerable(array_proto, "length".to_string());
+    vm.set_property_non_configurable(array_proto, "length".to_string());
 
     let map_fn = vm.alloc_native_function("map", 1, |vm, this, args| {
         let cb = args.first().copied().unwrap_or(JsValue::undefined());

@@ -41,11 +41,11 @@ pub(super) fn register_symbol(vm: &mut Vm) {
         Ok(vm.alloc_symbol(desc))
     });
     vm.set_property(symbol_proto, "constructor", symbol_ctor);
-    vm.non_enumerable_props.insert((symbol_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(symbol_proto, "constructor".to_string());
     vm.set_property(symbol_ctor, "prototype", symbol_proto);
-    vm.non_enumerable_props.insert((symbol_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((symbol_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((symbol_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(symbol_ctor, "prototype".to_string());
+    vm.set_property_non_writable(symbol_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(symbol_ctor, "prototype".to_string());
 
     let symbol_for = vm.alloc_native_function("for", 1, |vm, _this, args| {
         let key = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();

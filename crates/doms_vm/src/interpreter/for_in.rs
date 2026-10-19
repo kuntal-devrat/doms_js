@@ -46,18 +46,19 @@ impl Vm {
                             continue;
                         }
                         let k = i.to_string();
-                        if !self.non_enumerable_props.contains(&(obj_val, k.clone()))
-                            && !visited.contains(&k)
-                        {
+                        if let Some(info) = self.shapes.get_property_info(obj.shape_id, &k) {
+                            if !info.attributes.enumerable {
+                                continue;
+                            }
+                        }
+                        if !visited.contains(&k) {
                             int_keys.push((i, k));
                         }
                     }
                 } else if let ObjectKind::String(ref s) | ObjectKind::StringObject(ref s) = obj.kind {
                     for (i, _) in s.chars().enumerate() {
                         let k = i.to_string();
-                        if !self.non_enumerable_props.contains(&(obj_val, k.clone()))
-                            && !visited.contains(&k)
-                        {
+                        if !visited.contains(&k) {
                             int_keys.push((i, k));
                         }
                     }
@@ -66,10 +67,7 @@ impl Vm {
                 // 2. Accessors
                 if let Some(accs) = &obj.accessors {
                     for (k, acc) in accs.iter() {
-                        if acc.enumerable
-                            && !self.non_enumerable_props.contains(&(obj_val, k.clone()))
-                            && !visited.contains(k)
-                        {
+                        if acc.enumerable && !visited.contains(k) {
                             if let Ok(idx) = k.parse::<usize>() {
                                 if idx.to_string() == *k {
                                     if !int_keys.iter().any(|(_, ik)| ik == k) {
@@ -87,10 +85,7 @@ impl Vm {
 
                 // 3. Properties from shape in insertion order
                 for (prop, _, attrs) in self.shapes.all_properties_with_attributes(obj.shape_id) {
-                    if attrs.enumerable
-                        && !self.non_enumerable_props.contains(&(obj_val, prop.clone()))
-                        && !visited.contains(&prop)
-                    {
+                    if attrs.enumerable && !visited.contains(&prop) {
                         if let Ok(idx) = prop.parse::<usize>() {
                             if idx.to_string() == prop {
                                 if !int_keys.iter().any(|(_, ik)| ik == &prop) {

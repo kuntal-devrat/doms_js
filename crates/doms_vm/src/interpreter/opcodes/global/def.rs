@@ -29,8 +29,16 @@ impl Vm {
                         }
                         self.globals.insert(name.clone(), JsValue::undefined());
                         if self.global_object.is_object() {
-                            self.set_property(self.global_object, &name, JsValue::undefined());
-                            self.non_configurable_props.insert((self.global_object, name.clone()));
+                            self.define_builtin_property(
+                                self.global_object,
+                                &name,
+                                JsValue::undefined(),
+                                crate::shape::PropertyAttributes {
+                                    writable: true,
+                                    enumerable: true,
+                                    configurable: false,
+                                },
+                            );
                         }
                     }
         Ok(None)

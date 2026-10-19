@@ -81,10 +81,10 @@ pub(super) fn register_object_builtins(vm: &mut Vm) {
         "assign", "groupBy", "prototype",
     ];
     for name in statics {
-        vm.non_enumerable_props.insert((object_constructor, name.to_string()));
+        vm.set_property_non_enumerable(object_constructor, name.to_string());
     }
-    vm.non_writable_props.insert((object_constructor, "prototype".to_string()));
-    vm.non_configurable_props.insert((object_constructor, "prototype".to_string()));
+    vm.set_property_non_writable(object_constructor, "prototype".to_string());
+    vm.set_property_non_configurable(object_constructor, "prototype".to_string());
 
     vm.globals.insert("Object".to_string(), object_constructor);
     if vm.global_object.is_object() {

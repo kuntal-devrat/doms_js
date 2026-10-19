@@ -98,13 +98,13 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
     });
 
     vm.set_property(wm_proto, "get", wm_get);
-    vm.non_enumerable_props.insert((wm_proto, "get".to_string()));
+    vm.set_property_non_enumerable(wm_proto, "get".to_string());
     vm.set_property(wm_proto, "set", wm_set);
-    vm.non_enumerable_props.insert((wm_proto, "set".to_string()));
+    vm.set_property_non_enumerable(wm_proto, "set".to_string());
     vm.set_property(wm_proto, "has", wm_has);
-    vm.non_enumerable_props.insert((wm_proto, "has".to_string()));
+    vm.set_property_non_enumerable(wm_proto, "has".to_string());
     vm.set_property(wm_proto, "delete", wm_delete);
-    vm.non_enumerable_props.insert((wm_proto, "delete".to_string()));
+    vm.set_property_non_enumerable(wm_proto, "delete".to_string());
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_str = vm.alloc_string("WeakMap".into());
         vm.set_symbol_property(wm_proto, sym_tag, tag_str);
@@ -171,11 +171,11 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
         Ok(res)
     });
     vm.set_property(weakmap_ctor, "prototype", wm_proto);
-    vm.non_enumerable_props.insert((weakmap_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((weakmap_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((weakmap_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(weakmap_ctor, "prototype".to_string());
+    vm.set_property_non_writable(weakmap_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(weakmap_ctor, "prototype".to_string());
     vm.set_property(wm_proto, "constructor", weakmap_ctor);
-    vm.non_enumerable_props.insert((wm_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(wm_proto, "constructor".to_string());
     vm.globals.insert("WeakMap".to_string(), weakmap_ctor);
 
     // WeakSet
@@ -231,11 +231,11 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
     });
 
     vm.set_property(ws_proto, "add", ws_add);
-    vm.non_enumerable_props.insert((ws_proto, "add".to_string()));
+    vm.set_property_non_enumerable(ws_proto, "add".to_string());
     vm.set_property(ws_proto, "has", ws_has);
-    vm.non_enumerable_props.insert((ws_proto, "has".to_string()));
+    vm.set_property_non_enumerable(ws_proto, "has".to_string());
     vm.set_property(ws_proto, "delete", ws_delete);
-    vm.non_enumerable_props.insert((ws_proto, "delete".to_string()));
+    vm.set_property_non_enumerable(ws_proto, "delete".to_string());
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_str = vm.alloc_string("WeakSet".into());
         vm.set_symbol_property(ws_proto, sym_tag, tag_str);
@@ -290,11 +290,11 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
         Ok(res)
     });
     vm.set_property(weakset_ctor, "prototype", ws_proto);
-    vm.non_enumerable_props.insert((weakset_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((weakset_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((weakset_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(weakset_ctor, "prototype".to_string());
+    vm.set_property_non_writable(weakset_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(weakset_ctor, "prototype".to_string());
     vm.set_property(ws_proto, "constructor", weakset_ctor);
-    vm.non_enumerable_props.insert((ws_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(ws_proto, "constructor".to_string());
     vm.globals.insert("WeakSet".to_string(), weakset_ctor);
 
 }

@@ -117,7 +117,7 @@ pub(super) fn register_display_names(vm: &mut Vm, intl_obj: JsValue) {
         }
     });
     vm.set_property(dn_proto, "of", dn_of_fn);
-    vm.non_enumerable_props.insert((dn_proto, "of".to_string()));
+    vm.set_property_non_enumerable(dn_proto, "of".to_string());
 
     let dn_resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, this, _| {
         let opts = vm.alloc_object();
@@ -137,7 +137,7 @@ pub(super) fn register_display_names(vm: &mut Vm, intl_obj: JsValue) {
         Ok(opts)
     });
     vm.set_property(dn_proto, "resolvedOptions", dn_resolved_opts);
-    vm.non_enumerable_props.insert((dn_proto, "resolvedOptions".to_string()));
+    vm.set_property_non_enumerable(dn_proto, "resolvedOptions".to_string());
 
     let supported_locales_fn7 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
         let loc = args.first().copied().unwrap_or(JsValue::undefined());
@@ -146,7 +146,7 @@ pub(super) fn register_display_names(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(items))
     });
     vm.set_property(dn_ctor, "supportedLocalesOf", supported_locales_fn7);
-    vm.non_enumerable_props.insert((dn_ctor, "supportedLocalesOf".to_string()));
+    vm.set_property_non_enumerable(dn_ctor, "supportedLocalesOf".to_string());
 
     setup_prototype_and_constructor(vm, dn_ctor, dn_proto, "Intl.DisplayNames", "DisplayNames", intl_obj);
 

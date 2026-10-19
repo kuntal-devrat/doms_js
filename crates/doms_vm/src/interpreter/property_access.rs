@@ -158,7 +158,7 @@ impl Vm {
             return Ok(false);
         }
 
-        if self.non_writable_props.contains(&(target, key.to_string())) {
+        if !self.is_own_property_writable(target, key) {
             return Ok(false);
         }
 
@@ -250,9 +250,6 @@ impl Vm {
                                 return Ok(false);
                             }
                         }
-                        if self.non_writable_props.contains(&(proto_val, key.to_string())) {
-                            return Ok(false);
-                        }
                         curr_proto = proto_obj.prototype;
                     } else {
                         break;
@@ -305,9 +302,6 @@ impl Vm {
             if key == "length" && !r_obj.is_array_length_writable() {
                 return Ok(false);
             }
-            if self.non_writable_props.contains(&(receiver, key.to_string())) {
-                return Ok(false);
-            }
             if !r_obj.is_extensible() && !self.shapes.has_property(r_obj.shape_id, key) {
                 return Ok(false);
             }
@@ -334,9 +328,6 @@ impl Vm {
                         return Ok(false);
                     }
                 }
-            }
-            if self.non_configurable_props.contains(&(target, key.to_string())) {
-                return Ok(false);
             }
             if let ObjectKind::StringObject(s) = &obj.kind {
                 if key == "length" || key.parse::<usize>().is_ok_and(|idx| idx < s.chars().count()) {
@@ -383,10 +374,6 @@ impl Vm {
         match key {
             PropertyKeyVal::String(s) => self.delete_property(target, s),
             PropertyKeyVal::Symbol(sym) => {
-                let key_name = format!("[Symbol:{:x}]", sym.raw_bits());
-                if self.non_configurable_props.contains(&(target, key_name)) {
-                    return Ok(false);
-                }
                 if let Some(ptr) = target.as_object_ptr() {
                     let obj = unsafe { &mut *(ptr as *mut JsObject) };
                     if let Some(syms) = &mut obj.symbol_properties {

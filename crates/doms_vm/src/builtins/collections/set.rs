@@ -510,14 +510,14 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
 
     for (name, func) in methods {
         vm.set_property(set_proto, name, func);
-        vm.non_enumerable_props.insert((set_proto, name.to_string()));
+        vm.set_property_non_enumerable(set_proto, name.to_string());
     }
 
     if let Some(ptr) = set_proto.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         obj.define_getter("size".to_string(), set_size_getter);
     }
-    vm.non_enumerable_props.insert((set_proto, "size".to_string()));
+    vm.set_property_non_enumerable(set_proto, "size".to_string());
 
     if let Some(sym_iter) = vm.symbol_iterator {
         vm.set_symbol_property(set_proto, sym_iter, set_values);
@@ -576,11 +576,11 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         Ok(res)
     });
     vm.set_property(set_ctor, "prototype", set_proto);
-    vm.non_enumerable_props.insert((set_ctor, "prototype".to_string()));
-    vm.non_writable_props.insert((set_ctor, "prototype".to_string()));
-    vm.non_configurable_props.insert((set_ctor, "prototype".to_string()));
+    vm.set_property_non_enumerable(set_ctor, "prototype".to_string());
+    vm.set_property_non_writable(set_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(set_ctor, "prototype".to_string());
     vm.set_property(set_proto, "constructor", set_ctor);
-    vm.non_enumerable_props.insert((set_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(set_proto, "constructor".to_string());
     add_species_getter(vm, set_ctor);
     vm.globals.insert("Set".to_string(), set_ctor);
     if vm.global_object.is_object() {

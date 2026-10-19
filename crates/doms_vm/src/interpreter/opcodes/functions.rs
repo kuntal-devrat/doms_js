@@ -238,10 +238,16 @@ impl Vm {
                         func.name = Some(name.clone());
                     }
                 }
-                self.set_own_property(cur_val, "name", cur_name);
-                self.non_enumerable_props.insert((cur_val, "name".to_string()));
-                self.non_writable_props.insert((cur_val, "name".to_string()));
-                self.non_configurable_props.remove(&(cur_val, "name".to_string()));
+                self.define_builtin_property(
+                    cur_val,
+                    "name",
+                    cur_name,
+                    crate::shape::PropertyAttributes {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
             }
             self.temp_roots.truncate(prev_temp);
         }

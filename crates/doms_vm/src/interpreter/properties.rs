@@ -68,12 +68,6 @@ impl Vm {
                 return;
             }
         }
-        if key == "length" && !self.is_array_length_writable(target) {
-            return;
-        }
-        if self.non_writable_props.contains(&(target, key.to_string())) {
-            return;
-        }
         if !self.is_extensible_object(target) {
             if let Some(ptr) = target.as_object_ptr() {
                 if !self.is_valid_heap_object(ptr) {
@@ -84,9 +78,6 @@ impl Vm {
                     return;
                 }
             }
-        }
-        if self.non_writable_props.contains(&(target, key.to_string())) {
-            return;
         }
         if let Some(ptr) = target.as_object_ptr() {
             if !self.is_valid_heap_object(ptr) {
@@ -315,7 +306,7 @@ impl Vm {
 
             // Check non-configurable: CreateDataProperty requires configurable: true.
             // If property is already non-configurable, redefining it as configurable fails.
-            if self.non_configurable_props.contains(&(target, key_string.clone())) {
+            if !self.is_own_property_configurable(target, key) {
                 return Err(VmError::TypeError(format!("Cannot redefine non-configurable property '{}'", key)));
             }
 
@@ -325,8 +316,6 @@ impl Vm {
             }
         }
 
-        self.non_writable_props.remove(&(target, key_string.clone()));
-        self.non_enumerable_props.remove(&(target, key_string.clone()));
         self.set_own_property(target, key, value);
         Ok(())
     }

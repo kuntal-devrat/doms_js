@@ -21,13 +21,9 @@ impl Vm {
 
         let len_val = JsValue::from_int32(length as i32);
         self.define_builtin_property(self.temp_roots[prev_temp], "length", len_val, fn_attrs);
-        self.non_enumerable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
-        self.non_writable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
 
         let name_val = self.alloc_string(name.to_string());
         self.define_builtin_property(self.temp_roots[prev_temp], "name", name_val, fn_attrs);
-        self.non_enumerable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
-        self.non_writable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
 
         let res = self.temp_roots[prev_temp];
         self.temp_roots.truncate(prev_temp);
@@ -52,13 +48,9 @@ impl Vm {
 
         let len_val = JsValue::from_int32(length as i32);
         self.define_builtin_property(self.temp_roots[prev_temp], "length", len_val, fn_attrs);
-        self.non_enumerable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
-        self.non_writable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
 
         let name_val = self.alloc_string(name.to_string());
         self.define_builtin_property(self.temp_roots[prev_temp], "name", name_val, fn_attrs);
-        self.non_enumerable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
-        self.non_writable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
 
         let res = self.temp_roots[prev_temp];
         self.temp_roots.truncate(prev_temp);
@@ -83,11 +75,9 @@ impl Vm {
 
         let len_val = JsValue::from_int32(len as i32);
         self.define_builtin_property(self.temp_roots[prev_temp], "length", len_val, fn_attrs);
-        self.non_enumerable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
 
         let name_val = self.alloc_string(name_str);
         self.define_builtin_property(self.temp_roots[prev_temp], "name", name_val, fn_attrs);
-        self.non_enumerable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
 
         let proto = self.alloc_object_old_gen();
         let current_fn_val = self.temp_roots[prev_temp];
@@ -101,7 +91,6 @@ impl Vm {
                 configurable: true,
             },
         );
-        self.non_enumerable_props.insert((proto, "constructor".to_string()));
 
         self.define_builtin_property(
             current_fn_val,
@@ -113,8 +102,6 @@ impl Vm {
                 configurable: false,
             },
         );
-        self.non_enumerable_props.insert((current_fn_val, "prototype".to_string()));
-        self.non_configurable_props.insert((current_fn_val, "prototype".to_string()));
         if let Some(p) = current_fn_val.as_object_ptr() {
             let jsobj = unsafe { &mut *(p as *mut JsObject) };
             if let ObjectKind::Function(ref mut f) = jsobj.kind {

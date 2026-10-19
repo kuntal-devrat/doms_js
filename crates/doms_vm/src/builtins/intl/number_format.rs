@@ -61,7 +61,7 @@ pub(super) fn register_number_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_string(s))
     });
     vm.set_property(num_format_proto, "format", nf_format_fn);
-    vm.non_enumerable_props.insert((num_format_proto, "format".to_string()));
+    vm.set_property_non_enumerable(num_format_proto, "format".to_string());
 
     let nf_format_to_parts_fn = vm.alloc_native_function("formatToParts", 1, |vm, this, args| {
         let format_fn = vm.get_property(this, "format");
@@ -75,7 +75,7 @@ pub(super) fn register_number_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(vec![part_obj]))
     });
     vm.set_property(num_format_proto, "formatToParts", nf_format_to_parts_fn);
-    vm.non_enumerable_props.insert((num_format_proto, "formatToParts".to_string()));
+    vm.set_property_non_enumerable(num_format_proto, "formatToParts".to_string());
 
     let nf_resolved_opts = vm.alloc_native_function("resolvedOptions", 0, |vm, this, _| {
         let opts = vm.alloc_object();
@@ -96,7 +96,7 @@ pub(super) fn register_number_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(opts)
     });
     vm.set_property(num_format_proto, "resolvedOptions", nf_resolved_opts);
-    vm.non_enumerable_props.insert((num_format_proto, "resolvedOptions".to_string()));
+    vm.set_property_non_enumerable(num_format_proto, "resolvedOptions".to_string());
 
     let supported_locales_fn = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
         let loc = args.first().copied().unwrap_or(JsValue::undefined());
@@ -105,7 +105,7 @@ pub(super) fn register_number_format(vm: &mut Vm, intl_obj: JsValue) {
         Ok(vm.alloc_array(items))
     });
     vm.set_property(num_format_ctor, "supportedLocalesOf", supported_locales_fn);
-    vm.non_enumerable_props.insert((num_format_ctor, "supportedLocalesOf".to_string()));
+    vm.set_property_non_enumerable(num_format_ctor, "supportedLocalesOf".to_string());
 
     setup_prototype_and_constructor(vm, num_format_ctor, num_format_proto, "Intl.NumberFormat", "NumberFormat", intl_obj);
 

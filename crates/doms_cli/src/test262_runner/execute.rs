@@ -117,9 +117,6 @@ impl Test262Runner {
             if let Some(tag_sym) = vm.symbol_to_string_tag {
                 let tag_val = vm.alloc_string("Module".to_string());
                 vm.set_symbol_property(m, tag_sym, tag_val);
-                vm.non_configurable_props.insert((m, "[Symbol.toStringTag]".to_string()));
-                vm.non_enumerable_props.insert((m, "[Symbol.toStringTag]".to_string()));
-                vm.non_writable_props.insert((m, "[Symbol.toStringTag]".to_string()));
             }
             vm.module_namespace_objects.insert(m);
             vm.prevent_extensions_object(m);

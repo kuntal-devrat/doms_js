@@ -27,9 +27,16 @@ impl Vm {
         let obj = JsObject::new_regexp(ShapeRegistry::ROOT_SHAPE_ID, proto, pattern, flags);
         let ptr = self.allocate_js_object(obj);
         let val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
-        self.set_property(val, "lastIndex", JsValue::from_int32(0));
-        self.non_enumerable_props.insert((val, "lastIndex".to_string()));
-        self.non_configurable_props.insert((val, "lastIndex".to_string()));
+        self.define_builtin_property(
+            val,
+            "lastIndex",
+            JsValue::from_int32(0),
+            crate::shape::PropertyAttributes {
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            },
+        );
         val
     }
     pub fn alloc_date(&mut self, proto: Option<JsValue>, time_ms: f64) -> JsValue {

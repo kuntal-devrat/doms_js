@@ -123,7 +123,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         obj.define_accessor("constructor".to_string(), Some(ctor_getter), Some(ctor_setter));
     }
-    vm.non_enumerable_props.insert((iter_proto, "constructor".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "constructor".to_string());
 
     // 2. [Symbol.toStringTag] accessor
     if let Some(sym_tag) = vm.symbol_to_string_tag {
@@ -139,7 +139,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
             obj.define_symbol_accessor(sym_tag, Some(tag_getter), Some(tag_setter));
         }
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.non_enumerable_props.insert((iter_proto, key_name));
+        vm.set_property_non_enumerable(iter_proto, key_name);
     }
 
     // 3. [Symbol.iterator]()
@@ -149,7 +149,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         });
         vm.set_symbol_property(iter_proto, sym_iter, iter_self_fn);
         let key_name = format!("[Symbol:{:x}]", sym_iter.raw_bits());
-        vm.non_enumerable_props.insert((iter_proto, key_name));
+        vm.set_property_non_enumerable(iter_proto, key_name);
     }
 
     // 4. toArray()
@@ -171,7 +171,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         Ok(vm.alloc_array(items))
     });
     vm.set_property(iter_proto, "toArray", to_array_fn);
-    vm.non_enumerable_props.insert((iter_proto, "toArray".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "toArray".to_string());
 
     // 5. forEach(fn)
     let for_each_fn = vm.alloc_native_function("forEach", 1, |vm, this, args| {
@@ -204,7 +204,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         Ok(JsValue::undefined())
     });
     vm.set_property(iter_proto, "forEach", for_each_fn);
-    vm.non_enumerable_props.insert((iter_proto, "forEach".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "forEach".to_string());
 
     // 6. some(predicate)
     let some_fn = vm.alloc_native_function("some", 1, |vm, this, args| {
@@ -244,7 +244,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         }
     });
     vm.set_property(iter_proto, "some", some_fn);
-    vm.non_enumerable_props.insert((iter_proto, "some".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "some".to_string());
 
     // 7. every(predicate)
     let every_fn = vm.alloc_native_function("every", 1, |vm, this, args| {
@@ -284,7 +284,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         }
     });
     vm.set_property(iter_proto, "every", every_fn);
-    vm.non_enumerable_props.insert((iter_proto, "every".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "every".to_string());
 
     // 8. find(predicate)
     let find_fn = vm.alloc_native_function("find", 1, |vm, this, args| {
@@ -324,7 +324,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         }
     });
     vm.set_property(iter_proto, "find", find_fn);
-    vm.non_enumerable_props.insert((iter_proto, "find".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "find".to_string());
 
     // 9. reduce(reducer [, initialValue])
     let reduce_fn = vm.alloc_native_function("reduce", 1, |vm, this, args| {
@@ -371,7 +371,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         }
     });
     vm.set_property(iter_proto, "reduce", reduce_fn);
-    vm.non_enumerable_props.insert((iter_proto, "reduce".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "reduce".to_string());
 
     // 10. map(mapper)
     let map_fn = vm.alloc_native_function("map", 1, |vm, this, args| {
@@ -386,7 +386,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         Ok(alloc_iterator_helper(vm, target, next_method, IteratorHelperKind::Map { mapper }))
     });
     vm.set_property(iter_proto, "map", map_fn);
-    vm.non_enumerable_props.insert((iter_proto, "map".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "map".to_string());
 
     // 11. filter(predicate)
     let filter_fn = vm.alloc_native_function("filter", 1, |vm, this, args| {
@@ -401,7 +401,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         Ok(alloc_iterator_helper(vm, target, next_method, IteratorHelperKind::Filter { predicate }))
     });
     vm.set_property(iter_proto, "filter", filter_fn);
-    vm.non_enumerable_props.insert((iter_proto, "filter".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "filter".to_string());
 
     // 12. take(limit)
     let take_fn = vm.alloc_native_function("take", 1, |vm, this, args| {
@@ -413,7 +413,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         Ok(alloc_iterator_helper(vm, target, next_method, IteratorHelperKind::Take { remaining: limit }))
     });
     vm.set_property(iter_proto, "take", take_fn);
-    vm.non_enumerable_props.insert((iter_proto, "take".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "take".to_string());
 
     // 13. drop(limit)
     let drop_fn = vm.alloc_native_function("drop", 1, |vm, this, args| {
@@ -425,7 +425,7 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         Ok(alloc_iterator_helper(vm, target, next_method, IteratorHelperKind::Drop { remaining: limit }))
     });
     vm.set_property(iter_proto, "drop", drop_fn);
-    vm.non_enumerable_props.insert((iter_proto, "drop".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "drop".to_string());
 
     // 14. flatMap(mapper)
     let flat_map_fn = vm.alloc_native_function("flatMap", 1, |vm, this, args| {
@@ -440,5 +440,5 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         Ok(alloc_iterator_helper(vm, target, next_method, IteratorHelperKind::FlatMap { mapper, inner_iter: None, inner_next: None }))
     });
     vm.set_property(iter_proto, "flatMap", flat_map_fn);
-    vm.non_enumerable_props.insert((iter_proto, "flatMap".to_string()));
+    vm.set_property_non_enumerable(iter_proto, "flatMap".to_string());
 }

@@ -526,7 +526,7 @@ pub(super) fn register_locale(vm: &mut Vm, intl_obj: JsValue) {
                 let obj = unsafe { &mut *(ptr as *mut JsObject) };
                 obj.define_getter($prop.to_string(), getter);
             }
-            vm.non_enumerable_props.insert((locale_proto, $prop.to_string()));
+            vm.set_property_non_enumerable(locale_proto, $prop.to_string());
         }};
     }
 
@@ -553,7 +553,7 @@ pub(super) fn register_locale(vm: &mut Vm, intl_obj: JsValue) {
         }
     });
     vm.set_property(locale_proto, "toString", loc_to_string_fn);
-    vm.non_enumerable_props.insert((locale_proto, "toString".to_string()));
+    vm.set_property_non_enumerable(locale_proto, "toString".to_string());
 
     let loc_maximize_fn = vm.alloc_native_function("maximize", 0, |vm, this, _| {
         if !this.is_object() {
@@ -583,7 +583,7 @@ pub(super) fn register_locale(vm: &mut Vm, intl_obj: JsValue) {
         vm.construct(loc_ctor, &[str_val])
     });
     vm.set_property(locale_proto, "maximize", loc_maximize_fn);
-    vm.non_enumerable_props.insert((locale_proto, "maximize".to_string()));
+    vm.set_property_non_enumerable(locale_proto, "maximize".to_string());
 
     let loc_minimize_fn = vm.alloc_native_function("minimize", 0, |vm, this, _| {
         if !this.is_object() {
@@ -608,7 +608,7 @@ pub(super) fn register_locale(vm: &mut Vm, intl_obj: JsValue) {
         vm.construct(loc_ctor, &[str_val])
     });
     vm.set_property(locale_proto, "minimize", loc_minimize_fn);
-    vm.non_enumerable_props.insert((locale_proto, "minimize".to_string()));
+    vm.set_property_non_enumerable(locale_proto, "minimize".to_string());
 
     setup_prototype_and_constructor(vm, locale_ctor, locale_proto, "Intl.Locale", "Locale", intl_obj);
 

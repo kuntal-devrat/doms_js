@@ -123,14 +123,17 @@ impl Vm {
             let val = self.temp_roots[args_start + i];
             self.set_own_property(self.temp_roots[args_obj_idx], &i.to_string(), val);
         }
-        self.set_own_property(self.temp_roots[args_obj_idx], "length", JsValue::from_int32(args_len as i32));
-        self.non_enumerable_props.insert((self.temp_roots[args_obj_idx], "length".to_string()));
+        self.define_builtin_property(
+            self.temp_roots[args_obj_idx],
+            "length",
+            JsValue::from_int32(args_len as i32),
+            crate::shape::PropertyAttributes::BUILTIN,
+        );
 
         if self.symbol_to_string_tag.is_some() {
             let tag_val = self.alloc_string("Arguments".to_string());
             if let Some(sym_tag) = self.symbol_to_string_tag {
                 self.set_symbol_property(self.temp_roots[args_obj_idx], sym_tag, tag_val);
-                self.non_enumerable_props.insert((self.temp_roots[args_obj_idx], "[Symbol.toStringTag]".to_string()));
             }
         }
         if let Some(arr_proto) = self.array_proto {
@@ -144,8 +147,12 @@ impl Vm {
 
         if !is_strict {
             let cur_callee = self.temp_roots[prev_temp];
-            self.set_own_property(self.temp_roots[args_obj_idx], "callee", cur_callee);
-            self.non_enumerable_props.insert((self.temp_roots[args_obj_idx], "callee".to_string()));
+            self.define_builtin_property(
+                self.temp_roots[args_obj_idx],
+                "callee",
+                cur_callee,
+                crate::shape::PropertyAttributes::BUILTIN,
+            );
         } else {
             let thrower = self.alloc_native_function("thrower", 0, |_vm, _this, _args| {
                 Err(VmError::TypeError("'arguments.callee' cannot be accessed in strict mode".into()))
@@ -155,9 +162,13 @@ impl Vm {
                 let obj = unsafe { &mut *(ptr as *mut JsObject) };
                 obj.define_getter("callee".into(), thrower);
                 obj.define_setter("callee".into(), thrower);
+                if let Some(accs) = &mut obj.accessors {
+                    if let Some(acc) = accs.get_mut("callee") {
+                        acc.enumerable = false;
+                        acc.configurable = false;
+                    }
+                }
             }
-            self.non_configurable_props.insert((cur_args, "callee".to_string()));
-            self.non_enumerable_props.insert((cur_args, "callee".to_string()));
         }
         let res = self.temp_roots[args_obj_idx];
         self.temp_roots.truncate(prev_temp);

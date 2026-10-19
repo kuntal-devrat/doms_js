@@ -154,15 +154,6 @@ impl Vm {
             mark_val(*val, &mut worklist, &mut live);
         }
         mark_val(self.global_object, &mut worklist, &mut live);
-        for (target, _) in &self.non_configurable_props {
-            mark_val(*target, &mut worklist, &mut live);
-        }
-        for (target, _) in &self.non_writable_props {
-            mark_val(*target, &mut worklist, &mut live);
-        }
-        for (target, _) in &self.non_enumerable_props {
-            mark_val(*target, &mut worklist, &mut live);
-        }
         for frame in &self.frames {
             if let Some(gv) = frame.gen_val {
                 mark_val(gv, &mut worklist, &mut live);
