@@ -1,17 +1,17 @@
 {
   "suite": "Official Test262",
   "total": 41204,
-  "passed": 26948,
-  "failed": 14256,
+  "passed": 26947,
+  "failed": 14257,
   "skipped": 18,
   "percentage": 65.40,
-  "elapsed_seconds": 10.70,
-  "timestamp": "1792381768-epoch",
+  "elapsed_seconds": 10.33,
+  "timestamp": "1792382959-epoch",
   "session": {
     "total": 1409,
-    "passed": 617,
-    "failed": 774,
-    "percentage": 43.79
+    "passed": 616,
+    "failed": 775,
+    "percentage": 43.72
   },
   "categories": {
     "annexB/built-ins": { "total": 241, "passed": 151, "failed": 90, "percentage": 62.66 },
@@ -136,7 +136,7 @@
     "staging/decorators": { "total": 3, "passed": 1, "failed": 2, "percentage": 33.33 },
     "staging/explicit-resource-management": { "total": 0, "passed": 0, "failed": 0, "percentage": 0.00 },
     "staging/set-methods": { "total": 3, "passed": 0, "failed": 3, "percentage": 0.00 },
-    "staging/sm": { "total": 1391, "passed": 617, "failed": 774, "percentage": 44.36 },
+    "staging/sm": { "total": 1391, "passed": 616, "failed": 775, "percentage": 44.28 },
     "staging/source-phase-imports": { "total": 0, "passed": 0, "failed": 0, "percentage": 0.00 },
     "staging/top-level-await": { "total": 1, "passed": 1, "failed": 0, "percentage": 100.00 }
   }

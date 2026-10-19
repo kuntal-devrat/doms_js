@@ -85,7 +85,9 @@ pub fn define_property_internal(
     // Array exotic behavior for "length" and array indices
     if let Some(ptr) = target.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
-        if let ObjectKind::Array(elements) = &mut obj.kind {
+        let is_length_writable = obj.is_array_length_writable();
+        let is_array = matches!(obj.kind, ObjectKind::Array(_));
+        if is_array {
             if let PropertyKeyVal::String(s) = &prop_key {
                 if s == "length" {
                     if has_get || has_set {
@@ -104,35 +106,47 @@ pub fn define_property_internal(
                         if (u32_len as f64) != num || num.is_nan() || num.is_sign_negative() {
                             return Err(VmError::RangeError("Invalid array length".into()));
                         }
-                        if vm.non_writable_props.contains(&(target, "length".to_string())) {
+                        if !is_length_writable {
                             return Err(VmError::TypeError("Cannot change length of array with non-writable length".into()));
                         }
                         let new_len = u32_len as usize;
-                        let old_len = elements.len();
-                        if new_len >= old_len {
-                            if new_len < 100_000 {
-                                elements.resize(new_len, JsValue::hole());
+                        let mut non_conf_conflict: Option<usize> = None;
+                        if let ObjectKind::Array(elements) = &mut obj.kind {
+                            let old_len = elements.len();
+                            if new_len >= old_len {
+                                if new_len < 100_000 {
+                                    elements.resize(new_len, JsValue::hole());
+                                } else {
+                                    vm.set_own_property(target, "length", JsValue::from_double(num));
+                                }
                             } else {
-                                vm.set_own_property(target, "length", JsValue::from_double(num));
-                            }
-                        } else {
-                            for i in (new_len..old_len).rev() {
-                                if vm.non_configurable_props.contains(&(target, i.to_string())) {
-                                    elements.truncate(i + 1);
-                                    if has_writ && !vm.get_property(desc, "writable").is_truthy() {
-                                        vm.non_writable_props.insert((target, "length".to_string()));
+                                for i in (new_len..old_len).rev() {
+                                    if vm.non_configurable_props.contains(&(target, i.to_string())) {
+                                        non_conf_conflict = Some(i);
+                                        break;
                                     }
-                                    return Err(VmError::TypeError("Cannot delete non-configurable array element".into()));
+                                }
+                                if let Some(i) = non_conf_conflict {
+                                    elements.truncate(i + 1);
+                                } else {
+                                    elements.truncate(new_len);
                                 }
                             }
-                            elements.truncate(new_len);
+                        }
+                        if non_conf_conflict.is_some() {
+                            if has_writ && !vm.get_property(desc, "writable").is_truthy() {
+                                obj.set_array_length_non_writable();
+                                vm.non_writable_props.insert((target, "length".to_string()));
+                            }
+                            return Err(VmError::TypeError("Cannot delete non-configurable array element".into()));
                         }
                     }
                     if has_writ {
                         let w = vm.get_property(desc, "writable").is_truthy();
                         if !w {
+                            obj.set_array_length_non_writable();
                             vm.non_writable_props.insert((target, "length".to_string()));
-                        } else if vm.non_writable_props.contains(&(target, "length".to_string())) {
+                        } else if !is_length_writable {
                             return Err(VmError::TypeError("Cannot make non-writable length writable".into()));
                         }
                     }
@@ -140,8 +154,12 @@ pub fn define_property_internal(
                 } else if let Ok(idx) = s.parse::<u32>() {
                     if idx.to_string() == *s {
                         let idx = idx as usize;
-                        let old_len = elements.len();
-                        if idx >= old_len && vm.non_writable_props.contains(&(target, "length".to_string())) {
+                        let old_len = if let ObjectKind::Array(elements) = &obj.kind {
+                            elements.len()
+                        } else {
+                            0
+                        };
+                        if idx >= old_len && !is_length_writable {
                             return Err(VmError::TypeError("Cannot add property to array with non-writable length".into()));
                         }
                     }
@@ -154,7 +172,7 @@ pub fn define_property_internal(
     let current_exists = !current.is_undefined();
 
     if !current_exists {
-        if vm.non_extensible_objects.contains(&target) {
+        if !vm.is_extensible_object(target) {
             return Err(VmError::TypeError(format!("Cannot define property {}, object is not extensible", key_name)));
         }
     } else {
@@ -218,13 +236,15 @@ pub fn define_property_internal(
                         syms.remove(&sym);
                     }
                     let accs = obj.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-                    let entry = accs.entry(sym).or_insert(Accessor { getter: None, setter: None });
+                    let entry = accs.entry(sym).or_insert_with(Accessor::default);
                     if has_get {
                         entry.getter = if get_val.is_undefined() { None } else { Some(get_val) };
                     }
                     if has_set {
                         entry.setter = if set_val.is_undefined() { None } else { Some(set_val) };
                     }
+                    if has_enum { entry.enumerable = enum_val; } else if !current_exists { entry.enumerable = false; }
+                    if has_conf { entry.configurable = conf_val; } else if !current_exists { entry.configurable = false; }
                     let order = obj.symbol_order.get_or_insert_with(Vec::new);
                     if !order.contains(&sym) {
                         order.push(sym);
@@ -249,48 +269,86 @@ pub fn define_property_internal(
                     let obj = unsafe { &mut *(ptr as *mut JsObject) };
                     let new_shape_id = vm.shapes.remove_property(obj.shape_id, prop_name);
                     obj.shape_id = new_shape_id;
+                    let accs = obj.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+                    let entry = accs.entry(prop_name.clone()).or_insert_with(Accessor::default);
                     if has_get {
-                        obj.define_getter(prop_name.clone(), get_val);
+                        entry.getter = if get_val.is_undefined() { None } else { Some(get_val) };
                     }
                     if has_set {
-                        obj.define_setter(prop_name.clone(), set_val);
+                        entry.setter = if set_val.is_undefined() { None } else { Some(set_val) };
+                    }
+                    if has_enum { entry.enumerable = enum_val; } else if !current_exists { entry.enumerable = false; }
+                    if has_conf { entry.configurable = conf_val; } else if !current_exists { entry.configurable = false; }
+                    let order = obj.accessor_order.get_or_insert_with(Vec::new);
+                    if !order.contains(prop_name) {
+                        order.push(prop_name.clone());
                     }
                 }
             } else {
-                if has_val || !current_exists {
-                    let val = if has_val { val_val } else { JsValue::undefined() };
-                    if let Some(ptr) = target.as_object_ptr() {
-                        let obj = unsafe { &mut *(ptr as *mut JsObject) };
-                        if let Some(accs) = &mut obj.accessors {
-                            accs.remove(prop_name);
-                        }
-                        if let Some(order) = &mut obj.accessor_order {
-                            order.retain(|k| k != prop_name);
-                        }
-                        if let ObjectKind::Array(elements) = &mut obj.kind {
-                            if let Ok(idx) = prop_name.parse::<u32>() {
-                                if idx.to_string() == *prop_name {
-                                    let idx = idx as usize;
-                                    if idx >= elements.len() {
-                                        if idx < 100_000 {
-                                            elements.resize(idx + 1, JsValue::hole());
-                                        } else {
-                                            vm.set_own_property(target, "length", JsValue::from_double((idx as f64) + 1.0));
-                                        }
+                let current_info = if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *const JsObject) };
+                    vm.shapes.get_property_info(obj.shape_id, prop_name)
+                } else {
+                    None
+                };
+                let attrs = crate::shape::PropertyAttributes {
+                    writable: if has_writ { writ_val } else if let Some(ref info) = current_info { info.attributes.writable } else { false },
+                    enumerable: if has_enum { enum_val } else if let Some(ref info) = current_info { info.attributes.enumerable } else { false },
+                    configurable: if has_conf { conf_val } else if let Some(ref info) = current_info { info.attributes.configurable } else { false },
+                };
+                let val = if has_val {
+                    val_val
+                } else if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *const JsObject) };
+                    if let Some(ref info) = current_info {
+                        obj.get_slot(info.offset).unwrap_or(JsValue::undefined())
+                    } else {
+                        JsValue::undefined()
+                    }
+                } else {
+                    JsValue::undefined()
+                };
+
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let Some(accs) = &mut obj.accessors {
+                        accs.remove(prop_name);
+                    }
+                    if let Some(order) = &mut obj.accessor_order {
+                        order.retain(|k| k != prop_name);
+                    }
+                    if let ObjectKind::Array(elements) = &mut obj.kind {
+                        if let Ok(idx) = prop_name.parse::<u32>() {
+                            if idx.to_string() == *prop_name {
+                                let idx = idx as usize;
+                                if idx >= elements.len() {
+                                    if idx < 100_000 {
+                                        elements.resize(idx + 1, JsValue::hole());
+                                    } else {
+                                        vm.set_own_property(target, "length", JsValue::from_double((idx as f64) + 1.0));
                                     }
-                                    if idx < elements.len() {
-                                        elements[idx] = val;
-                                    }
+                                }
+                                if idx < elements.len() {
+                                    elements[idx] = val;
                                 }
                             }
                         }
                     }
-                    vm.set_own_property(target, prop_name, val);
-                    if target == vm.global_object {
-                        vm.globals.insert(prop_name.clone(), val);
+                    if let Some(offset) = vm.shapes.lookup_offset(obj.shape_id, prop_name) {
+                        let new_shape_id = vm.shapes.transition_redefine(obj.shape_id, prop_name, attrs);
+                        obj.shape_id = new_shape_id;
+                        obj.set_slot(offset, val);
+                    } else {
+                        let (new_shape_id, offset) = vm.shapes.transition_with_attributes(obj.shape_id, prop_name, attrs);
+                        obj.shape_id = new_shape_id;
+                        obj.set_slot(offset, val);
+                        obj.add_prop_order(prop_name.clone());
                     }
-                    vm.sync_mapped_arguments_write(target, prop_name, val);
                 }
+                if target == vm.global_object {
+                    vm.globals.insert(prop_name.clone(), val);
+                }
+                vm.sync_mapped_arguments_write(target, prop_name, val);
             }
         }
     }

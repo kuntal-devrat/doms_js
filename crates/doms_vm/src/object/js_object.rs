@@ -3,6 +3,8 @@
 use super::*;
 
 pub const IN_OBJECT_SLOTS: usize = 4;
+pub const OBJECT_FLAG_EXTENSIBLE: u8 = 1 << 0;
+pub const OBJECT_FLAG_ARRAY_LENGTH_NON_WRITABLE: u8 = 1 << 1;
 
 #[derive(Debug, Clone)]
 pub struct JsObject {
@@ -11,6 +13,7 @@ pub struct JsObject {
     pub in_object_slots: [JsValue; IN_OBJECT_SLOTS],
     pub extra_slots: Vec<JsValue>,
     pub kind: ObjectKind,
+    pub flags: u8,
     pub accessors: Option<Box<std::collections::HashMap<String, Accessor>>>,
     pub accessor_order: Option<Vec<String>>,
     pub prop_order: Option<Vec<String>>,
@@ -28,6 +31,7 @@ impl JsObject {
             in_object_slots: [JsValue::hole(); IN_OBJECT_SLOTS],
             extra_slots: Vec::new(),
             kind,
+            flags: OBJECT_FLAG_EXTENSIBLE,
             accessors: None,
             accessor_order: None,
             prop_order: None,
@@ -38,6 +42,31 @@ impl JsObject {
         }
     }
 
+    #[inline]
+    pub fn is_extensible(&self) -> bool {
+        (self.flags & OBJECT_FLAG_EXTENSIBLE) != 0
+    }
+
+    #[inline]
+    pub fn prevent_extensions(&mut self) {
+        self.flags &= !OBJECT_FLAG_EXTENSIBLE;
+    }
+
+    #[inline]
+    pub fn is_array_length_writable(&self) -> bool {
+        (self.flags & OBJECT_FLAG_ARRAY_LENGTH_NON_WRITABLE) == 0
+    }
+
+    #[inline]
+    pub fn set_array_length_non_writable(&mut self) {
+        self.flags |= OBJECT_FLAG_ARRAY_LENGTH_NON_WRITABLE;
+    }
+
+    #[inline]
+    pub fn set_array_length_writable(&mut self) {
+        self.flags &= !OBJECT_FLAG_ARRAY_LENGTH_NON_WRITABLE;
+    }
+
     pub fn insert_private_element(&mut self, name: String, val: JsValue) {
         let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         privs.insert(name, PrivateElement::Value(val));
@@ -45,19 +74,19 @@ impl JsObject {
 
     pub fn insert_private_getter(&mut self, name: String, getter: JsValue) {
         let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        let entry = privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor { getter: None, setter: None }));
+        let entry = privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor::default()));
         match entry {
             PrivateElement::Accessor(acc) => acc.getter = Some(getter),
-            PrivateElement::Value(_) => *entry = PrivateElement::Accessor(Accessor { getter: Some(getter), setter: None }),
+            PrivateElement::Value(_) => *entry = PrivateElement::Accessor(Accessor::with_getter(getter)),
         }
     }
 
     pub fn insert_private_setter(&mut self, name: String, setter: JsValue) {
         let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        let entry = privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor { getter: None, setter: None }));
+        let entry = privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor::default()));
         match entry {
             PrivateElement::Accessor(acc) => acc.setter = Some(setter),
-            PrivateElement::Value(_) => *entry = PrivateElement::Accessor(Accessor { getter: None, setter: Some(setter) }),
+            PrivateElement::Value(_) => *entry = PrivateElement::Accessor(Accessor::with_setter(setter)),
         }
     }
 
@@ -80,7 +109,7 @@ impl JsObject {
 
     pub fn insert_symbol_accessor_getter(&mut self, sym: JsValue, getter: JsValue) {
         let accs = self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        accs.entry(sym).or_insert(Accessor { getter: None, setter: None }).getter = Some(getter);
+        accs.entry(sym).or_default().getter = Some(getter);
         let order = self.symbol_order.get_or_insert_with(Vec::new);
         if !order.contains(&sym) {
             order.push(sym);
@@ -89,7 +118,7 @@ impl JsObject {
 
     pub fn insert_symbol_accessor_setter(&mut self, sym: JsValue, setter: JsValue) {
         let accs = self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        accs.entry(sym).or_insert(Accessor { getter: None, setter: None }).setter = Some(setter);
+        accs.entry(sym).or_default().setter = Some(setter);
         let order = self.symbol_order.get_or_insert_with(Vec::new);
         if !order.contains(&sym) {
             order.push(sym);

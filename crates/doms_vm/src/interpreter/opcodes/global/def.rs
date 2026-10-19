@@ -20,7 +20,7 @@ impl Vm {
                     }
                     self.var_names.insert(name.clone());
                     if !self.globals.contains_key(&name) {
-                        if self.non_extensible_objects.contains(&self.global_object) {
+                        if !self.is_extensible_object(self.global_object) {
                             self.handle_exception_at_depth(
                                 VmError::TypeError(format!("Cannot define property '{}' on non-extensible global object", name)),
                                 target_depth,

@@ -46,8 +46,7 @@ impl Vm {
                             continue;
                         }
                         let k = i.to_string();
-                        if !self.deleted_props.contains(&(obj_val, k.clone()))
-                            && !self.non_enumerable_props.contains(&(obj_val, k.clone()))
+                        if !self.non_enumerable_props.contains(&(obj_val, k.clone()))
                             && !visited.contains(&k)
                         {
                             int_keys.push((i, k));
@@ -66,8 +65,9 @@ impl Vm {
 
                 // 2. Accessors
                 if let Some(accs) = &obj.accessors {
-                    for k in accs.keys() {
-                        if !self.non_enumerable_props.contains(&(obj_val, k.clone()))
+                    for (k, acc) in accs.iter() {
+                        if acc.enumerable
+                            && !self.non_enumerable_props.contains(&(obj_val, k.clone()))
                             && !visited.contains(k)
                         {
                             if let Ok(idx) = k.parse::<usize>() {
@@ -86,9 +86,9 @@ impl Vm {
                 }
 
                 // 3. Properties from shape in insertion order
-                for prop in self.shapes.all_properties(obj.shape_id) {
-                    if !self.non_enumerable_props.contains(&(obj_val, prop.clone()))
-                        && !self.deleted_props.contains(&(obj_val, prop.clone()))
+                for (prop, _, attrs) in self.shapes.all_properties_with_attributes(obj.shape_id) {
+                    if attrs.enumerable
+                        && !self.non_enumerable_props.contains(&(obj_val, prop.clone()))
                         && !visited.contains(&prop)
                     {
                         if let Ok(idx) = prop.parse::<usize>() {

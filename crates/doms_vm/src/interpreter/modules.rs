@@ -35,7 +35,7 @@ impl Vm {
                 if self.global_lexicals.contains_key(name) {
                     return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
                 }
-                if self.non_extensible_objects.contains(&self.global_object) {
+                if !self.is_extensible_object(self.global_object) {
                     let has = if let Some(ptr) = self.global_object.as_object_ptr() {
                         let obj = unsafe { &*(ptr as *mut JsObject) };
                         self.shapes.has_property(obj.shape_id, name)
@@ -66,7 +66,7 @@ impl Vm {
                         return Err(VmError::TypeError(format!("Cannot declare global function '{}': existing property is non-configurable", name)));
                     }
                 }
-                if self.non_extensible_objects.contains(&self.global_object) {
+                if !self.is_extensible_object(self.global_object) {
                     let has = if let Some(ptr) = self.global_object.as_object_ptr() {
                         let obj = unsafe { &*(ptr as *mut JsObject) };
                         self.shapes.has_property(obj.shape_id, name)

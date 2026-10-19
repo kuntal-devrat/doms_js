@@ -38,13 +38,6 @@ pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<Propert
                     raw_names.push(i.to_string());
                 }
             }
-            ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => {
-                raw_names.push("length".to_string());
-                raw_names.push("name".to_string());
-                if matches!(&obj.kind, ObjectKind::Function(_)) {
-                    raw_names.push("prototype".to_string());
-                }
-            }
             _ => {}
         }
         if let Some(order) = &obj.prop_order {
@@ -71,7 +64,6 @@ pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<Propert
                 raw_names.push(re_name.clone());
             }
         }
-        raw_names.retain(|p| !vm.deleted_props.contains(&(target, p.clone())));
     }
     if vm.module_namespace_objects.contains(&target) {
         raw_names.sort();

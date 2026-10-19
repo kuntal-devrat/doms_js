@@ -119,11 +119,12 @@ impl Vm {
                 self.set_property(obj, &key, val);
                 return;
             }
+            let is_extensible = jsobj.is_extensible();
             if let ObjectKind::Array(elements) = &mut jsobj.kind {
                 if index < elements.len() {
                     elements[index] = val;
                     return;
-                } else if !self.non_extensible_objects.contains(&obj) {
+                } else if is_extensible {
                     if index == elements.len() {
                         elements.push(val);
                         return;

@@ -133,13 +133,26 @@ impl ShapeRegistry {
     /// Transition from `current_shape_id` by adding property `key`.
     /// Returns `(new_shape_id, property_offset)`.
     pub fn transition(&mut self, current_shape_id: ShapeId, key: &str) -> (ShapeId, u32) {
+        self.transition_with_attributes(current_shape_id, key, PropertyAttributes::default())
+    }
+
+    /// Transition from `current_shape_id` by adding property `key` with explicit attributes.
+    /// Returns `(new_shape_id, property_offset)`.
+    pub fn transition_with_attributes(
+        &mut self,
+        current_shape_id: ShapeId,
+        key: &str,
+        attributes: PropertyAttributes,
+    ) -> (ShapeId, u32) {
         if let Some(&existing_child_id) =
             self.shapes[current_shape_id as usize].transitions.get(key)
         {
-            if let ShapeTransition::Add { offset, .. } =
+            if let ShapeTransition::Add { offset, attributes: existing_attrs, .. } =
                 self.shapes[existing_child_id as usize].transition
             {
-                return (existing_child_id, offset);
+                if existing_attrs == attributes {
+                    return (existing_child_id, offset);
+                }
             }
         }
 
@@ -152,7 +165,7 @@ impl ShapeRegistry {
             transition: ShapeTransition::Add {
                 key: key.to_string(),
                 offset,
-                attributes: PropertyAttributes::default(),
+                attributes,
             },
             next_offset: offset + 1,
             num_properties: parent.num_properties + 1,
@@ -166,6 +179,34 @@ impl ShapeRegistry {
             .insert(key.to_string(), new_id);
 
         (new_id, offset)
+    }
+
+    /// Redefine attributes on an existing property, returning the new shape ID.
+    pub fn transition_redefine(
+        &mut self,
+        current_shape_id: ShapeId,
+        key: &str,
+        attributes: PropertyAttributes,
+    ) -> ShapeId {
+        let parent = &self.shapes[current_shape_id as usize];
+        let offset = self.lookup_offset(current_shape_id, key).unwrap_or(parent.next_offset);
+        let new_id = self.shapes.len() as ShapeId;
+        let new_shape = Shape {
+            id: new_id,
+            parent: Some(current_shape_id),
+            transition: ShapeTransition::Add {
+                key: key.to_string(),
+                offset,
+                attributes,
+            },
+            next_offset: parent.next_offset,
+            num_properties: parent.num_properties,
+            transitions: HashMap::new(),
+            delete_transitions: HashMap::new(),
+        };
+
+        self.shapes.push(new_shape);
+        new_id
     }
 
     /// Check if shape has a property.
@@ -224,9 +265,54 @@ impl ShapeRegistry {
         entries
     }
 
+    /// Return all property (key, offset, attributes) defined in this shape in insertion order.
+    pub fn all_properties_with_attributes(
+        &self,
+        mut shape_id: ShapeId,
+    ) -> Vec<(String, u32, PropertyAttributes)> {
+        let mut entries = Vec::new();
+        let mut seen = HashSet::new();
+        let mut deleted: Option<HashSet<String>> = None;
+
+        while let Some(shape) = self.shapes.get(shape_id as usize) {
+            match &shape.transition {
+                ShapeTransition::Add {
+                    key,
+                    offset,
+                    attributes,
+                } => {
+                    let is_deleted = deleted.as_ref().map(|d| d.contains(key)).unwrap_or(false);
+                    if !is_deleted && seen.insert(key.clone()) {
+                        entries.push((key.clone(), *offset, *attributes));
+                    }
+                }
+                ShapeTransition::Remove { key } => {
+                    deleted.get_or_insert_with(HashSet::new).insert(key.clone());
+                }
+                ShapeTransition::Root => break,
+            }
+            match shape.parent {
+                Some(p) => shape_id = p,
+                None => break,
+            }
+        }
+
+        entries.reverse();
+        entries
+    }
+
     /// Return all property names defined in this shape in insertion order.
     pub fn all_properties(&self, shape_id: ShapeId) -> Vec<String> {
         self.all_property_entries(shape_id).into_iter().map(|(k, _)| k).collect()
+    }
+
+    /// Return all enumerable property names defined in this shape in insertion order.
+    pub fn enumerable_properties(&self, shape_id: ShapeId) -> Vec<String> {
+        self.all_properties_with_attributes(shape_id)
+            .into_iter()
+            .filter(|(_, _, attrs)| attrs.enumerable)
+            .map(|(k, _, _)| k)
+            .collect()
     }
 
     /// Remove a property from a shape, returning a new shape ID without the property.

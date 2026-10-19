@@ -46,7 +46,6 @@ impl Vm {
     }
 
     pub fn set_property_direct(&mut self, target: JsValue, key: &str, value: JsValue) {
-        self.deleted_props.remove(&(target, key.to_string()));
         if let Some(ptr) = target.as_object_ptr() {
             if !self.is_valid_heap_object(ptr) {
                 return;
@@ -64,11 +63,18 @@ impl Vm {
     }
 
     pub fn set_property(&mut self, target: JsValue, key: &str, value: JsValue) {
-        self.deleted_props.remove(&(target, key.to_string()));
+        if let Some(info) = self.get_own_property_info(target, key) {
+            if !info.attributes.writable {
+                return;
+            }
+        }
+        if key == "length" && !self.is_array_length_writable(target) {
+            return;
+        }
         if self.non_writable_props.contains(&(target, key.to_string())) {
             return;
         }
-        if self.non_extensible_objects.contains(&target) {
+        if !self.is_extensible_object(target) {
             if let Some(ptr) = target.as_object_ptr() {
                 if !self.is_valid_heap_object(ptr) {
                     return;
@@ -178,7 +184,6 @@ impl Vm {
     }
 
     pub fn set_own_property(&mut self, target: JsValue, key: &str, value: JsValue) {
-        self.deleted_props.remove(&(target, key.to_string()));
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
 
@@ -315,7 +320,7 @@ impl Vm {
             }
 
             // Check non-extensible
-            if self.non_extensible_objects.contains(&target) && !self.has_own_property(target, key) {
+            if !self.is_extensible_object(target) && !self.has_own_property(target, key) {
                 return Err(VmError::TypeError(format!("Cannot add property '{}' to non-extensible object", key)));
             }
         }

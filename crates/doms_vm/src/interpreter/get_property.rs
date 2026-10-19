@@ -238,29 +238,6 @@ impl Vm {
                 }
             }
 
-            // Special properties on Function / NativeFunction
-            if matches!(obj.kind, ObjectKind::Function(_) | ObjectKind::NativeFunction(_)) && !self.deleted_props.contains(&(target, key.to_string())) {
-                match key {
-                    "name" => {
-                        let name_str = match &obj.kind {
-                            ObjectKind::Function(f) => f.name.as_deref().unwrap_or(""),
-                            ObjectKind::NativeFunction(n) => &n.name,
-                            _ => "",
-                        };
-                        return self.alloc_string(name_str.to_string());
-                    }
-                    "length" => {
-                        let len = match &obj.kind {
-                            ObjectKind::Function(f) => f.params.iter().take_while(|p| !p.starts_with("...")).count(),
-                            ObjectKind::NativeFunction(n) => n.length as usize,
-                            _ => 0,
-                        };
-                        return JsValue::from_int32(len as i32);
-                    }
-                    _ => {}
-                }
-            }
-
             // Prototype chain lookup
             let mut curr_proto = obj.prototype;
             while let Some(proto_val) = curr_proto {

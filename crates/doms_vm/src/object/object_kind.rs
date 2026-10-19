@@ -133,10 +133,52 @@ pub enum SetIterationKind {
     KeyValue,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Accessor {
     pub getter: Option<JsValue>,
     pub setter: Option<JsValue>,
+    pub enumerable: bool,
+    pub configurable: bool,
+}
+
+impl Accessor {
+    pub fn new(getter: Option<JsValue>, setter: Option<JsValue>) -> Self {
+        Self {
+            getter,
+            setter,
+            enumerable: true,
+            configurable: true,
+        }
+    }
+
+    pub fn with_getter(getter: JsValue) -> Self {
+        Self {
+            getter: Some(getter),
+            setter: None,
+            enumerable: true,
+            configurable: true,
+        }
+    }
+
+    pub fn with_setter(setter: JsValue) -> Self {
+        Self {
+            getter: None,
+            setter: Some(setter),
+            enumerable: true,
+            configurable: true,
+        }
+    }
+}
+
+impl Default for Accessor {
+    fn default() -> Self {
+        Self {
+            getter: None,
+            setter: None,
+            enumerable: true,
+            configurable: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

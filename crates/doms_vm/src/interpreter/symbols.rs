@@ -235,7 +235,7 @@ impl Vm {
                 return Ok(false);
             }
             let has_sym = r_obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
-            if self.non_extensible_objects.contains(&receiver) && !has_sym {
+            if !r_obj.is_extensible() && !has_sym {
                 return Ok(false);
             }
             r_obj.insert_symbol_property(key, value);
@@ -281,9 +281,6 @@ impl Vm {
             return Ok(false);
         }
         if let PropertyKeyVal::String(s) = key {
-            if self.deleted_props.contains(&(target, s.clone())) {
-                return Ok(false);
-            }
             if self.module_reexports.contains_key(&(target, s.clone())) {
                 return Ok(true);
             }
@@ -348,9 +345,6 @@ impl Vm {
                 false
             }
             PropertyKeyVal::String(key) => {
-                if self.deleted_props.contains(&(target, key.clone())) {
-                    return false;
-                }
                 match &obj.kind {
                     ObjectKind::Generator(_) => {
                         if matches!(key.as_str(), "next" | "return" | "throw") {
@@ -375,11 +369,6 @@ impl Vm {
                     ObjectKind::TypedArray(ta) => {
                         if matches!(key.as_str(), "length" | "byteLength" | "byteOffset" | "buffer")
                             || key.parse::<usize>().map(|idx| idx < ta.length).unwrap_or(false) {
-                            return true;
-                        }
-                    }
-                    ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => {
-                        if key == "length" || key == "name" || (matches!(&obj.kind, ObjectKind::Function(_)) && key == "prototype") {
                             return true;
                         }
                     }

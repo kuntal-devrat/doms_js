@@ -150,7 +150,7 @@ pub(super) fn register_eval(vm: &mut Vm) {
                         }
                     }
                 } else {
-                    let is_extensible = !vm.non_extensible_objects.contains(&vm.global_object);
+                    let is_extensible = vm.is_extensible_object(vm.global_object);
                     if !is_extensible {
                         for name in chunk.top_var_names.iter().chain(chunk.top_func_names.iter()) {
                             let has = if let Some(ptr) = vm.global_object.as_object_ptr() {

@@ -76,9 +76,6 @@ pub fn get_own_property_descriptor_internal(
                         return Ok(desc);
                     }
                 }
-                if vm.deleted_props.contains(&(target, prop_name.clone())) {
-                    return Ok(JsValue::undefined());
-                }
                 match &obj.kind {
                     ObjectKind::Array(elements) => {
                         if prop_name == "length" {
@@ -154,44 +151,9 @@ pub fn get_own_property_descriptor_internal(
                             }
                         }
                     }
-                    ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => {
-                        if prop_name == "length" {
-                            let len = match &obj.kind {
-                                ObjectKind::Function(f) => f.params.iter().take_while(|p| !p.starts_with("...")).count(),
-                                ObjectKind::NativeFunction(n) => n.length as usize,
-                                _ => 0,
-                            };
-                            let desc = vm.alloc_object();
-                            vm.set_property(desc, "value", JsValue::from_int32(len as i32));
-                            let is_writ = false;
-                            let is_enum = false;
-                            let is_conf = !vm.non_configurable_props.contains(&(target, prop_name.clone()));
-                            vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
-                            vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
-                            vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
-                            return Ok(desc);
-                        }
-                        if prop_name == "name" {
-                            let name_str = match &obj.kind {
-                                ObjectKind::Function(f) => f.name.as_deref().unwrap_or(""),
-                                ObjectKind::NativeFunction(n) => &n.name,
-                                _ => "",
-                            };
-                            let name_val = vm.alloc_string(name_str.to_string());
-                            let desc = vm.alloc_object();
-                            vm.set_property(desc, "value", name_val);
-                            let is_writ = false;
-                            let is_enum = false;
-                            let is_conf = !vm.non_configurable_props.contains(&(target, prop_name.clone()));
-                            vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
-                            vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
-                            vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
-                            return Ok(desc);
-                        }
-                    }
                     _ => {}
                 }
-                if vm.shapes.has_property(obj.shape_id, prop_name) {
+                if let Some(info) = vm.shapes.get_property_info(obj.shape_id, prop_name) {
                     let val = vm.get_property(target, prop_name);
                     if vm.module_namespace_objects.contains(&target) && val == JsValue::uninitialized() {
                         return Err(VmError::ReferenceError(format!("Cannot access uninitialized export '{}'", prop_name)));
@@ -201,17 +163,17 @@ pub fn get_own_property_descriptor_internal(
                     let is_writ = if vm.module_namespace_objects.contains(&target) {
                         true
                     } else {
-                        !vm.non_writable_props.contains(&(target, prop_name.clone()))
+                        info.attributes.writable && !vm.non_writable_props.contains(&(target, prop_name.clone()))
                     };
                     let is_enum = if vm.module_namespace_objects.contains(&target) {
                         true
                     } else {
-                        !vm.non_enumerable_props.contains(&(target, prop_name.clone()))
+                        info.attributes.enumerable && !vm.non_enumerable_props.contains(&(target, prop_name.clone()))
                     };
                     let is_conf = if vm.module_namespace_objects.contains(&target) {
                         false
                     } else {
-                        !vm.non_configurable_props.contains(&(target, prop_name.clone()))
+                        info.attributes.configurable && !vm.non_configurable_props.contains(&(target, prop_name.clone()))
                     };
                     vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
                     vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));

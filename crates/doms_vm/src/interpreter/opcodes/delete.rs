@@ -111,7 +111,6 @@ impl Vm {
                                     }
                                 } else {
                                     let _ = self.delete_property(scope_obj, &name);
-                                    self.deleted_props.insert((scope_obj, name.clone()));
                                     self.push(JsValue::from_boolean(true));
                                 }
                                 scope_found = true;

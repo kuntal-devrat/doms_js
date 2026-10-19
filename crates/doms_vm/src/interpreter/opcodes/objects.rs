@@ -88,15 +88,13 @@ impl Vm {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
                 let names = self.shapes.all_properties(obj.shape_id);
                 for name in names {
-                    if !self.deleted_props.contains(&(obj_val, name.clone())) {
-                        let val = self.get_property(obj_val, &name);
-                        if val == JsValue::uninitialized() {
-                            self.handle_exception_at_depth(
-                                VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
-                                target_depth,
-                            )?;
-                            return Ok(Some(JsValue::undefined()));
-                        }
+                    let val = self.get_property(obj_val, &name);
+                    if val == JsValue::uninitialized() {
+                        self.handle_exception_at_depth(
+                            VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                            target_depth,
+                        )?;
+                        return Ok(Some(JsValue::undefined()));
                     }
                 }
             }
@@ -633,7 +631,7 @@ impl Vm {
             match prop_key {
                 PropertyKeyVal::String(s) => {
                     let accs = obj.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-                    accs.entry(s).or_insert(Accessor { getter: None, setter: None }).getter = Some(getter_val);
+                    accs.entry(s).or_default().getter = Some(getter_val);
                 }
                 PropertyKeyVal::Symbol(sym) => {
                     obj.insert_symbol_accessor_getter(sym, getter_val);
@@ -665,7 +663,7 @@ impl Vm {
             match prop_key {
                 PropertyKeyVal::String(s) => {
                     let accs = obj.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-                    accs.entry(s).or_insert(Accessor { getter: None, setter: None }).setter = Some(setter_val);
+                    accs.entry(s).or_default().setter = Some(setter_val);
                 }
                 PropertyKeyVal::Symbol(sym) => {
                     obj.insert_symbol_accessor_setter(sym, setter_val);

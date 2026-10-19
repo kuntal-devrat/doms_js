@@ -306,6 +306,7 @@ impl Vm {
                             if idx >= 0 {
                                 if let Some(ptr) = obj.as_object_ptr() {
                                     let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                                    let is_extensible = jsobj.is_extensible();
                                     if let ObjectKind::Array(elements) = &mut jsobj.kind {
                                         let uidx = idx as usize;
                                         if uidx < elements.len() && !elements[uidx].is_hole() {
@@ -315,7 +316,7 @@ impl Vm {
                                             continue;
                                         } else if uidx == elements.len()
                                             && (jsobj.prototype.is_none() || jsobj.prototype == self.array_proto)
-                                            && (self.non_extensible_objects.is_empty() || !self.non_extensible_objects.contains(&obj))
+                                            && is_extensible
                                         {
                                             elements.push(val);
                                             self.stack[stack_len - 3] = val;

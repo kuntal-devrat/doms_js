@@ -52,7 +52,6 @@ pub struct Vm {
     pub non_configurable_props: HashSet<(JsValue, String)>,
     pub non_writable_props: HashSet<(JsValue, String)>,
     pub non_enumerable_props: HashSet<(JsValue, String)>,
-    pub non_extensible_objects: HashSet<JsValue>,
     pub var_names: HashSet<String>,
     pub script_var_names: HashSet<String>,
     pub in_eval: bool,
@@ -73,7 +72,6 @@ pub struct Vm {
     pub symbol_search: Option<JsValue>,
     pub symbol_split: Option<JsValue>,
     pub symbol_unscopables: Option<JsValue>,
-    pub deleted_props: HashSet<(JsValue, String)>,
     pub is_module: bool,
     pub base_dir: Option<std::path::PathBuf>,
     pub module_namespace_objects: HashSet<JsValue>,
@@ -149,7 +147,6 @@ impl Vm {
             non_configurable_props: HashSet::new(),
             non_writable_props: HashSet::new(),
             non_enumerable_props: HashSet::new(),
-            non_extensible_objects: HashSet::new(),
             var_names: HashSet::new(),
             script_var_names: HashSet::new(),
             in_eval: false,
@@ -170,7 +167,6 @@ impl Vm {
             symbol_search: None,
             symbol_split: None,
             symbol_unscopables: None,
-            deleted_props: HashSet::new(),
             is_module: false,
             base_dir: None,
             module_namespace_objects: HashSet::new(),
@@ -188,6 +184,160 @@ impl Vm {
         vm.globals.insert("globalThis".to_string(), global_obj);
         register_builtins(&mut vm);
         vm
+    }
+
+    #[inline]
+    pub fn is_extensible_object(&self, target: JsValue) -> bool {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &*(ptr as *const JsObject) };
+                return obj.is_extensible();
+            }
+        }
+        false
+    }
+
+    #[inline]
+    pub fn prevent_extensions_object(&mut self, target: JsValue) {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                obj.prevent_extensions();
+            }
+        }
+    }
+
+    #[inline]
+    pub fn is_array_length_writable(&self, target: JsValue) -> bool {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &*(ptr as *const JsObject) };
+                return obj.is_array_length_writable();
+            }
+        }
+        true
+    }
+
+    #[inline]
+    pub fn set_array_length_non_writable(&mut self, target: JsValue) {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                obj.set_array_length_non_writable();
+            }
+        }
+    }
+
+    #[inline]
+    pub fn set_array_length_writable(&mut self, target: JsValue) {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                obj.set_array_length_writable();
+            }
+        }
+    }
+
+    /// Look up property info (offset + attributes) on an object's shape.
+    #[inline]
+    pub fn get_own_property_info(&self, target: JsValue, key: &str) -> Option<crate::shape::PropertyInfo> {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &*(ptr as *const JsObject) };
+                return self.shapes.get_property_info(obj.shape_id, key);
+            }
+        }
+        None
+    }
+
+    /// Check if an own property is writable.
+    #[inline]
+    pub fn is_own_property_writable(&self, target: JsValue, key: &str) -> bool {
+        if let Some(info) = self.get_own_property_info(target, key) {
+            return info.attributes.writable;
+        }
+        true
+    }
+
+    /// Check if an own property is configurable.
+    #[inline]
+    pub fn is_own_property_configurable(&self, target: JsValue, key: &str) -> bool {
+        if let Some(info) = self.get_own_property_info(target, key) {
+            return info.attributes.configurable;
+        }
+        true
+    }
+
+    /// Check if an own property is enumerable.
+    #[inline]
+    pub fn is_own_property_enumerable(&self, target: JsValue, key: &str) -> bool {
+        if let Some(info) = self.get_own_property_info(target, key) {
+            return info.attributes.enumerable;
+        }
+        true
+    }
+
+    /// Define a builtin property with explicit ECMAScript PropertyAttributes.
+    pub fn define_builtin_property(
+        &mut self,
+        target: JsValue,
+        key: &str,
+        value: JsValue,
+        attributes: crate::shape::PropertyAttributes,
+    ) {
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
+                    let new_shape_id = self.shapes.transition_redefine(obj.shape_id, key, attributes);
+                    obj.shape_id = new_shape_id;
+                    obj.set_slot(offset, value);
+                } else {
+                    let (new_shape_id, offset) = self.shapes.transition_with_attributes(obj.shape_id, key, attributes);
+                    obj.shape_id = new_shape_id;
+                    obj.set_slot(offset, value);
+                    obj.add_prop_order(key.to_string());
+                }
+            }
+        }
+    }
+
+    /// Define a builtin method on a prototype or namespace: { writable: true, enumerable: false, configurable: true }.
+    pub fn define_builtin_method(
+        &mut self,
+        target: JsValue,
+        key: &str,
+        func: JsValue,
+    ) {
+        self.define_builtin_property(
+            target,
+            key,
+            func,
+            crate::shape::PropertyAttributes {
+                writable: true,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
+
+    /// Define a builtin constant (e.g. Math.PI): { writable: false, enumerable: false, configurable: false }.
+    pub fn define_builtin_constant(
+        &mut self,
+        target: JsValue,
+        key: &str,
+        value: JsValue,
+    ) {
+        self.define_builtin_property(
+            target,
+            key,
+            value,
+            crate::shape::PropertyAttributes {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        );
     }
 
     pub fn push(&mut self, val: JsValue) {

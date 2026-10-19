@@ -122,7 +122,7 @@ impl Test262Runner {
                 vm.non_writable_props.insert((m, "[Symbol.toStringTag]".to_string()));
             }
             vm.module_namespace_objects.insert(m);
-            vm.non_extensible_objects.insert(m);
+            vm.prevent_extensions_object(m);
             vm.current_module_obj = Some(m);
 
             let canonical_key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf())

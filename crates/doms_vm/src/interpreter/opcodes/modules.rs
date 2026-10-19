@@ -61,7 +61,6 @@ impl Vm {
                                         self.current_exports.remove(&name);
                                         if let Some(cur) = self.current_module_obj {
                                             self.non_configurable_props.remove(&(cur, name.clone()));
-                                            self.deleted_props.insert((cur, name.clone()));
                                             self.module_reexports.remove(&(cur, name.clone()));
                                             if let Some(cur_ptr) = cur.as_object_ptr() {
                                                 let cur_obj = unsafe { &mut *(cur_ptr as *mut JsObject) };
@@ -163,11 +162,11 @@ impl Vm {
                                         self.set_property_direct(m, &k, v);
                                         self.non_configurable_props.insert((m, k.clone()));
                                     }
-                                    self.non_extensible_objects.insert(m);
+                                    self.prevent_extensions_object(m);
                                 }
                             }
                         }
-                        self.non_extensible_objects.insert(m);
+                        self.prevent_extensions_object(m);
                         m
                     };
                     self.push(mod_obj);
@@ -248,11 +247,11 @@ impl Vm {
                                         self.set_property(m, &k, v);
                                         self.non_configurable_props.insert((m, k.clone()));
                                     }
-                                    self.non_extensible_objects.insert(m);
+                                    self.prevent_extensions_object(m);
                                 }
                             }
                         }
-                        self.non_extensible_objects.insert(m);
+                        self.prevent_extensions_object(m);
                         m
                     };
                     let promise_val = self.alloc_promise(PromiseState::Fulfilled, mod_obj);

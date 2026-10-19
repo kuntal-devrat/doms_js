@@ -13,13 +13,19 @@ impl Vm {
         let prev_temp = self.temp_roots.len();
         self.temp_roots.push(fn_val);
 
+        let fn_attrs = crate::shape::PropertyAttributes {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        };
+
         let len_val = JsValue::from_int32(length as i32);
-        self.set_own_property(self.temp_roots[prev_temp], "length", len_val);
+        self.define_builtin_property(self.temp_roots[prev_temp], "length", len_val, fn_attrs);
         self.non_enumerable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
         self.non_writable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
 
         let name_val = self.alloc_string(name.to_string());
-        self.set_own_property(self.temp_roots[prev_temp], "name", name_val);
+        self.define_builtin_property(self.temp_roots[prev_temp], "name", name_val, fn_attrs);
         self.non_enumerable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
         self.non_writable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
 
@@ -38,13 +44,19 @@ impl Vm {
         let prev_temp = self.temp_roots.len();
         self.temp_roots.push(fn_val);
 
+        let fn_attrs = crate::shape::PropertyAttributes {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        };
+
         let len_val = JsValue::from_int32(length as i32);
-        self.set_own_property(self.temp_roots[prev_temp], "length", len_val);
+        self.define_builtin_property(self.temp_roots[prev_temp], "length", len_val, fn_attrs);
         self.non_enumerable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
         self.non_writable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
 
         let name_val = self.alloc_string(name.to_string());
-        self.set_own_property(self.temp_roots[prev_temp], "name", name_val);
+        self.define_builtin_property(self.temp_roots[prev_temp], "name", name_val, fn_attrs);
         self.non_enumerable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
         self.non_writable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
 
@@ -63,19 +75,44 @@ impl Vm {
         let prev_temp = self.temp_roots.len();
         self.temp_roots.push(fn_val);
 
+        let fn_attrs = crate::shape::PropertyAttributes {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        };
+
         let len_val = JsValue::from_int32(len as i32);
-        self.set_own_property(self.temp_roots[prev_temp], "length", len_val);
+        self.define_builtin_property(self.temp_roots[prev_temp], "length", len_val, fn_attrs);
         self.non_enumerable_props.insert((self.temp_roots[prev_temp], "length".to_string()));
 
         let name_val = self.alloc_string(name_str);
-        self.set_own_property(self.temp_roots[prev_temp], "name", name_val);
+        self.define_builtin_property(self.temp_roots[prev_temp], "name", name_val, fn_attrs);
         self.non_enumerable_props.insert((self.temp_roots[prev_temp], "name".to_string()));
 
         let proto = self.alloc_object_old_gen();
         let current_fn_val = self.temp_roots[prev_temp];
-        self.set_own_property(proto, "constructor", current_fn_val);
+        self.define_builtin_property(
+            proto,
+            "constructor",
+            current_fn_val,
+            crate::shape::PropertyAttributes {
+                writable: true,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         self.non_enumerable_props.insert((proto, "constructor".to_string()));
-        self.set_own_property(current_fn_val, "prototype", proto);
+
+        self.define_builtin_property(
+            current_fn_val,
+            "prototype",
+            proto,
+            crate::shape::PropertyAttributes {
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            },
+        );
         self.non_enumerable_props.insert((current_fn_val, "prototype".to_string()));
         self.non_configurable_props.insert((current_fn_val, "prototype".to_string()));
         if let Some(p) = current_fn_val.as_object_ptr() {

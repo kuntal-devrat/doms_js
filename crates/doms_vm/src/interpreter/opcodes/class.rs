@@ -54,7 +54,9 @@ impl Vm {
                                     PropertyKeyVal::String(s) => {
                                         self.non_enumerable_props.insert((target, s.clone()));
                                         let accs = target_obj.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-                                        accs.entry(s).or_insert(Accessor { getter: None, setter: None }).getter = Some(func_val);
+                                        let acc = accs.entry(s).or_default();
+                                        acc.getter = Some(func_val);
+                                        acc.enumerable = false;
                                     }
                                     PropertyKeyVal::Symbol(sym) => {
                                         target_obj.insert_symbol_accessor_getter(sym, func_val);
@@ -66,7 +68,9 @@ impl Vm {
                                     PropertyKeyVal::String(s) => {
                                         self.non_enumerable_props.insert((target, s.clone()));
                                         let accs = target_obj.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-                                        accs.entry(s).or_insert(Accessor { getter: None, setter: None }).setter = Some(func_val);
+                                        let acc = accs.entry(s).or_default();
+                                        acc.setter = Some(func_val);
+                                        acc.enumerable = false;
                                     }
                                     PropertyKeyVal::Symbol(sym) => {
                                         target_obj.insert_symbol_accessor_setter(sym, func_val);

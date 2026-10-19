@@ -493,7 +493,7 @@ impl Vm {
             if current == proto {
                 return Ok(true);
             }
-            if self.non_extensible_objects.contains(&target) {
+            if !obj.is_extensible() {
                 return Ok(false);
             }
             // Check cycle
@@ -525,8 +525,9 @@ impl Vm {
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
                 return self.proxy_is_extensible(target);
             }
+            return Ok(obj.is_extensible());
         }
-        Ok(!self.non_extensible_objects.contains(&target))
+        Ok(false)
     }
 
     pub(crate) fn prevent_extensions_val(&mut self, target: JsValue) -> Result<bool, VmError> {
@@ -534,16 +535,17 @@ impl Vm {
             return Ok(false);
         }
         if let Some(ptr) = target.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
                 return self.proxy_prevent_extensions(target);
             }
-        }
-        if self.module_namespace_objects.contains(&target) {
+            if self.module_namespace_objects.contains(&target) {
+                return Ok(true);
+            }
+            obj.prevent_extensions();
             return Ok(true);
         }
-        self.non_extensible_objects.insert(target);
-        Ok(true)
+        Ok(false)
     }
 
     pub(crate) fn create_list_from_array_like(&mut self, array_like: JsValue) -> Result<Vec<JsValue>, VmError> {

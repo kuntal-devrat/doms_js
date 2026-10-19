@@ -393,10 +393,11 @@ fn to_canonical_array_index(key: JsValue) -> Option<usize> {
                     if let Some(idx) = Self::to_canonical_array_index(key) {
                         if let Some(ptr) = obj.as_object_ptr() {
                             let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                            let is_extensible = jsobj.is_extensible();
                             if let ObjectKind::Array(elements) = &mut jsobj.kind {
                                 let is_existing = idx < elements.len() && !elements[idx].is_hole();
                                 let is_standard_proto = jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
-                                if (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 && (self.non_extensible_objects.is_empty() || !self.non_extensible_objects.contains(&obj)) {
+                                if (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 && is_extensible {
                                     if idx < elements.len() {
                                         elements[idx] = val;
                                     } else if idx == elements.len() {

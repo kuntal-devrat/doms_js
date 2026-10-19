@@ -29,7 +29,7 @@
 use crate::builtins::register_builtins;
 use crate::inline_cache::InlineCacheSlot;
 use crate::object::{
-    Accessor, JsFunction, JsGenerator, JsObject, JsTypedArray, MapIterationKind, NativeFn, NativeFunction, ObjectKind,
+    JsFunction, JsGenerator, JsObject, JsTypedArray, MapIterationKind, NativeFn, NativeFunction, ObjectKind,
     PromiseState, SavedCatchHandler, SetIterationKind, TypedArrayKind,
 };
 use crate::shape::ShapeRegistry;

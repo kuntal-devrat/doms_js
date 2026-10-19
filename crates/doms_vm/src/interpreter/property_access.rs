@@ -245,6 +245,11 @@ impl Vm {
                                 }
                             }
                         }
+                        if let Some(proto_info) = self.shapes.get_property_info(proto_obj.shape_id, key) {
+                            if !proto_info.attributes.writable {
+                                return Ok(false);
+                            }
+                        }
                         if self.non_writable_props.contains(&(proto_val, key.to_string())) {
                             return Ok(false);
                         }
@@ -292,10 +297,18 @@ impl Vm {
                     return Ok(false);
                 }
             }
+            if let Some(r_info) = self.shapes.get_property_info(r_obj.shape_id, key) {
+                if !r_info.attributes.writable {
+                    return Ok(false);
+                }
+            }
+            if key == "length" && !r_obj.is_array_length_writable() {
+                return Ok(false);
+            }
             if self.non_writable_props.contains(&(receiver, key.to_string())) {
                 return Ok(false);
             }
-            if self.non_extensible_objects.contains(&receiver) && !self.shapes.has_property(r_obj.shape_id, key) {
+            if !r_obj.is_extensible() && !self.shapes.has_property(r_obj.shape_id, key) {
                 return Ok(false);
             }
         }
@@ -309,6 +322,18 @@ impl Vm {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
                 return self.proxy_delete_property(target, &PropertyKeyVal::String(key.to_string()));
+            }
+            if let Some(info) = self.shapes.get_property_info(obj.shape_id, key) {
+                if !info.attributes.configurable {
+                    return Ok(false);
+                }
+            }
+            if let Some(accs) = &obj.accessors {
+                if let Some(acc) = accs.get(key) {
+                    if !acc.configurable {
+                        return Ok(false);
+                    }
+                }
             }
             if self.non_configurable_props.contains(&(target, key.to_string())) {
                 return Ok(false);
@@ -342,7 +367,6 @@ impl Vm {
                 self.globals.remove(key);
             }
             self.sync_mapped_arguments_delete(target, key);
-            self.deleted_props.insert((target, key.to_string()));
             Ok(true)
         } else {
             Ok(true)
