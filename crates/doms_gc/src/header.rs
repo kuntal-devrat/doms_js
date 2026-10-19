@@ -24,6 +24,8 @@ const FLAG_PINNED: u16 = 1 << 1;
 const FLAG_MARKED: u16 = 1 << 2;
 /// Flag: object has been promoted to old generation.
 const FLAG_TENURED: u16 = 1 << 3;
+/// Flag: object has been freed and memory is in a free list.
+const FLAG_FREE: u16 = 1 << 8;
 
 /// Bit shift for object age (number of scavenges survived).
 const AGE_SHIFT: u16 = 4;
@@ -178,6 +180,12 @@ impl GcHeader {
         self.flags & FLAG_TENURED != 0
     }
 
+    /// Check if this object has been freed.
+    #[inline]
+    pub fn is_free(&self) -> bool {
+        self.flags & FLAG_FREE != 0
+    }
+
     // Flag mutations
 
     /// Set the marked flag.
@@ -190,6 +198,18 @@ impl GcHeader {
     #[inline]
     pub fn clear_marked(&mut self) {
         self.flags &= !FLAG_MARKED;
+    }
+
+    /// Set the free flag.
+    #[inline]
+    pub fn set_free(&mut self) {
+        self.flags |= FLAG_FREE;
+    }
+
+    /// Clear the free flag.
+    #[inline]
+    pub fn clear_free(&mut self) {
+        self.flags &= !FLAG_FREE;
     }
 
     /// Set the pinned flag.

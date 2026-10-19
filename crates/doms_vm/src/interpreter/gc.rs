@@ -22,17 +22,15 @@ impl Vm {
         let mut live = HashSet::new();
         let mut worklist = Vec::new();
 
-        let to_start = self.heap.nursery.to_start() as usize;
-        let space_size = self.heap.nursery.space_size();
         let mark_val = |val: JsValue, worklist: &mut Vec<*mut JsObject>, live: &mut HashSet<*mut JsObject>| {
             if let Some(ptr) = val.as_heap_ptr() {
-                let addr = ptr as usize;
-                if addr >= to_start && addr < to_start + space_size {
-                    panic!("Corrupted reference in GC: pointer {:p} is in old from-space (to-space)!", ptr);
-                }
                 let obj_ptr = ptr as *mut JsObject;
                 if live.insert(obj_ptr) {
                     worklist.push(obj_ptr);
+                    unsafe {
+                        let header = &mut *((obj_ptr as *mut doms_gc::GcHeader).sub(1));
+                        header.set_marked();
+                    }
                 }
             }
         };
@@ -41,6 +39,10 @@ impl Vm {
         if let Some(pending) = self.pending_alloc {
             if live.insert(pending) {
                 worklist.push(pending);
+                unsafe {
+                    let header = &mut *((pending as *mut doms_gc::GcHeader).sub(1));
+                    header.set_marked();
+                }
             }
         }
         if let Some(proto) = self.object_proto {
@@ -291,355 +293,7 @@ impl Vm {
             }
         }
 
-        crate::jit::clear_jit_call_cache();
-        crate::jit::clear_jit_array_cache();
-        before_count - self.objects.len()
-    }
-
-    /// Perform a generational minor GC (nursery scavenge) using Cheney's copying algorithm.
-    pub fn scavenge_nursery(&mut self) {
-        let mut to_cursor = self.heap.nursery.to_start();
-        let to_limit = self.heap.nursery.to_limit();
-        let to_start = to_cursor;
-
-        // Helper: copy an object if it is in nursery from-space, and update JsValue in-place
-        let copy_val = |val: &mut JsValue, to_cursor: &mut *mut u8| {
-            if let Some(ptr) = val.as_heap_ptr() {
-                if self.heap.nursery.contains(ptr) {
-                    let new_ptr = self.heap.nursery.copy_object(ptr, to_cursor, to_limit);
-                    unsafe {
-                        val.update_heap_ptr(new_ptr);
-                    }
-                }
-            }
-        };
-
-        // Evacuate root-reachable objects to to-space
-        if let Some(pending) = self.pending_alloc {
-            let ptr = pending as *mut u8;
-            if self.heap.nursery.contains(ptr) {
-                let new_ptr = self.heap.nursery.copy_object(ptr, &mut to_cursor, to_limit);
-                self.pending_alloc = Some(new_ptr as *mut JsObject);
-            }
-        }
-        if let Some(mut proto) = self.object_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.object_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.array_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.array_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.function_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.function_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.regexp_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.regexp_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.string_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.string_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.number_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.number_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.boolean_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.boolean_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.symbol_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.symbol_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.promise_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.promise_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.date_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.date_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.iterator_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.iterator_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.array_iterator_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.array_iterator_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.map_iterator_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.map_iterator_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.set_iterator_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.set_iterator_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.string_iterator_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.string_iterator_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.generator_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.generator_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.wrap_for_valid_iterator_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.wrap_for_valid_iterator_proto = Some(proto);
-        }
-        if let Some(mut proto) = self.iterator_helper_proto {
-            copy_val(&mut proto, &mut to_cursor);
-            self.iterator_helper_proto = Some(proto);
-        }
-        if let Some(mut nt) = self.current_new_target {
-            copy_val(&mut nt, &mut to_cursor);
-            self.current_new_target = Some(nt);
-        }
-        if let Some(mut s) = self.symbol_iterator {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_iterator = Some(s);
-        }
-        if let Some(mut s) = self.symbol_async_iterator {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_async_iterator = Some(s);
-        }
-        if let Some(mut s) = self.symbol_to_string_tag {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_to_string_tag = Some(s);
-        }
-        if let Some(mut s) = self.symbol_is_concat_spreadable {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_is_concat_spreadable = Some(s);
-        }
-        if let Some(mut s) = self.symbol_species {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_species = Some(s);
-        }
-        if let Some(mut s) = self.symbol_to_primitive {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_to_primitive = Some(s);
-        }
-        if let Some(mut s) = self.symbol_has_instance {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_has_instance = Some(s);
-        }
-        if let Some(mut s) = self.symbol_match {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_match = Some(s);
-        }
-        if let Some(mut s) = self.symbol_match_all {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_match_all = Some(s);
-        }
-        if let Some(mut s) = self.symbol_replace {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_replace = Some(s);
-        }
-        if let Some(mut s) = self.symbol_search {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_search = Some(s);
-        }
-        if let Some(mut s) = self.symbol_split {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_split = Some(s);
-        }
-        if let Some(mut s) = self.symbol_unscopables {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_unscopables = Some(s);
-        }
-        for s in self.symbol_registry.values_mut() {
-            copy_val(s, &mut to_cursor);
-        }
-        for val in self.global_lexicals.values_mut() {
-            copy_val(val, &mut to_cursor);
-        }
-        for val in &mut self.temp_roots {
-            copy_val(val, &mut to_cursor);
-        }
-        for val in &mut self.stack {
-            copy_val(val, &mut to_cursor);
-        }
-        copy_val(&mut self.global_object, &mut to_cursor);
-        for frame in &mut self.frames {
-            if let Some(mut gv) = frame.gen_val {
-                copy_val(&mut gv, &mut to_cursor);
-                frame.gen_val = Some(gv);
-            }
-            if let Some(mut cv) = frame.callee_val {
-                copy_val(&mut cv, &mut to_cursor);
-                frame.callee_val = Some(cv);
-            }
-            copy_val(&mut frame.this_val, &mut to_cursor);
-            for local in &mut frame.locals {
-                copy_val(local, &mut to_cursor);
-            }
-            for scope in &mut frame.scopes {
-                copy_val(scope, &mut to_cursor);
-            }
-            if let Some(mut env) = frame.env_obj {
-                copy_val(&mut env, &mut to_cursor);
-                frame.env_obj = Some(env);
-            }
-            if let Some(mut args_val) = frame.arguments {
-                copy_val(&mut args_val, &mut to_cursor);
-                frame.arguments = Some(args_val);
-            }
-            if let Some(ref mut raw_args) = frame.raw_args {
-                for arg in raw_args {
-                    copy_val(arg, &mut to_cursor);
-                }
-            }
-            if let Some(mut nt) = frame.new_target {
-                copy_val(&mut nt, &mut to_cursor);
-                frame.new_target = Some(nt);
-            }
-            if let Some(mut ho) = frame.home_object {
-                copy_val(&mut ho, &mut to_cursor);
-                frame.home_object = Some(ho);
-            }
-            if let Some(f) = &mut frame.callee_func {
-                for uv in &mut f.upvalues {
-                    copy_val(uv, &mut to_cursor);
-                }
-                if let Some(ref mut ho) = f.home_object {
-                    copy_val(ho, &mut to_cursor);
-                }
-            }
-        }
-        for val in self.globals.values_mut() {
-            copy_val(val, &mut to_cursor);
-        }
-        for val in self.modules.values_mut() {
-            copy_val(val, &mut to_cursor);
-        }
-        for val in self.current_exports.values_mut() {
-            copy_val(val, &mut to_cursor);
-        }
-        for timer in self.timers.values_mut() {
-            copy_val(&mut timer.callback, &mut to_cursor);
-            for arg in &mut timer.args {
-                copy_val(arg, &mut to_cursor);
-            }
-        }
-        for (callee, args) in &mut self.microtasks {
-            copy_val(callee, &mut to_cursor);
-            for arg in args {
-                copy_val(arg, &mut to_cursor);
-            }
-        }
-        if let Some(mut s) = self.symbol_iterator {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_iterator = Some(s);
-        }
-        if let Some(mut s) = self.symbol_async_iterator {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_async_iterator = Some(s);
-        }
-        if let Some(mut s) = self.symbol_to_string_tag {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_to_string_tag = Some(s);
-        }
-        if let Some(mut s) = self.symbol_is_concat_spreadable {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_is_concat_spreadable = Some(s);
-        }
-        if let Some(mut s) = self.symbol_to_primitive {
-            copy_val(&mut s, &mut to_cursor);
-            self.symbol_to_primitive = Some(s);
-        }
-        for s in self.symbol_registry.values_mut() {
-            copy_val(s, &mut to_cursor);
-        }
-
-        // Rehash sets/maps keyed by JsValue
-        let mut update_set = |set: &mut HashSet<(JsValue, String)>| {
-            let mut updated = HashSet::with_capacity(set.len());
-            for (mut target, key) in set.drain() {
-                copy_val(&mut target, &mut to_cursor);
-                updated.insert((target, key));
-            }
-            *set = updated;
-        };
-        update_set(&mut self.non_configurable_props);
-        update_set(&mut self.non_writable_props);
-        update_set(&mut self.non_enumerable_props);
-        update_set(&mut self.deleted_props);
-
-        let mut updated_non_ext = HashSet::with_capacity(self.non_extensible_objects.len());
-        for mut target in self.non_extensible_objects.drain() {
-            copy_val(&mut target, &mut to_cursor);
-            updated_non_ext.insert(target);
-        }
-        self.non_extensible_objects = updated_non_ext;
-
-        let mut updated_ns = HashSet::with_capacity(self.module_namespace_objects.len());
-        for mut target in self.module_namespace_objects.drain() {
-            copy_val(&mut target, &mut to_cursor);
-            updated_ns.insert(target);
-        }
-        self.module_namespace_objects = updated_ns;
-
-        if let Some(mut cmo) = self.current_module_obj {
-            copy_val(&mut cmo, &mut to_cursor);
-            self.current_module_obj = Some(cmo);
-        }
-
-        for (target, _) in self.imported_bindings.values_mut() {
-            copy_val(target, &mut to_cursor);
-        }
-        for target in self.star_exports.values_mut() {
-            copy_val(target, &mut to_cursor);
-        }
-        let mut updated_reexports = HashMap::with_capacity(self.module_reexports.len());
-        for ((mut k_tgt, k_str), (mut v_tgt, v_str)) in self.module_reexports.drain() {
-            copy_val(&mut k_tgt, &mut to_cursor);
-            copy_val(&mut v_tgt, &mut to_cursor);
-            updated_reexports.insert((k_tgt, k_str), (v_tgt, v_str));
-        }
-        self.module_reexports = updated_reexports;
-
-        // Evacuate references from objects outside the nursery (e.g. OldGen or large objects)
-        for &ptr in &self.objects {
-            if !self.heap.nursery.contains(ptr as *const u8) {
-                let obj = unsafe { &mut *ptr };
-                obj.visit_values_mut(|val| copy_val(val, &mut to_cursor));
-            }
-        }
-
-        // Cheney scan of to-space (transitive closure)
-        let mut scan = to_start;
-        while (scan as usize) < (to_cursor as usize) {
-            let header = unsafe { &*(scan as *const doms_gc::GcHeader) };
-            let total_size = header.total_size();
-            let payload = unsafe { scan.add(doms_gc::header::HEADER_SIZE) as *mut JsObject };
-            let obj = unsafe { &mut *payload };
-
-            obj.visit_values_mut(|val| copy_val(val, &mut to_cursor));
-
-            scan = unsafe { scan.add(total_size) };
-        }
-
-        // Update live object pointers and prune unreachable from-space objects
-        self.objects.retain_mut(|ptr_ref| {
-            let ptr = *ptr_ref;
-            if self.heap.nursery.contains(ptr as *const u8) {
-                let header = unsafe { &*((ptr as *mut doms_gc::GcHeader).sub(1)) };
-                if header.is_forwarded() {
-                    *ptr_ref = unsafe { header.forwarding_address() as *mut JsObject };
-                    true
-                } else {
-                    false
-                }
-            } else {
-                true
-            }
-        });
-
-        // Finalize scavenge: swap semi-spaces and synchronize JIT nursery pointers
-        self.heap.nursery.finish_scavenge(to_cursor);
+        self.heap.nursery.sweep_marked();
         crate::jit::NURSERY_PTRS.with(|cell| {
             let ptrs = unsafe { &mut *cell.get() };
             if !ptrs.bump.is_null() {
@@ -649,6 +303,11 @@ impl Vm {
         });
         crate::jit::clear_jit_call_cache();
         crate::jit::clear_jit_array_cache();
+        before_count - self.objects.len()
+    }
+
+    /// Perform a generational minor GC (in-place non-moving mark and sweep).
+    pub fn scavenge_nursery(&mut self) {
+        self.gc_collect();
     }
 }
-

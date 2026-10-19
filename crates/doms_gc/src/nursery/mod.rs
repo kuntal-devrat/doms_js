@@ -18,6 +18,7 @@
 //! - **Pause time:** Proportional to nursery size and survival rate.
 
 use crate::header::{GC_ALIGN, GcHeader, HEADER_SIZE, TypeTag};
+use crate::old_gen::FreeChunk;
 use crate::trace::{TraceVisitor, TypeRegistry};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
@@ -29,38 +30,32 @@ mod inspect;
 #[cfg(test)]
 mod tests;
 
-/// Default size of each semi-space: 2 MB (fits in CPU L3 cache).
-pub const DEFAULT_SEMI_SPACE_SIZE: usize = 2 * 1024 * 1024;
+/// Default size of the nursery arena: 2 MB (fits in CPU L3 cache).
+pub const DEFAULT_NURSERY_SIZE: usize = 2 * 1024 * 1024;
+pub const DEFAULT_SEMI_SPACE_SIZE: usize = DEFAULT_NURSERY_SIZE;
 
-/// Number of scavenges an object must survive before promotion.
+/// Number of collections an object survives before promotion.
 pub const PROMOTION_THRESHOLD: u8 = 2;
 
-/// The nursery — a semi-space copying collector for young objects.
-///
-/// ```text
-///   from_space                          to_space
-///   ┌──────────────────────────┐       ┌──────────────────────────┐
-///   │ [obj1][obj2][obj3]       │       │                          │
-///   │ ▲               ▲     ▲  │       │                          │
-///   │ start         cursor limit│       │                          │
-///   └──────────────────────────┘       └──────────────────────────┘
-/// ```
+/// The nursery — an immovable bump-allocated arena for young objects.
+/// Objects are allocated via fast bump pointer, never moved, and swept in-place.
 pub struct Nursery {
-    /// Pointer to the start of from-space.
-    from_start: *mut u8,
-    /// Pointer to the start of to-space.
-    to_start: *mut u8,
-    /// Size of each semi-space in bytes.
-    space_size: usize,
+    /// Pointer to the start of nursery space.
+    pub(crate) from_start: *mut u8,
+    /// Size of nursery space in bytes.
+    pub(crate) space_size: usize,
 
-    /// Bump pointer: next free byte in from-space.
-    cursor: *mut u8,
-    /// End of from-space (cursor must not exceed this).
-    limit: *mut u8,
+    /// Bump pointer: next free byte in nursery space.
+    pub(crate) cursor: *mut u8,
+    /// End of nursery space (cursor must not exceed this).
+    pub(crate) limit: *mut u8,
 
-    /// Total bytes allocated since last scavenge (before this one).
+    /// Free memory chunks reclaimed by in-place sweep for reuse.
+    pub free_chunks: Vec<FreeChunk>,
+
+    /// Total bytes currently alive or allocated.
     pub bytes_allocated: usize,
-    /// Number of scavenges performed.
+    /// Number of collections performed.
     pub scavenge_count: u64,
     /// Total objects allocated.
     pub total_allocations: u64,
@@ -72,10 +67,9 @@ impl Drop for Nursery {
     fn drop(&mut self) {
         let layout = Layout::from_size_align(self.space_size, GC_ALIGN)
             .expect("Invalid layout during dealloc");
-        // SAFETY: from_start and to_start were allocated with this layout.
+        // SAFETY: from_start was allocated with this layout.
         unsafe {
             dealloc(self.from_start, layout);
-            dealloc(self.to_start, layout);
         }
     }
 }

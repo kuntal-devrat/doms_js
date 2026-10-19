@@ -211,7 +211,7 @@ impl Drop for Vm {
             if !ptr.is_null() && seen.insert(ptr) {
                 unsafe {
                     std::ptr::drop_in_place(ptr);
-                    if !self.heap.contains(ptr as *const u8) && !self.heap.nursery.to_space_contains(ptr as *const u8) {
+                    if !self.heap.contains(ptr as *const u8) {
                         drop(Box::from_raw(ptr));
                     }
                 }

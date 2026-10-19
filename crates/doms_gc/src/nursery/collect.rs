@@ -1,162 +1,134 @@
-//! Nursery scavenging: Cheney copying collection and object forwarding.
+//! Nursery collection: in-place non-moving mark and sweep.
 
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use super::*;
 
 impl Nursery {
-    /// Perform a scavenge (minor GC).
+    /// Perform a collection (minor GC) in-place without moving objects.
     ///
-    /// Copies all live objects from from-space to to-space using Cheney's
-    /// algorithm, then swaps the spaces.
+    /// Live objects are marked in-place. Unmarked objects are swept into `free_chunks`.
+    /// Pointers never change, eliminating pointer invalidation and dangling references.
     ///
     /// # Arguments
-    /// - `roots`: Mutable slice of root pointers. Each root points to the
-    ///   payload of a GC object. Roots are updated in-place to point to
-    ///   the new locations in to-space.
+    /// - `roots`: Mutable slice of root pointers. Since objects do not move,
+    ///   roots remain valid and unchanged.
     ///
     /// # Returns
-    /// The number of bytes that survived (were copied to to-space).
+    /// The number of live bytes that survived.
     pub fn scavenge(&mut self, roots: &mut [*mut u8]) -> usize {
-        // Reset to-space cursor.
-        let mut to_cursor = self.to_start;
-        let to_limit = unsafe { self.to_start.add(self.space_size) };
+        // Step 1: Mark phase
+        let mut worklist = Vec::new();
 
-        // Step 1: Copy all root-referenced objects to to-space.
-        for root in roots.iter_mut() {
-            if root.is_null() {
-                continue;
-            }
-            if self.contains(*root) {
-                *root = self.copy_object(*root, &mut to_cursor, to_limit);
+        for &root in roots.iter() {
+            if !root.is_null() && self.contains(root) {
+                let header = unsafe { &mut *((root as *mut GcHeader).sub(1)) };
+                if !header.is_marked() {
+                    header.set_marked();
+                    worklist.push(root);
+                }
             }
         }
 
-        // Step 2: Cheney scan — walk the copied objects in to-space and
-        // copy their referenced objects too (breadth-first).
-        let mut scan = self.to_start;
-        while (scan as usize) < (to_cursor as usize) {
-            // Read the header of the next object to scan.
-            // SAFETY: scan points to a valid GcHeader in to-space.
-            let header = unsafe { &*(scan as *const GcHeader) };
-            let total_size = header.total_size();
+        while let Some(ptr) = worklist.pop() {
+            let header = unsafe { &*((ptr as *const GcHeader).sub(1)) };
             let tag = header.tag();
-
-            let payload = unsafe { scan.add(HEADER_SIZE) };
             unsafe {
-                self.type_registry.trace(tag, payload, &mut |ref_slot: *mut *mut u8| {
-                    if !ref_slot.is_null() {
-                        let child_ptr = *ref_slot;
-                        if !child_ptr.is_null() && self.contains(child_ptr) {
-                            *ref_slot = self.copy_object(child_ptr, &mut to_cursor, to_limit);
+                self.type_registry.trace(tag, ptr, &mut |slot: *mut *mut u8| {
+                    if !slot.is_null() {
+                        let child = *slot;
+                        if !child.is_null() && self.contains(child) {
+                            let child_header = &mut *((child as *mut GcHeader).sub(1));
+                            if !child_header.is_marked() {
+                                child_header.set_marked();
+                                worklist.push(child);
+                            }
                         }
                     }
                 });
             }
-
-            // Advance scan to the next object.
-            // SAFETY: total_size is the aligned size written during allocation.
-            scan = unsafe { scan.add(total_size) };
         }
 
-        // Step 3: Swap from-space and to-space.
-        std::mem::swap(&mut self.from_start, &mut self.to_start);
-        self.cursor = to_cursor;
-        self.limit = unsafe { self.from_start.add(self.space_size) };
+        // Step 2: In-place sweep phase using sweep_marked
+        self.sweep_marked()
+    }
 
-        self.scavenge_count += 1;
-        let survived = unsafe { to_cursor.offset_from(self.from_start) } as usize;
-        self.bytes_allocated = survived;
+    /// In-place sweep of the nursery based on GcHeader mark bits.
+    ///
+    /// If no live objects survived in the nursery, cursor is reset to from_start (fast reset).
+    /// Otherwise, dead objects are marked free and added to `free_chunks`.
+    pub fn sweep_marked(&mut self) -> usize {
+        let mut scan = self.from_start;
+        let mut live_bytes = 0;
+        let mut live_count = 0;
+        let mut current_free_offset: Option<usize> = None;
+        let mut current_free_size = 0;
+        self.free_chunks.clear();
 
-        log::debug!(
-            "Scavenge #{}: {} bytes survived ({:.1}% survival rate)",
-            self.scavenge_count,
-            survived,
-            if self.space_size > 0 {
-                survived as f64 / self.space_size as f64 * 100.0
-            } else {
-                0.0
+        while (scan as usize) < (self.cursor as usize) {
+            let header = unsafe { &mut *(scan as *mut GcHeader) };
+            let sz = header.total_size();
+            if sz == 0 {
+                break;
             }
-        );
+            let offset = unsafe { scan.offset_from(self.from_start) as usize };
+            if header.is_marked() {
+                header.clear_marked();
+                live_bytes += sz;
+                live_count += 1;
+                if let Some(off) = current_free_offset.take() {
+                    self.free_chunks.push(FreeChunk {
+                        offset: off,
+                        size: current_free_size,
+                    });
+                    current_free_size = 0;
+                }
+            } else {
+                header.set_free();
+                let payload = unsafe { scan.add(HEADER_SIZE) };
+                unsafe { ptr::write_bytes(payload, 0, sz - HEADER_SIZE); }
+                if current_free_offset.is_none() {
+                    current_free_offset = Some(offset);
+                }
+                current_free_size += sz;
+            }
+            scan = unsafe { scan.add(sz) };
+        }
 
-        survived
-    }
+        if let Some(off) = current_free_offset {
+            self.free_chunks.push(FreeChunk {
+                offset: off,
+                size: current_free_size,
+            });
+        }
 
-    /// Complete a custom scavenge pass, swapping from/to spaces and updating cursors.
-    pub fn finish_scavenge(&mut self, to_cursor: *mut u8) -> usize {
-        std::mem::swap(&mut self.from_start, &mut self.to_start);
-        self.cursor = to_cursor;
-        self.limit = unsafe { self.from_start.add(self.space_size) };
+        if live_count == 0 {
+            // Entire nursery is dead: fast reset!
+            self.cursor = self.from_start;
+            self.free_chunks.clear();
+            self.bytes_allocated = 0;
+        } else {
+            self.bytes_allocated = live_bytes;
+        }
+
         self.scavenge_count += 1;
-        let survived = unsafe { to_cursor.offset_from(self.from_start) } as usize;
-        self.bytes_allocated = survived;
-        survived
+        live_bytes
     }
 
-    /// Copy a single object from from-space to to-space.
-    ///
-    /// If the object has already been forwarded, returns the forwarding address.
-    /// Otherwise, copies the object and installs a forwarding pointer.
-    ///
-    /// # Arguments
-    /// - `payload_ptr`: Pointer to the object's payload in from-space.
-    /// - `to_cursor`: Mutable reference to the to-space allocation cursor.
-    /// - `to_limit`: End of to-space.
-    ///
-    /// # Returns
-    /// Pointer to the object's payload in to-space.
+    /// Complete a collection pass (compatibility helper).
+    pub fn finish_scavenge(&mut self, _to_cursor: *mut u8) -> usize {
+        self.scavenge_count += 1;
+        self.bytes_allocated
+    }
+
+    /// Non-moving object "copy" (returns existing pointer directly).
+    #[inline]
     pub fn copy_object(
         &self,
         payload_ptr: *mut u8,
-        to_cursor: &mut *mut u8,
-        to_limit: *const u8,
+        _to_cursor: &mut *mut u8,
+        _to_limit: *const u8,
     ) -> *mut u8 {
-        // Get the header (immediately before the payload).
-        // SAFETY: payload_ptr points to a valid GC allocation in from-space.
-        let header_ptr = unsafe { (payload_ptr as *mut GcHeader).sub(1) };
-        let header = unsafe { &mut *header_ptr };
-
-        // If already forwarded, return the forwarding address.
-        if header.is_forwarded() {
-            // SAFETY: Forwarding address was set by a previous copy_object call.
-            return unsafe { header.forwarding_address() };
-        }
-
-        let total_size = header.total_size();
-
-        // Check to-space has room.
-        let space_remaining = unsafe { to_limit.offset_from(*to_cursor) } as usize;
-        assert!(
-            total_size <= space_remaining,
-            "To-space overflow during scavenge! Need {} bytes, have {}",
-            total_size,
-            space_remaining
-        );
-
-        let cur_age = header.age();
-
-        // Copy the entire object (header + payload) to to-space.
-        let new_header_ptr = *to_cursor;
-        // SAFETY: Both pointers are valid, non-overlapping, and to-space has space.
-        unsafe {
-            ptr::copy_nonoverlapping(header_ptr as *const u8, new_header_ptr, total_size);
-            let new_header = &mut *(new_header_ptr as *mut GcHeader);
-            new_header.set_age((cur_age + 1).min(15));
-        }
-
-        // The new payload is at header + HEADER_SIZE.
-        // SAFETY: new_header_ptr + HEADER_SIZE is within to-space.
-        let new_payload = unsafe { new_header_ptr.add(HEADER_SIZE) };
-
-        // Install forwarding pointer in the old from-space object.
-        // SAFETY: header_ptr is in from-space and still writable.
-        unsafe {
-            header.set_forwarding_address(new_payload);
-        }
-
-        // Bump to-space cursor.
-        *to_cursor = unsafe { (*to_cursor).add(total_size) };
-
-        new_payload
+        payload_ptr
     }
 }
