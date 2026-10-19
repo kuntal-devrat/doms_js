@@ -13,6 +13,7 @@ mod eval;
 mod functions;
 mod number;
 mod string;
+mod string_methods;
 
 use boolean::register_boolean_global;
 use date::register_date_global;

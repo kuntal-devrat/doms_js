@@ -49,12 +49,13 @@ mod alloc;
 mod calls;
 mod elements;
 mod errors;
+mod finalization;
 mod for_in;
 mod gc;
+mod generator;
 mod get_property;
 mod helpers;
 mod identifiers;
-mod methods;
 mod microtasks;
 mod modules;
 mod opcodes;
@@ -68,6 +69,7 @@ mod symbols;
 mod types;
 mod values;
 mod vm;
+mod worker;
 
 #[cfg(test)]
 mod tests;

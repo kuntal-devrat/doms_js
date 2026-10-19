@@ -13,12 +13,14 @@ impl Vm {
                     let obj = unsafe { &*(ptr as *mut JsObject) };
                     match &obj.kind {
                         ObjectKind::Map(_) => {
-                            if let Some(m) = self.get_map_method(target, "entries") {
+                            let m = self.get_property(target, "entries");
+                            if !m.is_undefined() {
                                 return Ok(m);
                             }
                         }
                         ObjectKind::Set(_) => {
-                            if let Some(m) = self.get_set_method(target, "values") {
+                            let m = self.get_property(target, "values");
+                            if !m.is_undefined() {
                                 return Ok(m);
                             }
                         }

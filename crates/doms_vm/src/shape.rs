@@ -13,9 +13,21 @@ pub struct PropertyAttributes {
     pub configurable: bool,
 }
 
+impl PropertyAttributes {
+    pub const DEFAULT: Self = Self { writable: true, enumerable: true, configurable: true };
+    pub const BUILTIN_METHOD: Self = Self { writable: true, enumerable: false, configurable: true };
+    pub const NON_WRITABLE_NON_ENUMERABLE: Self = Self { writable: false, enumerable: false, configurable: false };
+    pub const FROZEN: Self = Self { writable: false, enumerable: true, configurable: false };
+
+    #[inline]
+    pub fn new(writable: bool, enumerable: bool, configurable: bool) -> Self {
+        Self { writable, enumerable, configurable }
+    }
+}
+
 impl Default for PropertyAttributes {
     fn default() -> Self {
-        Self { writable: true, enumerable: true, configurable: true }
+        Self::DEFAULT
     }
 }
 
