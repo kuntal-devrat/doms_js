@@ -40,6 +40,9 @@ pub(super) fn register_buffers(vm: &mut Vm) {
         }
     }
 
+    vm.set_property(sab_proto, "constructor", sab_ctor);
+    vm.set_property_non_enumerable(sab_proto, "constructor".to_string());
+
     vm.set_property(sab_ctor, "prototype", sab_proto);
     vm.set_property_non_writable(sab_ctor, "prototype".to_string());
     vm.set_property_non_enumerable(sab_ctor, "prototype".to_string());
@@ -194,6 +197,9 @@ pub(super) fn register_buffers(vm: &mut Vm) {
             });
         }
     }
+
+    vm.set_property(ab_proto, "constructor", ab_ctor);
+    vm.set_property_non_enumerable(ab_proto, "constructor".to_string());
 
     vm.set_property(ab_ctor, "prototype", ab_proto);
     vm.set_property_non_writable(ab_ctor, "prototype".to_string());

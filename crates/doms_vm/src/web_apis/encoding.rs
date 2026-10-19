@@ -17,6 +17,7 @@ pub(super) fn register_encoding(vm: &mut Vm) {
         }
         Ok(vm.alloc_typed_array(JsTypedArray {
             buffer: Arc::new(sab),
+            buffer_val: None,
             kind: TypedArrayKind::Uint8,
             length: bytes.len(),
             byte_offset: 0,
@@ -38,6 +39,7 @@ pub(super) fn register_encoding(vm: &mut Vm) {
             }
             Ok(vm.alloc_typed_array(JsTypedArray {
                 buffer: Arc::new(sab),
+                buffer_val: None,
                 kind: TypedArrayKind::Uint8,
                 length: bytes.len(),
                 byte_offset: 0,

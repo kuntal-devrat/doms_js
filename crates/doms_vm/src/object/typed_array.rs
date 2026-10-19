@@ -47,7 +47,9 @@ impl TypedArrayKind {
 #[derive(Debug, Clone)]
 pub struct JsTypedArray {
     pub buffer: Arc<doms_parallel::SharedArrayBuffer>,
+    pub buffer_val: Option<JsValue>,
     pub kind: TypedArrayKind,
     pub length: usize,
     pub byte_offset: usize,
 }
+

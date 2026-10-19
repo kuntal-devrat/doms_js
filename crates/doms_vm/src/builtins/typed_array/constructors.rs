@@ -7,62 +7,63 @@ pub(super) fn construct_typed_array_kind(vm: &mut Vm, args: &[JsValue], kind: Ty
         return Err(VmError::TypeError(format!("Constructor {} requires 'new'", kind.name())));
     }
     let bpe = kind.bytes_per_element();
-    if args.is_empty() {
-        let sab = doms_parallel::SharedArrayBuffer::try_new(0)
-            .map_err(|e| VmError::RuntimeError(e.into()))?;
+    if args.is_empty() || args[0].is_undefined() {
+        let sab = Arc::new(doms_parallel::SharedArrayBuffer::try_new(0)
+            .map_err(|e| VmError::RuntimeError(e.into()))?);
+        let buf_val = vm.alloc_array_buffer(Arc::clone(&sab));
         return Ok(vm.alloc_typed_array(JsTypedArray {
-            buffer: Arc::new(sab),
+            buffer: sab,
+            buffer_val: Some(buf_val),
             kind,
             length: 0,
             byte_offset: 0,
         }));
     }
     let arg0 = args[0];
-    if arg0.is_undefined() {
-        let sab = doms_parallel::SharedArrayBuffer::try_new(0)
-            .map_err(|e| VmError::RuntimeError(e.into()))?;
-        return Ok(vm.alloc_typed_array(JsTypedArray {
-            buffer: Arc::new(sab),
-            kind,
-            length: 0,
-            byte_offset: 0,
-        }));
-    }
 
     // 1. If arg0 is Object
     if let Some(ptr) = arg0.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut JsObject) };
         if let ObjectKind::ArrayBuffer(sab) | ObjectKind::SharedArrayBuffer(sab) = &obj.kind {
-            let buf_len = sab.byte_length();
-            let byte_offset_num = args.get(1).and_then(|v| v.to_number()).unwrap_or(0.0);
-            if byte_offset_num < 0.0 || (byte_offset_num as usize) % bpe != 0 {
+            let sab = Arc::clone(sab);
+            let byte_offset = if let Some(&off_val) = args.get(1) {
+                vm.to_index(off_val)?
+            } else {
+                0
+            };
+            if byte_offset % bpe != 0 {
                 return Err(VmError::RangeError("Start offset must be a multiple of the element size".into()));
             }
-            let byte_offset = byte_offset_num as usize;
-            if byte_offset > buf_len {
-                return Err(VmError::RangeError("Start offset is outside the bounds of the buffer".into()));
-            }
-            let length = if let Some(len_arg) = args.get(2) {
+            let length = if let Some(&len_arg) = args.get(2) {
                 if len_arg.is_undefined() {
-                    if (buf_len - byte_offset) % bpe != 0 {
+                    None
+                } else {
+                    Some(vm.to_index(len_arg)?)
+                }
+            } else {
+                None
+            };
+            if sab.is_detached() {
+                return Err(VmError::TypeError("ArrayBuffer is detached".into()));
+            }
+            let buf_len = sab.byte_length();
+            let length = match length {
+                None => {
+                    if byte_offset > buf_len || (buf_len - byte_offset) % bpe != 0 {
                         return Err(VmError::RangeError("Invalid typed array length".into()));
                     }
                     (buf_len - byte_offset) / bpe
-                } else {
-                    let l_num = len_arg.to_number().unwrap_or(0.0);
-                    if l_num < 0.0 || byte_offset + (l_num as usize) * bpe > buf_len {
+                }
+                Some(len) => {
+                    if byte_offset + len * bpe > buf_len {
                         return Err(VmError::RangeError("Invalid typed array length".into()));
                     }
-                    l_num as usize
+                    len
                 }
-            } else {
-                if (buf_len - byte_offset) % bpe != 0 {
-                    return Err(VmError::RangeError("Invalid typed array length".into()));
-                }
-                (buf_len - byte_offset) / bpe
             };
             return Ok(vm.alloc_typed_array(JsTypedArray {
-                buffer: Arc::clone(sab),
+                buffer: sab,
+                buffer_val: Some(arg0),
                 kind,
                 length,
                 byte_offset,
@@ -70,10 +71,12 @@ pub(super) fn construct_typed_array_kind(vm: &mut Vm, args: &[JsValue], kind: Ty
         } else if let ObjectKind::TypedArray(src_ta) = &obj.kind {
             let src_ta = src_ta.clone();
             let len = src_ta.length;
-            let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
-                .map_err(|e| VmError::RuntimeError(e.into()))?;
+            let new_sab = Arc::new(doms_parallel::SharedArrayBuffer::try_new(len * bpe)
+                .map_err(|e| VmError::RuntimeError(e.into()))?);
+            let buf_val = vm.alloc_array_buffer(Arc::clone(&new_sab));
             let mut dst_ta = JsTypedArray {
-                buffer: Arc::new(new_sab),
+                buffer: new_sab,
+                buffer_val: Some(buf_val),
                 kind,
                 length: len,
                 byte_offset: 0,
@@ -97,10 +100,12 @@ pub(super) fn construct_typed_array_kind(vm: &mut Vm, args: &[JsValue], kind: Ty
         if is_iterable {
             let items = helpers::iterate_to_vec(vm, arg0)?;
             let len = items.len();
-            let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
-                .map_err(|e| VmError::RuntimeError(e.into()))?;
+            let new_sab = Arc::new(doms_parallel::SharedArrayBuffer::try_new(len * bpe)
+                .map_err(|e| VmError::RuntimeError(e.into()))?);
+            let buf_val = vm.alloc_array_buffer(Arc::clone(&new_sab));
             let mut dst_ta = JsTypedArray {
-                buffer: Arc::new(new_sab),
+                buffer: new_sab,
+                buffer_val: Some(buf_val),
                 kind,
                 length: len,
                 byte_offset: 0,
@@ -114,12 +119,13 @@ pub(super) fn construct_typed_array_kind(vm: &mut Vm, args: &[JsValue], kind: Ty
         // Array-like object with length property
         let len_val = vm.get_property(arg0, "length");
         if !len_val.is_undefined() {
-            let len_num = len_val.to_number().unwrap_or(0.0);
-            let len = if len_num < 0.0 { 0 } else { (len_num as usize).min(64 * 1024 * 1024) };
-            let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
-                .map_err(|e| VmError::RuntimeError(e.into()))?;
+            let len = vm.to_length(len_val)?;
+            let new_sab = Arc::new(doms_parallel::SharedArrayBuffer::try_new(len * bpe)
+                .map_err(|e| VmError::RuntimeError(e.into()))?);
+            let buf_val = vm.alloc_array_buffer(Arc::clone(&new_sab));
             let mut dst_ta = JsTypedArray {
-                buffer: Arc::new(new_sab),
+                buffer: new_sab,
+                buffer_val: Some(buf_val),
                 kind,
                 length: len,
                 byte_offset: 0,
@@ -137,28 +143,19 @@ pub(super) fn construct_typed_array_kind(vm: &mut Vm, args: &[JsValue], kind: Ty
     }
 
     // 2. Length or number argument
-    if arg0.is_symbol() {
-        return Err(VmError::TypeError("Cannot convert a Symbol value to a number".into()));
-    }
-    let num = arg0.to_number();
-    let len = if let Some(n) = num {
-        if n.is_nan() || n < 0.0 || n > 64.0 * 1024.0 * 1024.0 {
-            return Err(VmError::RangeError("Invalid typed array length".into()));
-        }
-        n as usize
-    } else {
-        0
-    };
-
-    let sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
-        .map_err(|e| VmError::RuntimeError(e.into()))?;
+    let len = vm.to_index(arg0)?;
+    let sab = Arc::new(doms_parallel::SharedArrayBuffer::try_new(len * bpe)
+        .map_err(|e| VmError::RuntimeError(e.into()))?);
+    let buf_val = vm.alloc_array_buffer(Arc::clone(&sab));
     Ok(vm.alloc_typed_array(JsTypedArray {
-        buffer: Arc::new(sab),
+        buffer: sab,
+        buffer_val: Some(buf_val),
         kind,
         length: len,
         byte_offset: 0,
     }))
 }
+
 
 fn construct_int8_array(vm: &mut Vm, _this: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
     construct_typed_array_kind(vm, args, TypedArrayKind::Int8)

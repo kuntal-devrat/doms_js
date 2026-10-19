@@ -247,6 +247,13 @@ impl Trace for JsObject {
                     tracer.trace_ref(p);
                 }
             }
+            ObjectKind::TypedArray(ta) => {
+                if let Some(buf) = ta.buffer_val {
+                    if let Some(p) = buf.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+            }
             ObjectKind::FinalizationRegistry { callback, entries } => {
                 if let Some(p) = callback.as_heap_ptr() {
                     tracer.trace_ref(p);
@@ -607,6 +614,11 @@ impl JsObject {
             ObjectKind::StringIterator { .. } => {}
             ObjectKind::DataView { buffer_val, .. } => {
                 visitor(buffer_val);
+            }
+            ObjectKind::TypedArray(ta) => {
+                if let Some(buf) = &mut ta.buffer_val {
+                    visitor(buf);
+                }
             }
             _ => {}
         }

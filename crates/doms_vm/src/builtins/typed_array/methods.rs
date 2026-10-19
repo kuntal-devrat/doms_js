@@ -15,13 +15,47 @@ pub(super) fn validate_typed_array(this: JsValue) -> Result<JsTypedArray, VmErro
     Err(VmError::TypeError("Method called on non-TypedArray".into()))
 }
 
+pub(crate) fn typed_array_species_create(
+    vm: &mut Vm,
+    exemplar: JsValue,
+    kind: TypedArrayKind,
+    len: usize,
+) -> Result<JsValue, VmError> {
+    let default_ctor = vm.globals.get(kind.name()).copied().unwrap_or(JsValue::undefined());
+    let ctor = vm.species_constructor(exemplar, default_ctor)?;
+    let result = vm.construct(ctor, &[JsValue::from_double(len as f64)])?;
+    if let Some(ptr) = result.as_object_ptr() {
+        let obj = unsafe { &*(ptr as *mut JsObject) };
+        if let ObjectKind::TypedArray(res_ta) = &obj.kind {
+            if res_ta.buffer.is_detached() {
+                return Err(VmError::TypeError("TypedArray buffer is detached".into()));
+            }
+            if res_ta.length < len {
+                return Err(VmError::TypeError("Constructed TypedArray is too small".into()));
+            }
+            return Ok(result);
+        }
+    }
+    Err(VmError::TypeError("Species constructor did not return a TypedArray".into()))
+}
+
 pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
     // 1. Getters
     let buffer_getter = vm.alloc_native_function("get buffer", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::TypedArray(ta) = &obj.kind {
-                return Ok(vm.alloc_array_buffer(Arc::clone(&ta.buffer)));
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ref mut ta) = obj.kind {
+                if let Some(buf) = ta.buffer_val {
+                    return Ok(buf);
+                }
+                let buf = vm.alloc_array_buffer(Arc::clone(&ta.buffer));
+                if let Some(ptr2) = this.as_object_ptr() {
+                    let obj2 = unsafe { &mut *(ptr2 as *mut JsObject) };
+                    if let ObjectKind::TypedArray(ref mut ta2) = obj2.kind {
+                        ta2.buffer_val = Some(buf);
+                    }
+                }
+                return Ok(buf);
             }
         }
         Err(VmError::TypeError("get TypedArray.prototype.buffer called on non-TypedArray".into()))
@@ -68,15 +102,11 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
 
     if let Some(ptr) = proto.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
-        obj.define_getter("buffer".to_string(), buffer_getter);
-        obj.define_getter("byteLength".to_string(), byte_length_getter);
-        obj.define_getter("byteOffset".to_string(), byte_offset_getter);
-        obj.define_getter("length".to_string(), length_getter);
+        obj.define_builtin_accessor("buffer".to_string(), Some(buffer_getter), None);
+        obj.define_builtin_accessor("byteLength".to_string(), Some(byte_length_getter), None);
+        obj.define_builtin_accessor("byteOffset".to_string(), Some(byte_offset_getter), None);
+        obj.define_builtin_accessor("length".to_string(), Some(length_getter), None);
     }
-    vm.set_property_non_enumerable(proto, "buffer".to_string());
-    vm.set_property_non_enumerable(proto, "byteLength".to_string());
-    vm.set_property_non_enumerable(proto, "byteOffset".to_string());
-    vm.set_property_non_enumerable(proto, "length".to_string());
 
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_getter = vm.alloc_native_function("get [Symbol.toStringTag]", 0, |vm, this, _args| {
@@ -91,29 +121,83 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         if let Some(ptr) = proto.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             obj.insert_symbol_accessor_getter(sym_tag, tag_getter);
+            if let Some(accs) = obj.symbol_accessors.as_mut() {
+                if let Some(acc) = accs.get_mut(&sym_tag) {
+                    acc.enumerable = false;
+                    acc.configurable = true;
+                }
+            }
         }
     }
 
     // 2. Methods
     let subarray_fn = vm.alloc_native_function("subarray", 2, |vm, this, args| {
-        let ta = validate_typed_array(this)?;
-        let len = ta.length as i32;
-        let start = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
-        let end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len);
-        let s = if start < 0 { (len + start).max(0) } else { start.min(len) } as usize;
-        let e = if end < 0 { (len + end).max(0) } else { end.min(len) } as usize;
-        let count = if e > s { e - s } else { 0 };
-        let bpe = ta.kind.bytes_per_element();
-        let byte_offset = ta.byte_offset + s * bpe;
-        Ok(vm.alloc_typed_array(JsTypedArray {
-            buffer: Arc::clone(&ta.buffer),
-            kind: ta.kind,
-            length: count,
-            byte_offset,
-        }))
+        let (ta, buffer_val) = if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(ref mut ta) = obj.kind {
+                let buf = if let Some(b) = ta.buffer_val {
+                    b
+                } else {
+                    let b = vm.alloc_array_buffer(Arc::clone(&ta.buffer));
+                    ta.buffer_val = Some(b);
+                    b
+                };
+                (ta.clone(), buf)
+            } else {
+                return Err(VmError::TypeError("Method called on non-TypedArray".into()));
+            }
+        } else {
+            return Err(VmError::TypeError("Method called on non-TypedArray".into()));
+        };
+
+        let src_len = if ta.buffer.is_detached() { 0 } else { ta.length };
+        let begin_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let relative_begin = vm.to_integer_or_infinity(begin_val)?;
+        let start_index = if relative_begin.is_infinite() && relative_begin < 0.0 {
+            0
+        } else if relative_begin < 0.0 {
+            ((src_len as f64) + relative_begin).max(0.0) as usize
+        } else {
+            (relative_begin.min(src_len as f64)) as usize
+        };
+
+        let end_val = args.get(1).copied().unwrap_or(JsValue::undefined());
+        let relative_end = if end_val.is_undefined() {
+            src_len as f64
+        } else {
+            vm.to_integer_or_infinity(end_val)?
+        };
+        let end_index = if relative_end.is_infinite() && relative_end < 0.0 {
+            0
+        } else if relative_end < 0.0 {
+            ((src_len as f64) + relative_end).max(0.0) as usize
+        } else {
+            (relative_end.min(src_len as f64)) as usize
+        };
+
+        let new_length = if end_index > start_index { end_index - start_index } else { 0 };
+        let element_size = ta.kind.bytes_per_element();
+        let begin_byte_offset = ta.byte_offset + start_index * element_size;
+
+        let default_ctor = vm.globals.get(ta.kind.name()).copied().unwrap_or(JsValue::undefined());
+        let ctor = vm.species_constructor(this, default_ctor)?;
+        let ctor_args = [
+            buffer_val,
+            JsValue::from_double(begin_byte_offset as f64),
+            JsValue::from_double(new_length as f64),
+        ];
+        let result = vm.construct(ctor, &ctor_args)?;
+        if let Some(ptr) = result.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(_) = &obj.kind {
+                return Ok(result);
+            }
+        }
+        Err(VmError::TypeError("Species constructor did not return a TypedArray".into()))
     });
     vm.set_property(proto, "subarray", subarray_fn);
     vm.set_property_non_enumerable(proto, "subarray".to_string());
+
 
     let set_fn = vm.alloc_native_function("set", 1, |vm, this, args| {
         let _ = validate_typed_array(this)?;
@@ -192,28 +276,64 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
 
     let slice_fn = vm.alloc_native_function("slice", 2, |vm, this, args| {
         let ta = validate_typed_array(this)?;
-        let len = ta.length as i32;
-        let start = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
-        let end = args.get(1).and_then(|v| v.to_int32()).unwrap_or(len);
-        let s = if start < 0 { (len + start).max(0) } else { start.min(len) } as usize;
-        let e = if end < 0 { (len + end).max(0) } else { end.min(len) } as usize;
-        let count = if e > s { e - s } else { 0 };
-        let bpe = ta.kind.bytes_per_element();
-        let new_sab = doms_parallel::SharedArrayBuffer::try_new(count * bpe)
-            .map_err(|e| VmError::RuntimeError(e.into()))?;
-        let mut dst_ta = JsTypedArray {
-            buffer: Arc::new(new_sab),
-            kind: ta.kind,
-            length: count,
-            byte_offset: 0,
+        let len = ta.length;
+        let start_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let relative_start = vm.to_integer_or_infinity(start_val)?;
+        let k = if relative_start.is_infinite() && relative_start < 0.0 {
+            0
+        } else if relative_start < 0.0 {
+            ((len as f64) + relative_start).max(0.0) as usize
+        } else {
+            (relative_start.min(len as f64)) as usize
         };
-        for i in 0..count {
-            if let Some(val) = vm.read_typed_array_element_vm(&ta, s + i) {
-                vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
+
+        let end_val = args.get(1).copied().unwrap_or(JsValue::undefined());
+        let relative_end = if end_val.is_undefined() {
+            len as f64
+        } else {
+            vm.to_integer_or_infinity(end_val)?
+        };
+        let final_idx = if relative_end.is_infinite() && relative_end < 0.0 {
+            0
+        } else if relative_end < 0.0 {
+            ((len as f64) + relative_end).max(0.0) as usize
+        } else {
+            (relative_end.min(len as f64)) as usize
+        };
+
+        let count = if final_idx > k { final_idx - k } else { 0 };
+
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(this);
+        let a = typed_array_species_create(vm, this, ta.kind, count)?;
+        let cur_this = vm.temp_roots[prev_temp];
+        vm.temp_roots.truncate(prev_temp);
+
+        if count > 0 {
+            if let Some(ptr) = cur_this.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::TypedArray(src_ta) = &obj.kind {
+                    if src_ta.buffer.is_detached() {
+                        return Err(VmError::TypeError("TypedArray buffer is detached".into()));
+                    }
+                    if let Some(dst_ptr) = a.as_object_ptr() {
+                        let dst_obj = unsafe { &*(dst_ptr as *mut JsObject) };
+                        if let ObjectKind::TypedArray(dst_ta) = &dst_obj.kind {
+                            let dst_ta_clone = dst_ta.clone();
+                            let src_ta_clone = src_ta.clone();
+                            for i in 0..count {
+                                if let Some(val) = vm.read_typed_array_element_vm(&src_ta_clone, k + i) {
+                                    vm.write_typed_array_element_vm(&dst_ta_clone, i, val)?;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        Ok(vm.alloc_typed_array(dst_ta))
+        Ok(a)
     });
+
     vm.set_property(proto, "slice", slice_fn);
     vm.set_property_non_enumerable(proto, "slice".to_string());
 
@@ -388,10 +508,12 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         }
         elements.reverse();
         let bpe = ta.kind.bytes_per_element();
-        let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
-            .map_err(|e| VmError::RuntimeError(e.into()))?;
+        let new_sab = Arc::new(doms_parallel::SharedArrayBuffer::try_new(len * bpe)
+            .map_err(|e| VmError::RuntimeError(e.into()))?);
+        let buf_val = vm.alloc_array_buffer(Arc::clone(&new_sab));
         let mut dst_ta = JsTypedArray {
-            buffer: Arc::new(new_sab),
+            buffer: new_sab,
+            buffer_val: Some(buf_val),
             kind: ta.kind,
             length: len,
             byte_offset: 0,
@@ -433,10 +555,12 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         }
         let k = actual_index as usize;
         let bpe = ta.kind.bytes_per_element();
-        let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
-            .map_err(|e| VmError::RuntimeError(e.into()))?;
+        let new_sab = Arc::new(doms_parallel::SharedArrayBuffer::try_new(len * bpe)
+            .map_err(|e| VmError::RuntimeError(e.into()))?);
+        let buf_val = vm.alloc_array_buffer(Arc::clone(&new_sab));
         let mut dst_ta = JsTypedArray {
-            buffer: Arc::new(new_sab),
+            buffer: new_sab,
+            buffer_val: Some(buf_val),
             kind: ta.kind,
             length: len,
             byte_offset: 0,
@@ -447,6 +571,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         }
         Ok(vm.alloc_typed_array(dst_ta))
     });
+
     vm.set_property(proto, "with", with_fn);
     vm.set_property_non_enumerable(proto, "with".to_string());
 
@@ -520,7 +645,6 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
         let ta = validate_typed_array(this)?;
         let len = ta.length;
-        let bpe = ta.kind.bytes_per_element();
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(this);
         vm.temp_roots.push(callback);
@@ -551,20 +675,19 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         } else {
             TypedArrayKind::Uint8
         };
-        let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
-            .map_err(|e| VmError::RuntimeError(e.into()))?;
-        let mut dst_ta = JsTypedArray {
-            buffer: Arc::new(new_sab),
-            kind,
-            length: len,
-            byte_offset: 0,
-        };
-        for i in 0..len {
-            let val = vm.temp_roots[mapped_start + i];
-            vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
+        let a = typed_array_species_create(vm, cur_this, kind, len)?;
+        if let Some(dst_ptr) = a.as_object_ptr() {
+            let dst_obj = unsafe { &*(dst_ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(dst_ta) = &dst_obj.kind {
+                let dst_ta_clone = dst_ta.clone();
+                for i in 0..len {
+                    let val = vm.temp_roots[mapped_start + i];
+                    vm.write_typed_array_element_vm(&dst_ta_clone, i, val)?;
+                }
+            }
         }
         vm.temp_roots.truncate(prev_temp);
-        Ok(vm.alloc_typed_array(dst_ta))
+        Ok(a)
     });
     vm.set_property(proto, "map", map_fn);
     vm.set_property_non_enumerable(proto, "map".to_string());
@@ -577,7 +700,6 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
         let ta = validate_typed_array(this)?;
         let len = ta.length;
-        let bpe = ta.kind.bytes_per_element();
         let kind = ta.kind;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(this);
@@ -606,21 +728,22 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
                 count_kept += 1;
             }
         }
-        let new_sab = doms_parallel::SharedArrayBuffer::try_new(count_kept * bpe)
-            .map_err(|e| VmError::RuntimeError(e.into()))?;
-        let mut dst_ta = JsTypedArray {
-            buffer: Arc::new(new_sab),
-            kind,
-            length: count_kept,
-            byte_offset: 0,
-        };
-        for i in 0..count_kept {
-            let val = vm.temp_roots[kept_start + i];
-            vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
+        let cur_this = vm.temp_roots[prev_temp];
+        let a = typed_array_species_create(vm, cur_this, kind, count_kept)?;
+        if let Some(dst_ptr) = a.as_object_ptr() {
+            let dst_obj = unsafe { &*(dst_ptr as *mut JsObject) };
+            if let ObjectKind::TypedArray(dst_ta) = &dst_obj.kind {
+                let dst_ta_clone = dst_ta.clone();
+                for i in 0..count_kept {
+                    let val = vm.temp_roots[kept_start + i];
+                    vm.write_typed_array_element_vm(&dst_ta_clone, i, val)?;
+                }
+            }
         }
         vm.temp_roots.truncate(prev_temp);
-        Ok(vm.alloc_typed_array(dst_ta))
+        Ok(a)
     });
+
     vm.set_property(proto, "filter", filter_fn);
     vm.set_property_non_enumerable(proto, "filter".to_string());
 
@@ -1057,10 +1180,12 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
                 vm.temp_roots[vals_start + idx] = val;
             }
         }
-        let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
-            .map_err(|e| VmError::RuntimeError(e.into()))?;
+        let new_sab = Arc::new(doms_parallel::SharedArrayBuffer::try_new(len * bpe)
+            .map_err(|e| VmError::RuntimeError(e.into()))?);
+        let buf_val = vm.alloc_array_buffer(Arc::clone(&new_sab));
         let mut dst_ta = JsTypedArray {
-            buffer: Arc::new(new_sab),
+            buffer: new_sab,
+            buffer_val: Some(buf_val),
             kind: ta.kind,
             length: len,
             byte_offset: 0,

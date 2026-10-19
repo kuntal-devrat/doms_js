@@ -53,6 +53,17 @@ impl Vm {
         }
     }
 
+    pub fn to_index(&mut self, val: JsValue) -> Result<usize, VmError> {
+        if val.is_undefined() {
+            return Ok(0);
+        }
+        let int_val = self.to_integer_or_infinity(val)?;
+        if int_val < 0.0 || int_val > 9007199254740991.0 {
+            return Err(VmError::RangeError("Index out of range".into()));
+        }
+        Ok(int_val as usize)
+    }
+
     pub fn to_length(&mut self, val: JsValue) -> Result<usize, VmError> {
         let raw_len = self.to_number_value(val)?;
         if raw_len.is_nan() || raw_len <= 0.0 {

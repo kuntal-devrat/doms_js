@@ -248,7 +248,7 @@ impl Vm {
             // 2. Check prototype chain accessor
             let has_own_data = self.shapes.has_property(obj.shape_id, key)
                 || matches!(&obj.kind, ObjectKind::Array(elements) if key == "length" || key.parse::<usize>().map(|idx| idx < elements.len()).unwrap_or(false))
-                || matches!(&obj.kind, ObjectKind::TypedArray(ta) if matches!(key, "length" | "byteLength" | "byteOffset" | "buffer") || key.parse::<usize>().map(|idx| idx < ta.length).unwrap_or(false))
+                || matches!(&obj.kind, ObjectKind::TypedArray(ta) if key.parse::<usize>().map(|idx| idx < ta.length).unwrap_or(false))
                 || matches!(&obj.kind, ObjectKind::String(_) | ObjectKind::StringObject(_) if key == "length" || key.parse::<usize>().is_ok());
             if !has_own_data {
                 let mut curr_proto = obj.prototype;

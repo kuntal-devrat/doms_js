@@ -171,16 +171,44 @@ impl Vm {
                 if ta.buffer.is_detached() {
                     match key {
                         "length" | "byteLength" | "byteOffset" => return JsValue::from_int32(0),
-                        "buffer" => return self.alloc_array_buffer(Arc::clone(&ta.buffer)),
+                        "buffer" => {
+                            if let Some(buf) = ta.buffer_val {
+                                return buf;
+                            }
+                            let buf = self.alloc_array_buffer(Arc::clone(&ta.buffer));
+                            if let Some(ptr) = target.as_object_ptr() {
+                                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                                if let ObjectKind::TypedArray(ref mut ta) = obj.kind {
+                                    ta.buffer_val = Some(buf);
+                                }
+                            }
+                            return buf;
+                        }
                         "BYTES_PER_ELEMENT" => return JsValue::from_int32(ta.kind.bytes_per_element() as i32),
-                        _ => return JsValue::undefined(),
+                        _ => {
+                            if key.parse::<usize>().is_ok() {
+                                return JsValue::undefined();
+                            }
+                        }
                     }
-                }
+                } else {
                 match key {
                     "length" => return JsValue::from_int32(ta.length as i32),
                     "byteLength" => return JsValue::from_int32((ta.length * ta.kind.bytes_per_element()) as i32),
                     "byteOffset" => return JsValue::from_int32(ta.byte_offset as i32),
-                    "buffer" => return self.alloc_array_buffer(Arc::clone(&ta.buffer)),
+                    "buffer" => {
+                        if let Some(buf) = ta.buffer_val {
+                            return buf;
+                        }
+                        let buf = self.alloc_array_buffer(Arc::clone(&ta.buffer));
+                        if let Some(ptr) = target.as_object_ptr() {
+                            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                            if let ObjectKind::TypedArray(ref mut ta) = obj.kind {
+                                ta.buffer_val = Some(buf);
+                            }
+                        }
+                        return buf;
+                    }
                     "BYTES_PER_ELEMENT" => return JsValue::from_int32(ta.kind.bytes_per_element() as i32),
                     _ => {
                         if let Ok(idx) = key.parse::<usize>() {
@@ -191,6 +219,7 @@ impl Vm {
                         }
                     }
                 }
+            }
             }
 
             // Special properties on Worker
