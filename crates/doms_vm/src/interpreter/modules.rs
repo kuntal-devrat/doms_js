@@ -15,7 +15,7 @@ impl Vm {
 
     pub fn instantiate_global_declarations(&mut self, chunk: &BytecodeChunk) -> Result<(), VmError> {
         if !self.is_module {
-            // Step 1: Validate top_lex_names
+            // Check lexical identifier collisions against existing bindings
             for name in &chunk.top_lex_names {
                 if self.global_lexicals.contains_key(name) {
                     return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
@@ -30,7 +30,7 @@ impl Vm {
                 }
             }
 
-            // Step 2: Validate top_var_names
+            // Verify var names against lexical scope and global extensibility
             for name in &chunk.top_var_names {
                 if self.global_lexicals.contains_key(name) {
                     return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
@@ -48,7 +48,7 @@ impl Vm {
                 }
             }
 
-            // Step 3: Validate top_func_names
+            // Ensure hoisted function declarations don't conflict with lexical bindings or non-configurable properties
             for name in &chunk.top_func_names {
                 if self.global_lexicals.contains_key(name) {
                     return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));

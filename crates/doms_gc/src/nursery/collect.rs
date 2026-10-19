@@ -17,7 +17,7 @@ impl Nursery {
     /// # Returns
     /// The number of live bytes that survived.
     pub fn scavenge(&mut self, roots: &mut [*mut u8]) -> usize {
-        // Step 1: Mark phase
+        // Mark all live objects reachable from nursery roots
         let mut worklist = Vec::new();
 
         for &root in roots.iter() {
@@ -49,7 +49,7 @@ impl Nursery {
             }
         }
 
-        // Step 2: In-place sweep phase using sweep_marked
+        // Reclaim unreached slots into free list; reset cursor if empty
         self.sweep_marked()
     }
 

@@ -30,7 +30,7 @@ const MAP_ANONYMOUS: i32 = 0x20;
 #[cfg(unix)]
 const MAP_NORESERVE: i32 = 0x4000;
 
-/// Represents an individual allocation bounded inside the memory cage.
+/// An allocated slice within the memory sandbox cage.
 #[derive(Debug, Clone)]
 pub struct CagedAllocation {
     pub id: usize,
