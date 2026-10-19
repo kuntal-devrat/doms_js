@@ -38,6 +38,7 @@ doms_wasm = { path = "crates/doms_wasm" }
 # External dependencies
 thiserror = "2"
 log = "0.4"
+libc = "0.2"
 unicode-ident = "1.0"
 num-bigint = "0.4.8"
 num-traits = "0.2.19"

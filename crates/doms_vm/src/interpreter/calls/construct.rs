@@ -313,5 +313,28 @@ impl Vm {
         };
         self.construct(ctor, &[len_val])
     }
+
+    /// SpeciesConstructor ( O, defaultConstructor )
+    /// ECMAScript 7.3.22
+    pub fn species_constructor(&mut self, obj: JsValue, default_ctor: JsValue) -> Result<JsValue, VmError> {
+        let c = self.get_property_result(obj, "constructor")?;
+        if c.is_undefined() {
+            return Ok(default_ctor);
+        }
+        if !c.is_js_object() {
+            return Err(VmError::TypeError("Constructor must be an object".into()));
+        }
+        if let Some(sym_species) = self.symbol_species {
+            let s = self.get_symbol_property_result(c, sym_species)?;
+            if s.is_undefined() || s.is_null() {
+                return Ok(default_ctor);
+            }
+            if self.is_constructor(s) {
+                return Ok(s);
+            }
+            return Err(VmError::TypeError("Symbol.species must be a constructor".into()));
+        }
+        Ok(default_ctor)
+    }
 }
 

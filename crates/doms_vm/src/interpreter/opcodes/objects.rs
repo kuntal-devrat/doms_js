@@ -19,13 +19,15 @@ impl Vm {
         let arr_val = *self.peek()?;
         if let Some(ptr) = arr_val.as_object_ptr() {
             let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::Array(elements) = &mut jsobj.kind {
-                elements.push(val);
-            } else {
-                let len = self.get_property(arr_val, "length").to_number().unwrap_or(0.0) as usize;
-                self.set_property(arr_val, &len.to_string(), val);
-                self.set_property(arr_val, "length", JsValue::from_int32((len + 1) as i32));
+            if !jsobj.has_element_attributes() && jsobj.is_extensible() {
+                if let ObjectKind::Array(elements) = &mut jsobj.kind {
+                    elements.push(val);
+                    return Ok(());
+                }
             }
+            let len = self.get_property(arr_val, "length").to_number().unwrap_or(0.0) as usize;
+            self.set_property(arr_val, &len.to_string(), val);
+            self.set_property(arr_val, "length", JsValue::from_int32((len + 1) as i32));
         }
         Ok(())
     }
@@ -42,16 +44,18 @@ impl Vm {
         let arr_val = *self.peek()?;
         if let Some(ptr) = arr_val.as_object_ptr() {
             let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::Array(elements) = &mut jsobj.kind {
-                elements.extend(items);
-            } else {
-                let mut len = self.get_property(arr_val, "length").to_number().unwrap_or(0.0) as usize;
-                for item in items {
-                    self.set_property(arr_val, &len.to_string(), item);
-                    len += 1;
+            if !jsobj.has_element_attributes() && jsobj.is_extensible() {
+                if let ObjectKind::Array(elements) = &mut jsobj.kind {
+                    elements.extend(items);
+                    return Ok(());
                 }
-                self.set_property(arr_val, "length", JsValue::from_int32(len as i32));
             }
+            let mut len = self.get_property(arr_val, "length").to_number().unwrap_or(0.0) as usize;
+            for item in items {
+                self.set_property(arr_val, &len.to_string(), item);
+                len += 1;
+            }
+            self.set_property(arr_val, "length", JsValue::from_int32(len as i32));
         }
         Ok(())
     }

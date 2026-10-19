@@ -60,6 +60,22 @@ impl Vm {
             return obj_ptr;
         }
 
+        // 4b. OldGen is full. The collection in step 2 just set fresh mark
+        //     bits for every live object, so dead blocks can be reclaimed
+        //     safely and reused. Never sweep when collection was suppressed:
+        //     live objects would not be marked and would be reclaimed.
+        if !self.gc_suppressed {
+            self.heap.old_gen.sweep();
+            if let Some(ptr) = self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+                let obj_ptr = ptr as *mut JsObject;
+                unsafe {
+                    std::ptr::write(obj_ptr, obj);
+                }
+                self.track_ptr(obj_ptr);
+                return obj_ptr;
+            }
+        }
+
         // 5. Fallback to large object space
         if let Some(ptr) = self.heap.large_objects.allocate(payload_size, doms_gc::header::TypeTag::Object) {
             let obj_ptr = ptr as *mut JsObject;

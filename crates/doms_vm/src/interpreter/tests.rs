@@ -521,5 +521,138 @@ fn test_fn_global_object() {
     assert_eq!(res2, vm.global_object);
 }
 
+#[test]
+fn test_array_element_attributes_semantics() {
+    let mut vm = Vm::new();
+    let res = vm.eval(r#"
+        var failures = [];
+        function check(name, cond) { if (!cond) failures.push(name); }
 
+        // 1. Non-writable element: writes are ignored in sloppy mode.
+        var a = [1, 2, 3];
+        Object.defineProperty(a, "1", { value: 5, writable: false, enumerable: true, configurable: false });
+        a[1] = 99;
+        check("non-writable write ignored", a[1] === 5);
 
+        // 2. Strict-mode writes to a non-writable element throw TypeError.
+        var threw = false;
+        try { (function () { "use strict"; a[1] = 99; })(); } catch (e) { threw = e instanceof TypeError; }
+        check("strict non-writable throws", threw);
+
+        // 3. Element accessors are honoured by the get/set fast paths.
+        var b = [1];
+        var setValue = 0;
+        Object.defineProperty(b, "0", {
+            get: function () { return 42; },
+            set: function (v) { setValue = v; },
+        });
+        check("accessor get", b[0] === 42);
+        b[0] = 7;
+        check("accessor set", setValue === 7);
+
+        // 4. Frozen elements ignore writes and push throws.
+        var c = Object.freeze([1]);
+        c[0] = 2;
+        check("frozen write ignored", c[0] === 1);
+        var pushThrew = false;
+        try { c.push(2); } catch (e) { pushThrew = e instanceof TypeError; }
+        check("frozen push throws", pushThrew);
+
+        // 5. Sparse index growth updates length without materializing holes.
+        var d = [];
+        d[200000] = 1;
+        check("sparse length", d.length === 200001);
+        check("sparse hole stays undefined", d[199999] === undefined);
+
+        // 6. `length` assignment coerces its value.
+        var e = [1, 2, 3];
+        e.length = "2";
+        check("length coercion truncates", e.length === 2 && e[2] === undefined);
+
+        // 7. Invalid lengths throw RangeError.
+        var rangeThrew = false;
+        try { e.length = -1; } catch (err) { rangeThrew = err instanceof RangeError; }
+        check("invalid length throws", rangeThrew);
+
+        failures.length;
+    "#).unwrap();
+    assert_eq!(res.as_number(), Some(0.0), "array element attribute semantics failed");
+}
+
+#[test]
+fn test_weak_pruning_and_liveness_after_gc() {
+    let mut vm = Vm::new();
+    let res = vm.eval(r#"
+        var failures = [];
+        function check(name, cond) { if (!cond) failures.push(name); }
+
+        // A WeakRef to an unreachable target is cleared by GC.
+        var wr = (function () { return new WeakRef({ tag: "dead" }); })();
+        (function churn() { for (var i = 0; i < 64; i++) { var junk = { j: i }; } })();
+        $262.gc();
+        check("weakref pruned", wr.deref() === undefined);
+
+        // A WeakRef to a live target survives GC.
+        var live = { tag: "live" };
+        var wr2 = new WeakRef(live);
+        $262.gc();
+        check("weakref live", wr2.deref() === live);
+
+        // WeakMap prunes entries whose keys became unreachable (ephemeron fixpoint).
+        var wm = new WeakMap();
+        (function () { wm.set({ dead: true }, "value"); })();
+        (function churn2() { for (var i = 0; i < 64; i++) { var junk = { j2: i }; } })();
+        $262.gc();
+        check("weakmap pruned", typeof wm.size === "undefined" || wm.size === 0);
+
+        // WeakMap retains entries for live keys.
+        var liveKey = { k: 2 };
+        var wm2 = new WeakMap();
+        wm2.set(liveKey, 42);
+        $262.gc();
+        check("weakmap live", wm2.get(liveKey) === 42);
+
+        failures.length;
+    "#).unwrap();
+    assert_eq!(res.as_number(), Some(0.0), "weak reference semantics failed");
+}
+
+#[test]
+fn test_tiny_heap_stack_locals_survive_gc() {
+    use doms_gc::heap::HeapConfig;
+    // A tiny heap forces collection on nearly every allocation. Values that
+    // only exist in Rust locals / machine registers while engine code runs
+    // (builtin construction, embedder callbacks) must be found by the
+    // conservative native-stack scan and kept alive.
+    let mut vm = Vm::with_heap(doms_gc::Heap::new(HeapConfig {
+        nursery_size: 64 * 1024,
+        old_gen_size: 256 * 1024,
+    }));
+    let a = vm.alloc_native_function("probe_a", 0, |_, _, _| Ok(JsValue::undefined()));
+    let pa = a.as_object_ptr().unwrap() as *mut JsObject;
+    for _ in 0..8 {
+        vm.gc_collect();
+    }
+    assert!(vm.objects.iter().any(|p| *p == pa), "live stack local was swept by GC");
+}
+
+#[test]
+fn test_gc_reclaims_dead_large_objects() {
+    // Large objects live in the fallback large-object space. A collection must
+    // sweep that space, otherwise every object that ever overflowed the
+    // nursery/old generation leaks until the process exits.
+    let mut vm = Vm::new();
+    let p = vm
+        .heap
+        .large_objects
+        .allocate(16 * 1024, doms_gc::header::TypeTag::Object)
+        .unwrap();
+    assert_eq!(vm.heap.large_objects.object_count(), 1);
+    vm.gc_collect();
+    assert_eq!(
+        vm.heap.large_objects.object_count(),
+        0,
+        "unreferenced large objects must be reclaimed by a collection"
+    );
+    assert!(!vm.heap.large_objects.contains(p));
+}

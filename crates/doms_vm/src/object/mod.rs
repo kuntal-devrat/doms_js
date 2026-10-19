@@ -24,4 +24,5 @@ pub use js_object::*;
 pub use native_function::*;
 pub use object_kind::*;
 pub use promise::*;
+pub use trace::*;
 pub use typed_array::*;

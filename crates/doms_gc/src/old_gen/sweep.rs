@@ -47,6 +47,10 @@ impl OldGen {
     /// Reclaims memory from unmarked objects into the free list, resetting
     /// mark bits for live objects. Unlike `compact()`, `sweep()` does not slide
     /// objects, ensuring that existing pointers remain completely valid.
+    ///
+    /// Freed blocks keep their header (with the free flag set) so that the
+    /// sweep can be repeated: every block in the space always carries a valid
+    /// size, which lets the next sweep keep scanning past it.
     /// Returns the number of bytes reclaimed.
     pub fn sweep(&mut self) -> usize {
         let mut scan = self.start;
@@ -54,9 +58,6 @@ impl OldGen {
         let mut live_count = 0;
         let mut reclaimed_bytes = 0;
         self.free_chunks.clear();
-
-        let mut current_free_offset: Option<usize> = None;
-        let mut current_free_size = 0;
 
         while scan < self.cursor {
             unsafe {
@@ -66,35 +67,24 @@ impl OldGen {
                     break;
                 }
                 let offset = scan.offset_from(self.start) as usize;
-                if header.is_marked() {
+                if header.is_free() {
+                    // Freed by an earlier sweep: carry the block over.
+                    header.clear_marked();
+                    self.free_chunks.push(FreeChunk { offset, size: sz });
+                } else if header.is_marked() {
                     header.clear_marked();
                     live_bytes += sz;
                     live_count += 1;
-                    if let Some(off) = current_free_offset.take() {
-                        self.free_chunks.push(FreeChunk {
-                            offset: off,
-                            size: current_free_size,
-                        });
-                        current_free_size = 0;
-                    }
                 } else {
-                    // Mark bit not set: object is dead. Zero its header/payload and add to free list.
-                    ptr::write_bytes(scan, 0, sz);
+                    // Mark bit not set: object is dead. Keep the header (so
+                    // this scan can be repeated) but zero the payload.
+                    header.set_free();
+                    ptr::write_bytes(scan.add(HEADER_SIZE), 0, sz - HEADER_SIZE);
+                    self.free_chunks.push(FreeChunk { offset, size: sz });
                     reclaimed_bytes += sz;
-                    if current_free_offset.is_none() {
-                        current_free_offset = Some(offset);
-                    }
-                    current_free_size += sz;
                 }
                 scan = scan.add(sz);
             }
-        }
-
-        if let Some(off) = current_free_offset {
-            self.free_chunks.push(FreeChunk {
-                offset: off,
-                size: current_free_size,
-            });
         }
 
         self.bytes_used = live_bytes;

@@ -160,9 +160,14 @@ pub(super) fn register_dataview(vm: &mut Vm) {
     if let Some(sym_tag) = vm.symbol_to_string_tag {
         let tag_val = vm.alloc_string("DataView".into());
         vm.set_symbol_property(dv_proto, sym_tag, tag_val);
-        let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
-        vm.set_property_non_writable(dv_proto, key_name.clone());
-        vm.set_property_non_enumerable(dv_proto, key_name);
+        if let Some(ptr) = dv_proto.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            obj.set_symbol_attributes(sym_tag, PropertyAttributes {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            });
+        }
     }
 
     // 4. Accessors: buffer, byteLength, byteOffset
@@ -459,7 +464,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
     }
 
     vm.set_property(dv_ctor, "prototype", dv_proto);
+    vm.set_property_non_writable(dv_ctor, "prototype".to_string());
     vm.set_property_non_enumerable(dv_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(dv_ctor, "prototype".to_string());
     vm.globals.insert("DataView".to_string(), dv_ctor);
     if vm.global_object.is_object() {
         vm.set_property(vm.global_object, "DataView", dv_ctor);

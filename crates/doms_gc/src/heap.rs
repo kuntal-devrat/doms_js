@@ -258,6 +258,24 @@ impl Heap {
     pub fn contains(&self, ptr: *const u8) -> bool {
         self.nursery.contains(ptr) || self.old_gen.contains(ptr) || self.large_objects.contains(ptr)
     }
+
+    /// Address range covering every space that may hold GC objects.
+    ///
+    /// Conservative stack scans use this as a cheap first-level filter before
+    /// consulting the exact object table.
+    pub fn address_bounds(&self) -> (usize, usize) {
+        let nursery_lo = self.nursery.from_start as usize;
+        let mut lo = nursery_lo;
+        let mut hi = nursery_lo + self.nursery.space_size;
+        let old_lo = self.old_gen.start as usize;
+        lo = lo.min(old_lo);
+        hi = hi.max(old_lo + self.old_gen.size);
+        if let Some((large_lo, large_hi)) = self.large_objects.address_bounds() {
+            lo = lo.min(large_lo);
+            hi = hi.max(large_hi);
+        }
+        (lo, hi)
+    }
 }
 
 #[cfg(test)]

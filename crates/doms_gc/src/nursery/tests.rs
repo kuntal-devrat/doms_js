@@ -226,3 +226,38 @@ fn test_scavenge_with_interior_references() {
     let child_val = unsafe { *(new_child_ptr as *const u64) };
     assert_eq!(child_val, 0xCAFEBABE);
 }
+
+#[test]
+fn test_repeated_sweep_after_free_chunk_split_preserves_later_live_objects() {
+    let mut nursery = Nursery::new(TEST_SPACE_SIZE);
+
+    // A, B, C: A dies first, C stays live throughout.
+    let a = nursery.allocate(96, TypeTag::Object).unwrap();
+    let b = nursery.allocate(96, TypeTag::Object).unwrap();
+    let c = nursery.allocate(96, TypeTag::Object).unwrap();
+
+    // First sweep: only B and C are live, so A becomes a free chunk.
+    let mut roots = vec![b, c];
+    nursery.scavenge(&mut roots);
+
+    // A smaller object splits A's free chunk. The remainder must keep a valid
+    // free header; otherwise the next sweep stops scanning at the gap.
+    let d = nursery.allocate(32, TypeTag::Object).unwrap();
+    assert_eq!(d, a);
+
+    // Second sweep: only C is live. If the scan stops at the split remainder,
+    // the nursery is wrongly considered empty, reset, and C gets overwritten.
+    let mut roots = vec![c];
+    nursery.scavenge(&mut roots);
+    assert!(
+        nursery.bytes_allocated > 0,
+        "live object C must keep the nursery from resetting"
+    );
+
+    // Allocate until the nursery is full: no allocation may reuse C's address.
+    unsafe { *(c as *mut u64) = 0x1122_3344_5566_7788; }
+    while let Some(p) = nursery.allocate(96, TypeTag::Object) {
+        assert_ne!(p, c, "allocation reused a live object's address");
+    }
+    assert_eq!(unsafe { *(c as *const u64) }, 0x1122_3344_5566_7788);
+}

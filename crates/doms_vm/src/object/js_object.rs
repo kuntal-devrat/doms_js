@@ -5,6 +5,7 @@ use super::*;
 pub const IN_OBJECT_SLOTS: usize = 4;
 pub const OBJECT_FLAG_EXTENSIBLE: u8 = 1 << 0;
 pub const OBJECT_FLAG_ARRAY_LENGTH_NON_WRITABLE: u8 = 1 << 1;
+pub const OBJECT_FLAG_ELEMENT_ATTRIBUTES: u8 = 1 << 2;
 
 #[derive(Debug, Clone)]
 pub struct JsObject {
@@ -67,6 +68,26 @@ impl JsObject {
     #[inline]
     pub fn set_array_length_writable(&mut self) {
         self.flags &= !OBJECT_FLAG_ARRAY_LENGTH_NON_WRITABLE;
+    }
+
+    /// Whether this object has element-level property attributes or accessors
+    /// (installed via `Object.defineProperty`, `Object.freeze`, sparse indexed
+    /// writes, …).
+    ///
+    /// When this is set, dense element fast paths must fall back to the
+    /// spec-level property operations, which honour writability, enumerability
+    /// and accessors.
+    #[inline]
+    pub fn has_element_attributes(&self) -> bool {
+        (self.flags & OBJECT_FLAG_ELEMENT_ATTRIBUTES) != 0
+    }
+
+    #[inline]
+    pub fn mark_element_attributes(&mut self) {
+        self.flags |= OBJECT_FLAG_ELEMENT_ATTRIBUTES;
+        // Dense element fast paths (including JIT caches) must not bypass the
+        // newly installed attributes.
+        crate::jit::clear_jit_array_cache();
     }
 
     pub fn insert_private_element(&mut self, name: String, val: JsValue) {
@@ -370,6 +391,16 @@ impl JsObject {
             order.push(key.clone());
         }
         self.add_prop_order(key);
+    }
+
+    pub fn define_builtin_accessor(&mut self, key: String, getter: Option<JsValue>, setter: Option<JsValue>) {
+        self.define_accessor(key.clone(), getter, setter);
+        if let Some(accs) = &mut self.accessors {
+            if let Some(acc) = accs.get_mut(&key) {
+                acc.enumerable = false;
+                acc.configurable = true;
+            }
+        }
     }
 
     pub fn define_symbol_accessor(&mut self, sym: JsValue, getter: Option<JsValue>, setter: Option<JsValue>) {

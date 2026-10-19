@@ -75,22 +75,38 @@ impl Nursery {
         for i in 0..self.free_chunks.len() {
             if self.free_chunks[i].size >= total_size {
                 let chunk = self.free_chunks.remove(i);
-                let dest = unsafe { self.from_start.add(chunk.offset) };
-                unsafe {
-                    let header = dest as *mut GcHeader;
-                    ptr::write(header, GcHeader::new(total_size as u32, type_tag));
-                }
                 let remaining_sz = chunk.size - total_size;
-                if remaining_sz >= HEADER_SIZE + GC_ALIGN {
+                // Keep the block-size invariant intact: every block in the
+                // nursery must have a valid header, otherwise a later sweep
+                // would stop scanning at the zeroed gap and could discard live
+                // objects. A split remainder therefore gets its own free
+                // header; a too-small tail is absorbed into this allocation.
+                let alloc_size = if remaining_sz >= HEADER_SIZE + GC_ALIGN {
+                    let rem = unsafe { self.from_start.add(chunk.offset + total_size) };
+                    unsafe {
+                        let rem_header = rem as *mut GcHeader;
+                        ptr::write(rem_header, GcHeader::new(remaining_sz as u32, TypeTag::Raw));
+                        (*rem_header).set_free();
+                    }
                     self.free_chunks.push(FreeChunk {
                         offset: chunk.offset + total_size,
                         size: remaining_sz,
                     });
+                    total_size
+                } else if remaining_sz > 0 {
+                    chunk.size
+                } else {
+                    total_size
+                };
+                let dest = unsafe { self.from_start.add(chunk.offset) };
+                unsafe {
+                    let header = dest as *mut GcHeader;
+                    ptr::write(header, GcHeader::new(alloc_size as u32, type_tag));
                 }
-                self.bytes_allocated += total_size;
+                self.bytes_allocated += alloc_size;
                 self.total_allocations += 1;
                 let payload = unsafe { dest.add(HEADER_SIZE) };
-                unsafe { ptr::write_bytes(payload, 0, payload_size); }
+                unsafe { ptr::write_bytes(payload, 0, alloc_size - HEADER_SIZE); }
                 return Some(payload);
             }
         }

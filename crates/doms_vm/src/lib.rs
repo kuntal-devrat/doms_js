@@ -2,6 +2,11 @@
 //!
 //! Bytecode virtual machine and interpreter for the DOMS JavaScript engine.
 
+// `dom_asan` is a build-time-only cfg used when compiling this crate with
+// AddressSanitizer so the conservative native-stack scan can opt out of
+// stack instrumentation (it intentionally reads the whole stack).
+#![cfg_attr(dom_asan, feature(sanitize))]
+
 pub mod builtins;
 pub mod debugger;
 pub mod inline_cache;

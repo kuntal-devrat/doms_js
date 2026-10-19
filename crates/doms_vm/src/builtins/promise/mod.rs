@@ -22,7 +22,9 @@ pub(super) fn register_promise(vm: &mut Vm) {
     let promise_proto = prototype::create_prototype(vm, promise_ctor);
 
     vm.set_property(promise_ctor, "prototype", promise_proto);
+    vm.set_property_non_writable(promise_ctor, "prototype".to_string());
     vm.set_property_non_enumerable(promise_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(promise_ctor, "prototype".to_string());
     add_species_getter(vm, promise_ctor);
 
     vm.globals.insert("Promise".to_string(), promise_ctor);

@@ -305,6 +305,7 @@ dependencies = [
  "doms_gc",
  "doms_parallel",
  "doms_parser",
+ "libc",
  "log",
  "num-bigint",
  "num-traits",

@@ -237,6 +237,16 @@ impl Trace for JsObject {
                     }
                 }
             }
+            ObjectKind::WeakRef(target) => {
+                if let Some(p) = target.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
+            ObjectKind::DataView { buffer_val, .. } => {
+                if let Some(p) = buffer_val.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
             ObjectKind::FinalizationRegistry { callback, entries } => {
                 if let Some(p) = callback.as_heap_ptr() {
                     tracer.trace_ref(p);
@@ -329,16 +339,56 @@ impl Trace for JsObject {
     }
 }
 
+/// Which reference slots a traversal should visit.
+///
+/// The GC marks strongly-held references transitively, then performs a
+/// separate ephemeron pass over the weakly-held ones (weak map keys,
+/// weak set members, weak ref targets).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisitMode {
+    /// Visit every reference (strong and weak). Used by root preservation.
+    All,
+    /// Visit only strongly-held references.
+    Strong,
+    /// Visit only weakly-held references. Used by the GC's ephemeron pass.
+    Weak,
+}
+
 impl JsObject {
     /// Mutably visit all internal `JsValue` references in this object.
     ///
     /// Used during GC scavenging and root preservation.
-    pub fn visit_values_mut<F>(&mut self, mut visitor: F)
+    pub fn visit_values_mut<F>(&mut self, visitor: F)
     where
         F: FnMut(&mut JsValue),
     {
+        self.visit_values_mut_mode(VisitMode::All, visitor)
+    }
+
+    /// Mutably visit internal `JsValue` references, filtered by [`VisitMode`].
+    pub fn visit_values_mut_mode<F>(&mut self, mode: VisitMode, mut visitor: F)
+    where
+        F: FnMut(&mut JsValue),
+    {
+        let strong = mode != VisitMode::Weak;
+        let weak = mode != VisitMode::Strong;
         if let Some(proto) = &mut self.prototype {
             visitor(proto);
+        }
+        if let Some(privs) = &mut self.private_elements {
+            for element in privs.values_mut() {
+                match element {
+                    PrivateElement::Value(v) => visitor(v),
+                    PrivateElement::Accessor(acc) => {
+                        if let Some(g) = &mut acc.getter {
+                            visitor(g);
+                        }
+                        if let Some(s) = &mut acc.setter {
+                            visitor(s);
+                        }
+                    }
+                }
+            }
         }
         for slot in &mut self.in_object_slots {
             if !slot.is_hole() {
@@ -409,7 +459,9 @@ impl JsObject {
                 visitor(handler);
             }
             ObjectKind::WeakRef(target) => {
-                visitor(target);
+                if weak {
+                    visitor(target);
+                }
             }
             ObjectKind::Function(f) => {
                 for uv in &mut f.upvalues {
@@ -479,23 +531,35 @@ impl JsObject {
                 }
             }
             ObjectKind::WeakMap(entries) => {
-                for (k, v) in entries {
-                    visitor(k);
-                    visitor(v);
+                if weak {
+                    for (k, v) in entries {
+                        visitor(k);
+                        visitor(v);
+                    }
                 }
             }
             ObjectKind::WeakSet(elements) => {
-                for el in elements {
-                    visitor(el);
+                if weak {
+                    for el in elements {
+                        visitor(el);
+                    }
                 }
             }
             ObjectKind::FinalizationRegistry { callback, entries } => {
-                visitor(callback);
+                if strong {
+                    visitor(callback);
+                }
                 for (t, h, unreg) in entries {
-                    visitor(t);
-                    visitor(h);
-                    if let Some(u) = unreg {
-                        visitor(u);
+                    if weak {
+                        visitor(t);
+                    }
+                    if strong {
+                        // The held value is strongly held until the target dies;
+                        // meanwhile keep it and the unregister token alive.
+                        visitor(h);
+                        if let Some(u) = unreg {
+                            visitor(u);
+                        }
                     }
                 }
             }

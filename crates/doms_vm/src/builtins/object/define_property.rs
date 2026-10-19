@@ -280,6 +280,17 @@ pub fn define_property_internal(
             }
         }
         PropertyKeyVal::String(prop_name) => {
+            // Element-level attributes on arrays (index descriptors, frozen
+            // arrays, sparse indices) must disable the dense fast paths.
+            let is_array = target.as_object_ptr().is_some_and(|p| {
+                matches!(unsafe { &*(p as *const JsObject) }.kind, ObjectKind::Array(_))
+            });
+            if is_array && Vm::canonical_array_index(prop_name).is_some() {
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    obj.mark_element_attributes();
+                }
+            }
             if is_accessor {
                 if let Some(ptr) = target.as_object_ptr() {
                     let obj = unsafe { &mut *(ptr as *mut JsObject) };

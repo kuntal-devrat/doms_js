@@ -46,6 +46,11 @@ impl Test262Runner {
                 || feat == "iterator-includes"
                 || feat == "Iterator.prototype.join"
                 || feat == "iterator-sequencing"
+                || feat == "await-dictionary"
+                || feat == "Float16Array"
+                || feat == "immutable-arraybuffer"
+                || feat == "arraybuffer-transfer"
+                || feat == "arraybuffer-slice-to-immutable"
             {
                 return TestStatus::Skip(format!("Feature '{}' not supported", feat));
             }

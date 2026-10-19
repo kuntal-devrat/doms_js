@@ -3,6 +3,121 @@
 use super::*;
 
 impl Vm {
+    /// Whether `key` is a canonical array index string (`"0"`, `"42"`, …),
+    /// excluding `2^32 - 1` which is an ordinary property per spec.
+    pub(crate) fn canonical_array_index(key: &str) -> Option<usize> {
+        if key.is_empty() || key.len() > 10 {
+            return None;
+        }
+        let idx: u32 = key.parse().ok()?;
+        if idx == u32::MAX || idx.to_string() != key {
+            return None;
+        }
+        Some(idx as usize)
+    }
+
+    /// Store a sparse array element (an index beyond the dense `elements`
+    /// representation) as a shape property and grow `length` to `idx + 1`.
+    ///
+    /// Marking the array as having element attributes forces the dense fast
+    /// paths to fall back to the spec-level property operations.
+    fn set_sparse_array_element(&mut self, obj: &mut JsObject, idx: usize, value: JsValue) {
+        let key = idx.to_string();
+        obj.mark_element_attributes();
+        if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, &key) {
+            obj.set_slot(offset, value);
+        } else {
+            let (new_shape_id, offset) = self.shapes.transition(obj.shape_id, &key);
+            obj.shape_id = new_shape_id;
+            obj.set_slot(offset, value);
+            obj.add_prop_order(key);
+        }
+        self.grow_array_length_slot(obj, idx + 1);
+    }
+
+    /// Ensure the `length` slot of an array is at least `len` (never shrinks).
+    fn grow_array_length_slot(&mut self, obj: &mut JsObject, len: usize) {
+        let dense_len = match &obj.kind {
+            ObjectKind::Array(elements) => elements.len(),
+            _ => 0,
+        };
+        let current = self
+            .shapes
+            .get_property_info(obj.shape_id, "length")
+            .and_then(|info| obj.get_slot(info.offset))
+            .and_then(|v| v.to_number())
+            .map(|n| n as usize)
+            .unwrap_or(dense_len);
+        if current >= len {
+            return;
+        }
+        let value = JsValue::from_double(len as f64);
+        let attrs = crate::shape::PropertyAttributes {
+            writable: true,
+            enumerable: false,
+            configurable: false,
+        };
+        if let Some(info) = self.shapes.get_property_info(obj.shape_id, "length") {
+            let new_shape_id = self.shapes.transition_redefine(obj.shape_id, "length", attrs);
+            obj.shape_id = new_shape_id;
+            obj.set_slot(info.offset, value);
+        } else {
+            let (new_shape_id, offset) = self.shapes.transition_with_attributes(obj.shape_id, "length", attrs);
+            obj.shape_id = new_shape_id;
+            obj.set_slot(offset, value);
+            obj.add_prop_order("length".to_string());
+        }
+    }
+
+    /// Write the (already validated) numeric `length` value of an array.
+    fn set_array_length_slot(&mut self, obj: &mut JsObject, num: f64) {
+        let attrs = crate::shape::PropertyAttributes {
+            writable: obj.is_array_length_writable(),
+            enumerable: false,
+            configurable: false,
+        };
+        let value = JsValue::from_double(num);
+        if let Some(info) = self.shapes.get_property_info(obj.shape_id, "length") {
+            let new_shape_id = self.shapes.transition_redefine(obj.shape_id, "length", attrs);
+            obj.shape_id = new_shape_id;
+            obj.set_slot(info.offset, value);
+        } else {
+            let (new_shape_id, offset) = self.shapes.transition_with_attributes(obj.shape_id, "length", attrs);
+            obj.shape_id = new_shape_id;
+            obj.set_slot(offset, value);
+            obj.add_prop_order("length".to_string());
+        }
+    }
+
+    /// Apply an array `length` assignment: coerce the value, validate it and
+    /// truncate or grow the dense storage.
+    ///
+    /// Returns `false` when the value is not a valid array length (the caller
+    /// decides whether that is a `RangeError`).
+    fn assign_array_length(&mut self, obj: &mut JsObject, value: JsValue) -> bool {
+        if !obj.is_array_length_writable() {
+            return false;
+        }
+        let num = match self.to_number_value(value) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+        let u32_len = num as u32;
+        if (u32_len as f64) != num || num.is_nan() || num.is_sign_negative() {
+            return false;
+        }
+        let new_len = u32_len as usize;
+        if let ObjectKind::Array(elements) = &mut obj.kind {
+            if new_len < elements.len() {
+                elements.truncate(new_len);
+            } else if new_len < 100_000 {
+                elements.resize(new_len, JsValue::hole());
+            }
+        }
+        self.set_array_length_slot(obj, num);
+        true
+    }
+
     pub fn get_prototype_of(&mut self, target: JsValue) -> Option<JsValue> {
         if let Some(ptr) = target.as_object_ptr() {
             if !self.is_valid_heap_object(ptr) {
@@ -95,32 +210,29 @@ impl Vm {
                 }
             }
 
-            if let ObjectKind::Array(elements) = &mut obj.kind {
+            if matches!(obj.kind, ObjectKind::Array(_)) {
                 if key == "length" {
-                    if let Some(new_len) = value.to_number().map(|n| n as usize) {
-                        if new_len < elements.len() {
-                            elements.truncate(new_len);
-                        } else if new_len < 100_000 {
-                            elements.resize(new_len, JsValue::hole());
-                        }
-                    }
-                    if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
-                        obj.set_slot(offset, value);
-                    } else {
-                        let (new_shape_id, offset) = self.shapes.transition(obj.shape_id, key);
-                        obj.shape_id = new_shape_id;
-                        obj.set_slot(offset, value);
-                        obj.add_prop_order(key.to_string());
-                    }
+                    self.assign_array_length(obj, value);
                     return;
                 }
-                if let Ok(idx) = key.parse::<usize>() {
-                    if idx < elements.len() {
-                        elements[idx] = value;
+                if let Some(idx) = Self::canonical_array_index(key) {
+                    let dense_len = match &obj.kind {
+                        ObjectKind::Array(elements) => elements.len(),
+                        _ => 0,
+                    };
+                    if idx < dense_len {
+                        if let ObjectKind::Array(elements) = &mut obj.kind {
+                            elements[idx] = value;
+                        }
                         return;
                     } else if idx < 100_000 {
-                        elements.resize(idx + 1, JsValue::hole());
-                        elements[idx] = value;
+                        if let ObjectKind::Array(elements) = &mut obj.kind {
+                            elements.resize(idx + 1, JsValue::hole());
+                            elements[idx] = value;
+                        }
+                        return;
+                    } else {
+                        self.set_sparse_array_element(obj, idx, value);
                         return;
                     }
                 }
@@ -178,32 +290,29 @@ impl Vm {
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
 
-            if let ObjectKind::Array(elements) = &mut obj.kind {
+            if matches!(obj.kind, ObjectKind::Array(_)) {
                 if key == "length" {
-                    if let Some(new_len) = value.to_number().map(|n| n as usize) {
-                        if new_len < elements.len() {
-                            elements.truncate(new_len);
-                        } else if new_len < 100_000 {
-                            elements.resize(new_len, JsValue::hole());
-                        }
-                    }
-                    if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
-                        obj.set_slot(offset, value);
-                    } else {
-                        let (new_shape_id, offset) = self.shapes.transition(obj.shape_id, key);
-                        obj.shape_id = new_shape_id;
-                        obj.set_slot(offset, value);
-                        obj.add_prop_order(key.to_string());
-                    }
+                    self.assign_array_length(obj, value);
                     return;
                 }
-                if let Ok(idx) = key.parse::<usize>() {
-                    if idx < elements.len() {
-                        elements[idx] = value;
+                if let Some(idx) = Self::canonical_array_index(key) {
+                    let dense_len = match &obj.kind {
+                        ObjectKind::Array(elements) => elements.len(),
+                        _ => 0,
+                    };
+                    if idx < dense_len {
+                        if let ObjectKind::Array(elements) = &mut obj.kind {
+                            elements[idx] = value;
+                        }
                         return;
                     } else if idx < 100_000 {
-                        elements.resize(idx + 1, JsValue::hole());
-                        elements[idx] = value;
+                        if let ObjectKind::Array(elements) = &mut obj.kind {
+                            elements.resize(idx + 1, JsValue::hole());
+                            elements[idx] = value;
+                        }
+                        return;
+                    } else {
+                        self.set_sparse_array_element(obj, idx, value);
                         return;
                     }
                 }
@@ -305,6 +414,21 @@ impl Vm {
             // If property is already non-configurable, redefining it as configurable fails.
             if !self.is_own_property_configurable(target, key) {
                 return Ok(false);
+            }
+
+            // CreateDataProperty must fail on a non-writable data property or
+            // an accessor property rather than silently overwriting it.
+            if self.has_own_property(target, key) {
+                if !self.is_own_property_writable(target, key) {
+                    return Ok(false);
+                }
+                let is_accessor = matches!(
+                    unsafe { &*(ptr as *const JsObject) }.accessors.as_deref(),
+                    Some(accs) if accs.contains_key(key)
+                );
+                if is_accessor {
+                    return Ok(false);
+                }
             }
 
             // Check non-extensible

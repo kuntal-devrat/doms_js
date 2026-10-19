@@ -337,7 +337,7 @@ fn to_canonical_array_index(key: JsValue) -> Option<usize> {
                         if let Some(ptr) = obj.as_object_ptr() {
                             let jsobj = unsafe { &*(ptr as *mut JsObject) };
                             if let ObjectKind::Array(elements) = &jsobj.kind {
-                                if idx < elements.len() {
+                                if !jsobj.has_element_attributes() && idx < elements.len() {
                                     let el = elements[idx];
                                     if !el.is_hole() {
                                         self.push(el);
@@ -413,10 +413,11 @@ fn to_canonical_array_index(key: JsValue) -> Option<usize> {
                         if let Some(ptr) = obj.as_object_ptr() {
                             let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
                             let is_extensible = jsobj.is_extensible();
+                            let has_elem_attrs = jsobj.has_element_attributes();
                             if let ObjectKind::Array(elements) = &mut jsobj.kind {
                                 let is_existing = idx < elements.len() && !elements[idx].is_hole();
                                 let is_standard_proto = jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
-                                if (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 && is_extensible {
+                                if !has_elem_attrs && (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 && is_extensible {
                                     if idx < elements.len() {
                                         elements[idx] = val;
                                     } else if idx == elements.len() {

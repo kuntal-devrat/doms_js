@@ -8,6 +8,7 @@ impl Vm {
     }
 
     pub fn drain_microtasks(&mut self) -> Result<(), VmError> {
+        crate::interpreter::gc::register_stack_base();
         let mut count = 0;
         while let Some((callee, args)) = self.microtasks.pop_front() {
             count += 1;

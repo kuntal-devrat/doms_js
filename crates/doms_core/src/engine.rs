@@ -102,9 +102,9 @@ impl Isolate {
 
     /// Create a new isolate with custom heap configuration.
     pub fn with_config(config: HeapConfig) -> Self {
-        let mut vm = doms_vm::Vm::new();
-        vm.heap = Heap::new(config);
-        Self { vm }
+        // The heap must exist before any builtin is allocated, otherwise the
+        // builtins would live in a heap that is thrown away here.
+        Self { vm: doms_vm::Vm::with_heap(Heap::new(config)) }
     }
 
     /// Create a new execution context within this isolate.
@@ -415,6 +415,29 @@ mod tests {
         let opt_none: Option<i32> = None;
         let val_none = opt_none.into_js(&mut isolate.vm);
         assert_eq!(Option::<i32>::from_js(val_none, &mut isolate.vm).unwrap(), None);
+    }
+
+    #[test]
+    fn test_isolate_with_config_builtins_survive_gc() {
+        let engine = Engine::new();
+        // A custom (small) heap must still host the builtins allocated during
+        // VM construction — otherwise GC would sweep them and property reads
+        // on prototypes would fail.
+        let mut isolate = engine.create_isolate_with_config(doms_gc::heap::HeapConfig {
+            nursery_size: 64 * 1024,
+            old_gen_size: 256 * 1024,
+        });
+
+        let mut ctx = isolate.create_context();
+        let res = ctx.eval("'abc'.toUpperCase() === 'ABC'").unwrap();
+        assert_eq!(res.as_boolean(), Some(true));
+
+        // Force a full collection and verify builtins are still reachable.
+        ctx.isolate.vm.scavenge_nursery();
+        ctx.isolate.vm.gc_collect();
+
+        let res = ctx.eval("[1, 2, 3].map(function (x) { return x * 2; }).join(',') === '2,4,6'").unwrap();
+        assert_eq!(res.as_boolean(), Some(true));
     }
 }
 

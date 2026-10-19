@@ -26,6 +26,13 @@ pub struct Vm {
     pub max_evals: Option<usize>,
     pub oom: bool,
     pub gc_threshold: usize,
+    /// When `true`, automatic and explicit collections are no-ops.
+    ///
+    /// Set while the VM is constructing its builtins: registration code holds
+    /// raw `JsValue`/`JsObject` pointers in Rust locals and containers that the
+    /// collector cannot see, so collecting mid-construction would free objects
+    /// that are still in use.
+    pub gc_suppressed: bool,
     pub temp_roots: Vec<JsValue>,
     pub pending_alloc: Option<*mut JsObject>,
     pub object_proto: Option<JsValue>,
@@ -94,12 +101,27 @@ pub struct RegExpLastMatch {
 }
 
 impl Vm {
+    /// Create a VM using the default heap configuration.
     pub fn new() -> Self {
+        Self::with_heap(Heap::with_defaults())
+    }
+
+    /// Create a VM backed by a caller-provided [`Heap`].
+    ///
+    /// All builtins are allocated into the supplied heap, so callers that want
+    /// a custom heap configuration must construct the VM through this method
+    /// rather than swapping `vm.heap` afterwards (which would orphan every
+    /// already-allocated builtin).
+    pub fn with_heap(heap: Heap) -> Self {
+        // Record this thread's stack boundary first: constructing builtins
+        // performs many allocations, and a collection triggered during
+        // construction must be able to see the constructor's locals.
+        crate::interpreter::gc::register_stack_base();
         let mut vm = Self {
             stack: Vec::with_capacity(4096),
             frames: Vec::with_capacity(256),
             globals: HashMap::new(),
-            heap: Heap::with_defaults(),
+            heap,
             shapes: ShapeRegistry::new(),
             inline_caches: Vec::new(),
             chunk_ics: HashMap::new(),
@@ -119,6 +141,7 @@ impl Vm {
             max_evals: None,
             oom: false,
             gc_threshold: 4096,
+            gc_suppressed: false,
             temp_roots: Vec::new(),
             pending_alloc: None,
             object_proto: None,
@@ -178,7 +201,13 @@ impl Vm {
         let global_obj = vm.alloc_object_old_gen();
         vm.global_object = global_obj;
         vm.globals.insert("globalThis".to_string(), global_obj);
+        // Builtin registration walks dozens of `register_*` helpers that hold
+        // freshly allocated objects in Rust locals and `Vec`s while allocating
+        // more. Those references are invisible to the collector, so no
+        // collection may run until every builtin is reachable from VM roots.
+        vm.gc_suppressed = true;
         register_builtins(&mut vm);
+        vm.gc_suppressed = false;
         vm
     }
 

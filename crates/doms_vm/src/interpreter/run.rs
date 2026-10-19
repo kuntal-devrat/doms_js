@@ -77,7 +77,11 @@ impl Vm {
     }
 
     fn run_until_depth_internal(&mut self, target_depth: usize) -> Result<JsValue, VmError> {
+        crate::interpreter::gc::register_stack_base();
         while self.frames.len() > target_depth {
+            // Fuel is consumed for every executed instruction, whether or not a
+            // limit is configured, so `fuel_consumed`/interrupt checks are exact.
+            self.instruction_count += 1;
             if self.objects.len() >= self.gc_threshold {
                 self.gc_collect();
                 if self.objects.len() * 2 > self.gc_threshold {
@@ -88,7 +92,6 @@ impl Vm {
                 return Err(VmError::RangeError("Out of memory: allocation limit reached".to_string()));
             }
             if let Some(max) = self.max_instructions {
-                self.instruction_count += 1;
                 if self.instruction_count > max {
                     return Err(VmError::RuntimeError(
                         "Execution step limit exceeded (timeout)".to_string(),
@@ -283,14 +286,16 @@ impl Vm {
                             if idx >= 0 {
                                 if let Some(ptr) = obj.as_object_ptr() {
                                     let jsobj = unsafe { &*(ptr as *mut JsObject) };
-                                    if let ObjectKind::Array(elements) = &jsobj.kind {
-                                        let uidx = idx as usize;
-                                        if uidx < elements.len() {
-                                            let el = elements[uidx];
-                                            if !el.is_hole() {
-                                                self.stack[stack_len - 2] = el;
-                                                self.stack.truncate(stack_len - 1);
-                                                continue;
+                                    if !jsobj.has_element_attributes() {
+                                        if let ObjectKind::Array(elements) = &jsobj.kind {
+                                            let uidx = idx as usize;
+                                            if uidx < elements.len() {
+                                                let el = elements[uidx];
+                                                if !el.is_hole() {
+                                                    self.stack[stack_len - 2] = el;
+                                                    self.stack.truncate(stack_len - 1);
+                                                    continue;
+                                                }
                                             }
                                         }
                                     }
@@ -312,21 +317,23 @@ impl Vm {
                                 if let Some(ptr) = obj.as_object_ptr() {
                                     let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
                                     let is_extensible = jsobj.is_extensible();
-                                    if let ObjectKind::Array(elements) = &mut jsobj.kind {
-                                        let uidx = idx as usize;
-                                        if uidx < elements.len() && !elements[uidx].is_hole() {
-                                            elements[uidx] = val;
-                                            self.stack[stack_len - 3] = val;
-                                            self.stack.truncate(stack_len - 2);
-                                            continue;
-                                        } else if uidx == elements.len()
-                                            && (jsobj.prototype.is_none() || jsobj.prototype == self.array_proto)
-                                            && is_extensible
-                                        {
-                                            elements.push(val);
-                                            self.stack[stack_len - 3] = val;
-                                            self.stack.truncate(stack_len - 2);
-                                            continue;
+                                    if !jsobj.has_element_attributes() {
+                                        if let ObjectKind::Array(elements) = &mut jsobj.kind {
+                                            let uidx = idx as usize;
+                                            if uidx < elements.len() && !elements[uidx].is_hole() {
+                                                elements[uidx] = val;
+                                                self.stack[stack_len - 3] = val;
+                                                self.stack.truncate(stack_len - 2);
+                                                continue;
+                                            } else if uidx == elements.len()
+                                                && (jsobj.prototype.is_none() || jsobj.prototype == self.array_proto)
+                                                && is_extensible
+                                            {
+                                                elements.push(val);
+                                                self.stack[stack_len - 3] = val;
+                                                self.stack.truncate(stack_len - 2);
+                                                continue;
+                                            }
                                         }
                                     }
                                 }
@@ -799,6 +806,13 @@ impl Vm {
         target_ip: usize,
         _target_depth: usize,
     ) -> Result<OsrOutcome, VmError> {
+        // Native loops run without per-instruction checks, so they must not be
+        // entered while the embedder asked for preemption or fuel metering.
+        // Falling back to the interpreter keeps interrupts, deadlines and
+        // instruction budgets exact.
+        if self.interrupt_flag.is_some() || self.deadline.is_some() || self.max_instructions.is_some() {
+            return Ok(OsrOutcome::NotTriggered);
+        }
         let count = self.loop_hotness.entry((chunk.id, target_ip)).or_insert(0);
         *count = count.saturating_add(1);
         if *count >= crate::jit::OSR_HOT_THRESHOLD {

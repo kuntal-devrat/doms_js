@@ -94,25 +94,32 @@ impl LargeObjectSpace {
     }
 
     /// Sweep: free all unmarked large objects, reset marks on survivors.
+    ///
+    /// A large object is considered live when either its per-space mark flag
+    /// or its [`GcHeader`] mark bit is set. The header bit lets the VM's
+    /// tracing collector mark large objects without reaching into this crate.
     pub fn sweep(&mut self) -> usize {
         let mut freed = 0usize;
 
-        self.objects.retain(|obj| {
-            if obj.marked {
-                true // Keep alive.
+        let mut i = 0;
+        while i < self.objects.len() {
+            let header_marked = unsafe {
+                let header = &mut *(self.objects[i].ptr as *mut GcHeader);
+                let marked = header.is_marked();
+                header.clear_marked();
+                marked
+            };
+            if self.objects[i].marked || header_marked {
+                self.objects[i].marked = false;
+                i += 1;
             } else {
+                let obj = self.objects.swap_remove(i);
                 // SAFETY: ptr was allocated with obj.layout.
                 unsafe {
                     dealloc(obj.ptr, obj.layout);
                 }
                 freed += obj.layout.size();
-                false // Remove from list.
             }
-        });
-
-        // Reset marks for next cycle.
-        for obj in &mut self.objects {
-            obj.marked = false;
         }
 
         self.bytes_allocated -= freed;
@@ -122,6 +129,23 @@ impl LargeObjectSpace {
     /// Number of live large objects.
     pub fn object_count(&self) -> usize {
         self.objects.len()
+    }
+
+    /// Address range covering every large object allocation, if any.
+    ///
+    /// Used as a cheap first-level filter by conservative stack scans.
+    pub fn address_bounds(&self) -> Option<(usize, usize)> {
+        let mut lo = usize::MAX;
+        let mut hi = 0usize;
+        for obj in &self.objects {
+            lo = lo.min(obj.ptr as usize);
+            hi = hi.max(obj.ptr as usize + obj.layout.size());
+        }
+        if lo < hi {
+            Some((lo, hi))
+        } else {
+            None
+        }
     }
 }
 
@@ -172,5 +196,26 @@ mod tests {
         assert!(freed > 0);
         assert_eq!(los.object_count(), 1);
         assert!(los.contains(p1));
+    }
+
+    #[test]
+    fn test_large_object_sweep_honours_header_mark_bits() {
+        let mut los = LargeObjectSpace::new();
+
+        let p1 = los.allocate(16 * 1024, TypeTag::ArrayBuffer).unwrap();
+        let _p2 = los.allocate(16 * 1024, TypeTag::ArrayBuffer).unwrap();
+
+        // Mimic an external tracing collector: set the header mark bit of p1.
+        unsafe {
+            (*(p1 as *mut GcHeader).sub(1)).set_marked();
+        }
+        let freed = los.sweep();
+        assert!(freed > 0);
+        assert_eq!(los.object_count(), 1);
+        assert!(los.contains(p1));
+        // Marks must be reset so a later sweep does not keep stale survivors.
+        unsafe {
+            assert!(!(*(p1 as *mut GcHeader).sub(1)).is_marked());
+        }
     }
 }

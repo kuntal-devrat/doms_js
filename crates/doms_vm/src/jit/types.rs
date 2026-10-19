@@ -222,12 +222,14 @@ pub extern "C" fn jit_get_elem(obj: u64, key: u64) -> u64 {
     if idx >= 0 {
         if let Some(ptr) = o.as_object_ptr() {
             let jsobj = unsafe { &*(ptr as *const crate::object::JsObject) };
-            if let crate::object::ObjectKind::Array(elements) = &jsobj.kind {
-                let uidx = idx as usize;
-                if uidx < elements.len() {
-                    let el = elements[uidx];
-                    if !el.is_hole() {
-                        return el.0;
+            if !jsobj.has_element_attributes() {
+                if let crate::object::ObjectKind::Array(elements) = &jsobj.kind {
+                    let uidx = idx as usize;
+                    if uidx < elements.len() {
+                        let el = elements[uidx];
+                        if !el.is_hole() {
+                            return el.0;
+                        }
                     }
                 }
             }
@@ -254,19 +256,21 @@ pub extern "C" fn jit_get_elem_dense(raw_obj: u64, idx_i32: i32) -> u64 {
     let o = JsValue(raw_obj);
     if let Some(ptr) = o.as_object_ptr() {
         let jsobj = unsafe { &*(ptr as *const crate::object::JsObject) };
-        if let crate::object::ObjectKind::Array(elements) = &jsobj.kind {
-            let slice = elements.as_slice();
-            ARRAY_CACHE.with(|c| {
-                c.set(Some(ArrayCacheEntry {
-                    obj_val: raw_obj,
-                    elements_ptr: slice.as_ptr(),
-                    len: slice.len(),
-                }));
-            });
-            if uidx < slice.len() {
-                let el = unsafe { *slice.get_unchecked(uidx) };
-                if !el.is_hole() {
-                    return el.0;
+        if !jsobj.has_element_attributes() {
+            if let crate::object::ObjectKind::Array(elements) = &jsobj.kind {
+                let slice = elements.as_slice();
+                ARRAY_CACHE.with(|c| {
+                    c.set(Some(ArrayCacheEntry {
+                        obj_val: raw_obj,
+                        elements_ptr: slice.as_ptr(),
+                        len: slice.len(),
+                    }));
+                });
+                if uidx < slice.len() {
+                    let el = unsafe { *slice.get_unchecked(uidx) };
+                    if !el.is_hole() {
+                        return el.0;
+                    }
                 }
             }
         }
@@ -290,14 +294,16 @@ pub extern "C" fn jit_set_elem(obj: u64, key: u64, val: u64) -> u64 {
     if idx >= 0 {
         if let Some(ptr) = o.as_object_ptr() {
             let jsobj = unsafe { &mut *(ptr as *mut crate::object::JsObject) };
-            if let crate::object::ObjectKind::Array(elements) = &mut jsobj.kind {
-                let uidx = idx as usize;
-                if uidx < elements.len() {
-                    elements[uidx] = v;
-                    return val;
-                } else if uidx == elements.len() {
-                    elements.push(v);
-                    return val;
+            if !jsobj.has_element_attributes() {
+                if let crate::object::ObjectKind::Array(elements) = &mut jsobj.kind {
+                    let uidx = idx as usize;
+                    if uidx < elements.len() {
+                        elements[uidx] = v;
+                        return val;
+                    } else if uidx == elements.len() {
+                        elements.push(v);
+                        return val;
+                    }
                 }
             }
         }
@@ -316,21 +322,23 @@ pub extern "C" fn jit_set_elem_dense(raw_obj: u64, idx_i32: i32, val: u64) -> u6
     let o = JsValue(raw_obj);
     if let Some(ptr) = o.as_object_ptr() {
         let jsobj = unsafe { &mut *(ptr as *mut crate::object::JsObject) };
-        if let crate::object::ObjectKind::Array(elements) = &mut jsobj.kind {
-            if uidx < elements.len() {
-                elements[uidx] = v;
-                return val;
-            } else if uidx == elements.len() {
-                elements.push(v);
-                let new_slice = elements.as_slice();
-                ARRAY_CACHE.with(|c| {
-                    c.set(Some(ArrayCacheEntry {
-                        obj_val: raw_obj,
-                        elements_ptr: new_slice.as_ptr(),
-                        len: new_slice.len(),
-                    }));
-                });
-                return val;
+        if !jsobj.has_element_attributes() {
+            if let crate::object::ObjectKind::Array(elements) = &mut jsobj.kind {
+                if uidx < elements.len() {
+                    elements[uidx] = v;
+                    return val;
+                } else if uidx == elements.len() {
+                    elements.push(v);
+                    let new_slice = elements.as_slice();
+                    ARRAY_CACHE.with(|c| {
+                        c.set(Some(ArrayCacheEntry {
+                            obj_val: raw_obj,
+                            elements_ptr: new_slice.as_ptr(),
+                            len: new_slice.len(),
+                        }));
+                    });
+                    return val;
+                }
             }
         }
     }
@@ -403,19 +411,21 @@ pub extern "C" fn jit_array_length(obj: u64) -> u64 {
     let o = JsValue(obj);
     if let Some(ptr) = o.as_object_ptr() {
         let jsobj = unsafe { &*(ptr as *const crate::object::JsObject) };
-        if let crate::object::ObjectKind::Array(elements) = &jsobj.kind {
-            let len = elements.len();
-            ARRAY_CACHE.with(|c| {
-                c.set(Some(ArrayCacheEntry {
-                    obj_val: obj,
-                    elements_ptr: elements.as_ptr(),
-                    len,
-                }));
-            });
-            if len <= (i32::MAX as usize) {
-                return crate::value::TAG_INT32 | (len as u32 as u64);
-            } else {
-                return JsValue::from_double(len as f64).0;
+        if !jsobj.has_element_attributes() {
+            if let crate::object::ObjectKind::Array(elements) = &jsobj.kind {
+                let len = elements.len();
+                ARRAY_CACHE.with(|c| {
+                    c.set(Some(ArrayCacheEntry {
+                        obj_val: obj,
+                        elements_ptr: elements.as_ptr(),
+                        len,
+                    }));
+                });
+                if len <= (i32::MAX as usize) {
+                    return crate::value::TAG_INT32 | (len as u32 as u64);
+                } else {
+                    return JsValue::from_double(len as f64).0;
+                }
             }
         }
     }
@@ -428,32 +438,34 @@ pub extern "C" fn jit_array_push_fast(obj: u64, val: u64) -> u64 {
     let o = JsValue(obj);
     if let Some(ptr) = o.as_object_ptr() {
         let jsobj = unsafe { &mut *(ptr as *mut crate::object::JsObject) };
-        if let crate::object::ObjectKind::Array(elements) = &mut jsobj.kind {
-            let len = elements.len();
-            let cap = elements.capacity();
-            let v = JsValue(val);
-            if len < cap {
-                unsafe {
-                    let end_ptr = elements.as_mut_ptr().add(len);
-                    std::ptr::write(end_ptr, v);
-                    elements.set_len(len + 1);
+        if !jsobj.has_element_attributes() && jsobj.is_extensible() {
+            if let crate::object::ObjectKind::Array(elements) = &mut jsobj.kind {
+                let len = elements.len();
+                let cap = elements.capacity();
+                let v = JsValue(val);
+                if len < cap {
+                    unsafe {
+                        let end_ptr = elements.as_mut_ptr().add(len);
+                        std::ptr::write(end_ptr, v);
+                        elements.set_len(len + 1);
+                    }
+                } else {
+                    elements.push(v);
                 }
-            } else {
-                elements.push(v);
-            }
-            let new_len = len + 1;
-            let new_ptr = elements.as_ptr();
-            ARRAY_CACHE.with(|c| {
-                c.set(Some(ArrayCacheEntry {
-                    obj_val: obj,
-                    elements_ptr: new_ptr,
-                    len: new_len,
-                }));
-            });
-            if new_len <= (i32::MAX as usize) {
-                return crate::value::TAG_INT32 | (new_len as u32 as u64);
-            } else {
-                return JsValue::from_double(new_len as f64).0;
+                let new_len = len + 1;
+                let new_ptr = elements.as_ptr();
+                ARRAY_CACHE.with(|c| {
+                    c.set(Some(ArrayCacheEntry {
+                        obj_val: obj,
+                        elements_ptr: new_ptr,
+                        len: new_len,
+                    }));
+                });
+                if new_len <= (i32::MAX as usize) {
+                    return crate::value::TAG_INT32 | (new_len as u32 as u64);
+                } else {
+                    return JsValue::from_double(new_len as f64).0;
+                }
             }
         }
     }

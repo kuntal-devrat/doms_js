@@ -53,6 +53,22 @@ impl Default for DomsWasmSandbox {
 
 // C ABI and WebAssembly exported functions
 
+/// Allocate a C string for an FFI result.
+///
+/// Every string returned by the eval entry points is allocated this way, so
+/// callers may uniformly release results with [`doms_wasm_free_string`].
+fn result_cstring(s: impl Into<Vec<u8>>) -> *const u8 {
+    CString::new(s).unwrap_or_else(|_| CString::new("Error: interior NUL").unwrap()).into_raw() as *const u8
+}
+
+/// Lock the isolate table, recovering from poisoning after a panic.
+fn lock_isolates() -> std::sync::MutexGuard<'static, Option<HashMap<usize, DomsWasmSandbox>>> {
+    match ISOLATES.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn doms_wasm_version() -> *const u8 {
     concat!("DOMS.js Wasm v", env!("CARGO_PKG_VERSION"), "\0").as_ptr()
@@ -60,7 +76,14 @@ pub extern "C" fn doms_wasm_version() -> *const u8 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn doms_wasm_alloc(size: usize) -> *mut u8 {
-    let mut vec = vec![0u8; size];
+    if size == 0 {
+        return std::ptr::null_mut();
+    }
+    let mut vec = Vec::<u8>::new();
+    if vec.try_reserve_exact(size).is_err() {
+        return std::ptr::null_mut();
+    }
+    vec.resize(size, 0);
     let ptr = vec.as_mut_ptr();
     std::mem::forget(vec);
     ptr
@@ -78,7 +101,7 @@ pub extern "C" fn doms_wasm_free(ptr: *mut u8, size: usize) {
 #[unsafe(no_mangle)]
 pub extern "C" fn doms_wasm_create_isolate() -> usize {
     let id = NEXT_ISOLATE_ID.fetch_add(1, Ordering::SeqCst);
-    let mut lock = ISOLATES.lock().unwrap();
+    let mut lock = lock_isolates();
     let map = lock.get_or_insert_with(HashMap::new);
     map.insert(id, DomsWasmSandbox::new());
     id
@@ -86,7 +109,7 @@ pub extern "C" fn doms_wasm_create_isolate() -> usize {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn doms_wasm_destroy_isolate(id: usize) {
-    let mut lock = ISOLATES.lock().unwrap();
+    let mut lock = lock_isolates();
     if let Some(map) = lock.as_mut() {
         map.remove(&id);
     }
@@ -99,27 +122,40 @@ pub extern "C" fn doms_wasm_isolate_eval(
     source_len: usize,
 ) -> *const u8 {
     if source_ptr.is_null() {
-        return std::ptr::null();
+        return result_cstring("Error: null source pointer");
     }
     let slice = unsafe { std::slice::from_raw_parts(source_ptr, source_len) };
     let source_str = match std::str::from_utf8(slice) {
         Ok(s) => s,
-        Err(_) => return c"Error: Invalid UTF-8".as_ptr() as *const u8,
+        // Return a heap string just like every other result so that callers can
+        // uniformly release it with `doms_wasm_free_string`.
+        Err(_) => return result_cstring("Error: Invalid UTF-8"),
     };
 
-    let mut lock = ISOLATES.lock().unwrap();
+    let mut lock = lock_isolates();
     let map = lock.get_or_insert_with(HashMap::new);
     let sandbox = map.entry(isolate_id).or_default();
 
-    let output = match sandbox.eval_with_event_loop(source_str) {
-        Ok(s) => s,
-        Err(e) => format!("Error: {}", e),
+    // A panic must never unwind across the C ABI boundary: that is undefined
+    // behaviour. Convert it into a regular error string instead.
+    let output = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sandbox.eval_with_event_loop(source_str)
+    })) {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => format!("Error: {}", e),
+        Err(_) => "Error: panic in evaluation".to_string(),
     };
 
-    let c_str = CString::new(output).unwrap_or_else(|_| CString::new("Error: CString conversion").unwrap());
-    c_str.into_raw() as *const u8
+    result_cstring(output)
 }
 
+/// Free a string previously returned by the eval entry points.
+///
+/// # Safety
+/// `ptr` must be a pointer returned by [`doms_wasm_isolate_eval`] /
+/// [`doms_wasm_eval`] (or another `result_cstring` allocation) that has not
+/// already been freed. Static strings such as [`doms_wasm_version`] must not
+/// be passed here.
 #[unsafe(no_mangle)]
 pub extern "C" fn doms_wasm_free_string(ptr: *mut std::ffi::c_char) {
     if !ptr.is_null() {
@@ -201,5 +237,31 @@ mod tests {
 
         doms_wasm_free_string(res_ptr as *mut _);
         doms_wasm_free(ptr, script.len());
+    }
+
+    #[test]
+    fn test_wasm_invalid_utf8_result_is_freeable() {
+        // The error result must be heap-allocated like every other result so
+        // that `doms_wasm_free_string` can safely release it.
+        let bad = [0xFFu8, 0xFE];
+        let res_ptr = doms_wasm_eval(bad.as_ptr(), bad.len());
+        assert!(!res_ptr.is_null());
+        let msg = unsafe { CStr::from_ptr(res_ptr as *const std::ffi::c_char) }.to_str().unwrap();
+        assert!(msg.starts_with("Error:"), "unexpected error message: {}", msg);
+        doms_wasm_free_string(res_ptr as *mut _);
+    }
+
+    #[test]
+    fn test_wasm_null_source_pointer_is_handled() {
+        let res_ptr = doms_wasm_eval(std::ptr::null(), 0);
+        assert!(!res_ptr.is_null());
+        let msg = unsafe { CStr::from_ptr(res_ptr as *const std::ffi::c_char) }.to_str().unwrap();
+        assert!(msg.starts_with("Error:"), "unexpected error message: {}", msg);
+        doms_wasm_free_string(res_ptr as *mut _);
+    }
+
+    #[test]
+    fn test_wasm_alloc_zero_size_returns_null() {
+        assert!(doms_wasm_alloc(0).is_null());
     }
 }

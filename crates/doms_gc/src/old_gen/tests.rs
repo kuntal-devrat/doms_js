@@ -137,3 +137,35 @@ fn test_old_gen_sweep_and_reuse() {
     assert_eq!(old_gen.object_count, 3);
     assert!(old_gen.contains(old_p4));
 }
+
+#[test]
+fn test_old_gen_repeated_sweep_scans_past_split_remainder() {
+    let mut nursery = Nursery::new(4096);
+    let mut old_gen = OldGen::new(4096);
+
+    let p1 = nursery.allocate(16, TypeTag::Object).unwrap();
+    let p2 = nursery.allocate(96, TypeTag::Object).unwrap();
+    let p3 = nursery.allocate(16, TypeTag::Object).unwrap();
+    let old_p1 = unsafe { old_gen.promote(p1).unwrap() };
+    let _old_p2 = unsafe { old_gen.promote(p2).unwrap() };
+    let old_p3 = unsafe { old_gen.promote(p3).unwrap() };
+
+    // First sweep frees p2, leaving a large free chunk between p1 and p3.
+    old_gen.start_incremental_marking(&[old_p1, old_p3]);
+    let reclaimed = old_gen.sweep();
+    assert!(reclaimed > 0);
+    assert_eq!(old_gen.object_count, 2);
+
+    // Allocate a smaller block from p2's chunk: it splits, and the remainder
+    // must keep a valid free header so the next sweep can scan past it.
+    let p4 = old_gen.allocate(8, TypeTag::Object).unwrap();
+    assert_eq!(p4, _old_p2);
+
+    // Second sweep: only p3 (which sits *after* the split remainder) is live.
+    old_gen.start_incremental_marking(&[old_p3]);
+    let reclaimed = old_gen.sweep();
+    assert!(reclaimed > 0, "dead objects after a split remainder must be reclaimed");
+    assert_eq!(old_gen.object_count, 1, "the live object after the remainder must survive");
+    assert!(old_gen.bytes_used > 0);
+    assert!(!old_gen.is_marked(old_p3), "live mark must be cleared by the sweep");
+}

@@ -462,6 +462,7 @@ impl Vm {
     }
 
     pub fn call(&mut self, callee: JsValue, this_val: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
+        crate::interpreter::gc::register_stack_base();
         let res_opt = self.execute_call_internal(callee, this_val, args)?;
         if let Some(res) = res_opt {
             Ok(res)
