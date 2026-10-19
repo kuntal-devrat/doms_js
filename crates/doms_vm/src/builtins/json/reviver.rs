@@ -7,15 +7,15 @@ pub(super) fn json_walk(vm: &mut Vm, reviver: JsValue, holder: JsValue, name: &s
     vm.temp_roots.push(holder);
     vm.temp_roots.push(reviver);
 
-    let val = vm.get_property(holder, name);
+    let val = vm.get_property_result(holder, name)?;
     vm.temp_roots.push(val);
 
     let res = (|| -> Result<JsValue, VmError> {
         let cur_val = vm.temp_roots[prev_temp + 2];
         if cur_val.is_js_object() {
-            if vm.is_array(cur_val) {
-                let len_val = vm.get_property(cur_val, "length");
-                let len = len_val.to_int32().unwrap_or(0).max(0) as usize;
+            if vm.is_array_result(cur_val)? {
+                let len_val = vm.get_property_result(cur_val, "length")?;
+                let len = vm.to_number_value(len_val).unwrap_or(0.0).max(0.0) as usize;
                 for i in 0..len {
                     let prop_str = i.to_string();
                     let cur_v = vm.temp_roots[prev_temp + 2];
@@ -23,22 +23,27 @@ pub(super) fn json_walk(vm: &mut Vm, reviver: JsValue, holder: JsValue, name: &s
                     let new_elem = json_walk(vm, cur_r, cur_v, &prop_str)?;
                     let cur_v = vm.temp_roots[prev_temp + 2];
                     if new_elem.is_undefined() {
-                        vm.delete_property(cur_v, &prop_str)?;
+                        let _ = vm.delete_property(cur_v, &prop_str)?;
                     } else {
-                        vm.create_data_property_or_throw(cur_v, &prop_str, new_elem)?;
+                        let _ = vm.create_data_property(cur_v, &prop_str, new_elem)?;
                     }
                 }
             } else {
-                let keys = get_enumerable_keys(vm, cur_val);
+                let key_vals = crate::builtins::object::enumerable_own_property_names(
+                    vm,
+                    cur_val,
+                    crate::builtins::object::EnumerableKind::Key,
+                )?;
+                let keys: Vec<String> = key_vals.into_iter().map(|k| vm.to_string_value(k)).collect();
                 for k in keys {
                     let cur_v = vm.temp_roots[prev_temp + 2];
                     let cur_r = vm.temp_roots[prev_temp + 1];
                     let new_val = json_walk(vm, cur_r, cur_v, &k)?;
                     let cur_v = vm.temp_roots[prev_temp + 2];
                     if new_val.is_undefined() {
-                        vm.delete_property(cur_v, &k)?;
+                        let _ = vm.delete_property(cur_v, &k)?;
                     } else {
-                        vm.create_data_property_or_throw(cur_v, &k, new_val)?;
+                        let _ = vm.create_data_property(cur_v, &k, new_val)?;
                     }
                 }
             }

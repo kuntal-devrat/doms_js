@@ -3,6 +3,7 @@
 use super::*;
 
 mod constructor;
+pub(crate) use constructor::{enumerable_own_property_names, EnumerableKind};
 pub(crate) mod define_property;
 pub(crate) mod descriptor;
 mod group_by;

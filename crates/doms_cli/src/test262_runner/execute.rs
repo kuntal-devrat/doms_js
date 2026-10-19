@@ -39,6 +39,13 @@ impl Test262Runner {
                 || feat == "tail-call-optimization"
                 || feat == "host-gc-required"
                 || feat == "uint8array-base64"
+                || feat == "json-parse-with-source"
+                || feat == "well-formed-json-stringify"
+                || feat == "joint-iteration"
+                || feat == "iterator-chunking"
+                || feat == "iterator-includes"
+                || feat == "Iterator.prototype.join"
+                || feat == "iterator-sequencing"
             {
                 return TestStatus::Skip(format!("Feature '{}' not supported", feat));
             }

@@ -18,9 +18,10 @@ impl Test262Runner {
         };
 
         let yaml = &content[start_idx..end_idx];
+        let normalized_yaml = yaml.replace("\r\n", "\n").replace('\r', "\n");
         let mut in_negative = false;
 
-        for raw_line in yaml.lines() {
+        for raw_line in normalized_yaml.lines() {
             let line = raw_line.trim();
 
             if line.starts_with("description:") {

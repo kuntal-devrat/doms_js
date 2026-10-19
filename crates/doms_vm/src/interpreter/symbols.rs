@@ -183,7 +183,16 @@ impl Vm {
             }
 
             let has_own_data = obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
-            if !has_own_data {
+            if has_own_data {
+                let is_writable = if let Some(attrs_map) = &obj.symbol_attributes {
+                    attrs_map.get(&key).map(|a| a.writable).unwrap_or(!is_to_string_tag)
+                } else {
+                    !is_to_string_tag
+                };
+                if !is_writable {
+                    return Ok(false);
+                }
+            } else {
                 let mut curr_proto = obj.prototype;
                 while let Some(proto_val) = curr_proto {
                     if let Some(proto_ptr) = proto_val.as_object_ptr() {
@@ -200,6 +209,19 @@ impl Vm {
                                 } else {
                                     return Ok(false);
                                 }
+                            }
+                        }
+                        if let Some(syms) = &proto_obj.symbol_properties {
+                            if syms.contains_key(&key) {
+                                let is_writable = if let Some(attrs_map) = &proto_obj.symbol_attributes {
+                                    attrs_map.get(&key).map(|a| a.writable).unwrap_or(!is_to_string_tag)
+                                } else {
+                                    !is_to_string_tag
+                                };
+                                if !is_writable {
+                                    return Ok(false);
+                                }
+                                break;
                             }
                         }
                         curr_proto = proto_obj.prototype;
@@ -233,6 +255,16 @@ impl Vm {
             let has_sym = r_obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
             if !r_obj.is_extensible() && !has_sym {
                 return Ok(false);
+            }
+            if has_sym {
+                let is_writable = if let Some(attrs_map) = &r_obj.symbol_attributes {
+                    attrs_map.get(&key).map(|a| a.writable).unwrap_or(!is_to_string_tag)
+                } else {
+                    !is_to_string_tag
+                };
+                if !is_writable {
+                    return Ok(false);
+                }
             }
             r_obj.insert_symbol_property(key, value);
             return Ok(true);

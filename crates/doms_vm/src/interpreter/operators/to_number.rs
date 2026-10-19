@@ -39,6 +39,36 @@ impl Vm {
         trimmed.parse::<f64>().unwrap_or(f64::NAN)
     }
 
+    pub fn to_integer_or_infinity(&mut self, val: JsValue) -> Result<f64, VmError> {
+        if val.is_undefined() {
+            return Ok(0.0);
+        }
+        let n = self.to_number_value(val)?;
+        if n.is_nan() || n == 0.0 {
+            Ok(0.0)
+        } else if n.is_infinite() {
+            Ok(n)
+        } else {
+            Ok(n.trunc())
+        }
+    }
+
+    pub fn to_length(&mut self, val: JsValue) -> Result<usize, VmError> {
+        let raw_len = self.to_number_value(val)?;
+        if raw_len.is_nan() || raw_len <= 0.0 {
+            Ok(0)
+        } else if raw_len >= 9007199254740991.0 {
+            Ok(9007199254740991)
+        } else {
+            Ok(raw_len.trunc() as usize)
+        }
+    }
+
+    pub fn length_of_array_like(&mut self, obj: JsValue) -> Result<usize, VmError> {
+        let len_val = self.get_property_result(obj, "length")?;
+        self.to_length(len_val)
+    }
+
     pub fn to_number_value(&mut self, val: JsValue) -> Result<f64, VmError> {
         let prim = self.to_primitive(val, PreferredType::Number)?;
         if prim.is_symbol() {

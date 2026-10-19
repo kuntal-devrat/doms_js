@@ -38,14 +38,20 @@ pub fn get_own_property_descriptor_internal(
                     if let Some(val) = syms.get(&sym) {
                         let desc = vm.alloc_object();
                         vm.set_property(desc, "value", *val);
-                        let is_tag = vm.symbol_to_string_tag.is_some_and(|t| t == sym);
-                        let is_iter = vm.symbol_iterator.is_some_and(|i| i == sym);
-                        let is_writ = !is_tag;
-                        let is_enum = !is_tag && !is_iter;
-                        let is_conf = !vm.module_namespace_objects.contains(&target);
-                        vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
-                        vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
-                        vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
+                        if let Some(attrs) = obj.symbol_attributes.as_ref().and_then(|m| m.get(&sym)) {
+                            vm.set_property(desc, "writable", JsValue::from_boolean(attrs.writable));
+                            vm.set_property(desc, "enumerable", JsValue::from_boolean(attrs.enumerable));
+                            vm.set_property(desc, "configurable", JsValue::from_boolean(attrs.configurable));
+                        } else {
+                            let is_tag = vm.symbol_to_string_tag.is_some_and(|t| t == sym);
+                            let is_iter = vm.symbol_iterator.is_some_and(|i| i == sym);
+                            let is_writ = !is_tag;
+                            let is_enum = !is_tag && !is_iter;
+                            let is_conf = !vm.module_namespace_objects.contains(&target);
+                            vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
+                            vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
+                            vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
+                        }
                         return Ok(desc);
                     }
                 }

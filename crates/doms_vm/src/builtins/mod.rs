@@ -33,6 +33,7 @@
 
 use crate::interpreter::{PropertyKeyVal, Vm, VmError};
 use crate::object::{Accessor, JsObject, JsTypedArray, MapIterationKind, NativeFn, ObjectKind, SetIterationKind, TypedArrayKind};
+use crate::shape::PropertyAttributes;
 use crate::value::JsValue;
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, One, Signed, Zero};
@@ -67,7 +68,7 @@ use collections::register_collections;
 use console::{native_console_log, register_console};
 use function::register_function_builtins;
 use globals::register_global_helpers;
-use helpers::{define_property_on_module_namespace, get_enumerable_keys, iterate_to_vec};
+use helpers::{define_property_on_module_namespace, iterate_to_vec};
 use intl::register_intl_builtins;
 use iterator::register_iterator_builtins;
 use json::register_json;

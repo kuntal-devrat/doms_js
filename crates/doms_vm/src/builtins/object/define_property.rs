@@ -257,6 +257,24 @@ pub fn define_property_internal(
                             accs.remove(&sym);
                         }
                         obj.insert_symbol_property(sym, val);
+                        let curr_attrs = obj.symbol_attributes.as_ref().and_then(|m| m.get(&sym)).copied().unwrap_or(PropertyAttributes::DEFAULT);
+                        let attrs = PropertyAttributes {
+                            writable: if has_writ { writ_val } else if !current_exists { false } else { curr_attrs.writable },
+                            enumerable: if has_enum { enum_val } else if !current_exists { false } else { curr_attrs.enumerable },
+                            configurable: if has_conf { conf_val } else if !current_exists { false } else { curr_attrs.configurable },
+                        };
+                        obj.set_symbol_attributes(sym, attrs);
+                    }
+                } else if has_writ || has_enum || has_conf {
+                    if let Some(ptr) = target.as_object_ptr() {
+                        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                        let curr_attrs = obj.symbol_attributes.as_ref().and_then(|m| m.get(&sym)).copied().unwrap_or(PropertyAttributes::DEFAULT);
+                        let attrs = PropertyAttributes {
+                            writable: if has_writ { writ_val } else { curr_attrs.writable },
+                            enumerable: if has_enum { enum_val } else { curr_attrs.enumerable },
+                            configurable: if has_conf { conf_val } else { curr_attrs.configurable },
+                        };
+                        obj.set_symbol_attributes(sym, attrs);
                     }
                 }
             }
@@ -298,7 +316,21 @@ pub fn define_property_internal(
                     val_val
                 } else if let Some(ptr) = target.as_object_ptr() {
                     let obj = unsafe { &*(ptr as *const JsObject) };
-                    if let Some(ref info) = current_info {
+                    if let ObjectKind::Array(elements) = &obj.kind {
+                        if let Ok(idx) = prop_name.parse::<usize>() {
+                            if idx < elements.len() {
+                                elements[idx]
+                            } else if let Some(ref info) = current_info {
+                                obj.get_slot(info.offset).unwrap_or(JsValue::undefined())
+                            } else {
+                                JsValue::undefined()
+                            }
+                        } else if let Some(ref info) = current_info {
+                            obj.get_slot(info.offset).unwrap_or(JsValue::undefined())
+                        } else {
+                            JsValue::undefined()
+                        }
+                    } else if let Some(ref info) = current_info {
                         obj.get_slot(info.offset).unwrap_or(JsValue::undefined())
                     } else {
                         JsValue::undefined()

@@ -143,4 +143,42 @@ impl Vm {
         let key = index.to_string();
         self.set_property(obj, &key, val);
     }
+
+    pub fn has_element_result(&mut self, obj: JsValue, index: usize) -> Result<bool, VmError> {
+        if obj.is_sso_string() {
+            let len = ((obj.0 >> 40) & 0x7) as usize;
+            return Ok(index < len);
+        }
+        if let Some(ptr) = obj.as_object_ptr() {
+            let jsobj = unsafe { &*(ptr as *mut JsObject) };
+            if jsobj.accessors.is_some() || matches!(jsobj.kind, ObjectKind::Proxy { .. }) {
+                let key = index.to_string();
+                return self.has_property(obj, &key);
+            }
+            if let ObjectKind::Array(elements) = &jsobj.kind {
+                if index < elements.len() {
+                    if !elements[index].is_hole() {
+                        return Ok(true);
+                    }
+                }
+                let key = index.to_string();
+                return self.has_property(obj, &key);
+            }
+            if let ObjectKind::TypedArray(ta) = &jsobj.kind {
+                return Ok(index < ta.length);
+            }
+            if let ObjectKind::String(s) = &jsobj.kind {
+                return Ok(index < s.chars().count());
+            }
+            if let ObjectKind::ConsString { length, .. } = &jsobj.kind {
+                return Ok(index < *length);
+            }
+        }
+        let key = index.to_string();
+        self.has_property(obj, &key)
+    }
+
+    pub fn has_element(&mut self, obj: JsValue, index: usize) -> bool {
+        self.has_element_result(obj, index).unwrap_or(false)
+    }
 }

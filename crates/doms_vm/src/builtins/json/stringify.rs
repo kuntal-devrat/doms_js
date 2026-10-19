@@ -26,7 +26,6 @@ pub(super) fn json_stringify_walk(
     vm: &mut Vm,
     holder: JsValue,
     key: &str,
-    val: JsValue,
     stack: &mut Vec<JsValue>,
     replacer_fn: Option<JsValue>,
     replacer_arr: Option<&[String]>,
@@ -35,161 +34,203 @@ pub(super) fn json_stringify_walk(
 ) -> Result<Option<String>, VmError> {
     let prev_temp = vm.temp_roots.len();
     vm.temp_roots.push(holder);
-    vm.temp_roots.push(val);
 
-    // 1. Check toJSON
-    let cur_val = vm.temp_roots[prev_temp + 1];
-    if let Some(_ptr) = cur_val.as_object_ptr() {
-        let to_json = vm.get_property(cur_val, "toJSON");
+    // 1. Let value be ? Get(holder, key).
+    let mut value = vm.get_property_result(holder, key)?;
+    vm.temp_roots.push(value);
+
+    // 2. If Type(value) is Object or BigInt, then
+    //    a. Let toJSON be ? Get(value, "toJSON").
+    //    b. If IsCallable(toJSON) is true, then
+    //       i. Set value to ? Call(toJSON, value, « key »).
+    if value.is_object() || value.is_bigint() {
+        let to_json = vm.get_property_result(value, "toJSON")?;
         if vm.is_callable(to_json) {
             let key_val = vm.alloc_string(key.to_string());
-            let cur_val = vm.temp_roots[prev_temp + 1];
-            let new_val = vm.call(to_json, cur_val, &[key_val])?;
-            vm.temp_roots[prev_temp + 1] = new_val;
+            value = vm.call(to_json, value, &[key_val])?;
+            vm.temp_roots[prev_temp + 1] = value;
         }
     }
 
-    // 2. Call replacer function if provided
+    // 3. If replacer is not undefined, then
+    //    a. Set value to ? Call(replacer, holder, « key, value »).
     if let Some(rf) = replacer_fn {
         let key_val = vm.alloc_string(key.to_string());
         let cur_holder = vm.temp_roots[prev_temp];
-        let cur_val = vm.temp_roots[prev_temp + 1];
-        let new_val = vm.call(rf, cur_holder, &[key_val, cur_val])?;
-        vm.temp_roots[prev_temp + 1] = new_val;
+        value = vm.call(rf, cur_holder, &[key_val, value])?;
+        vm.temp_roots[prev_temp + 1] = value;
     }
 
-    let cur_val = vm.temp_roots[prev_temp + 1];
-    if cur_val.is_null() {
+    // 4. If Type(value) is Object, then unwrap wrappers:
+    if let Some(ptr) = value.as_object_ptr() {
+        let obj = unsafe { &*(ptr as *mut JsObject) };
+        match &obj.kind {
+            ObjectKind::NumberObject(_) => {
+                let n = vm.to_number_value(value)?;
+                value = JsValue::from_double(n);
+                vm.temp_roots[prev_temp + 1] = value;
+            }
+            ObjectKind::StringObject(_) => {
+                let s = vm.to_string_spec(value)?;
+                value = vm.alloc_string(s);
+                vm.temp_roots[prev_temp + 1] = value;
+            }
+            ObjectKind::BooleanObject(b) => {
+                value = JsValue::from_boolean(*b);
+                vm.temp_roots[prev_temp + 1] = value;
+            }
+            ObjectKind::BigIntObject(bi) => {
+                let bi_clone = bi.clone();
+                value = vm.alloc_bigint(bi_clone);
+                vm.temp_roots[prev_temp + 1] = value;
+            }
+            _ => {}
+        }
+    }
+
+    // 5. If value is null, return "null".
+    if value.is_null() {
         vm.temp_roots.truncate(prev_temp);
         return Ok(Some("null".to_string()));
     }
-    if cur_val.is_boolean() {
-        let b = cur_val.as_boolean() == Some(true);
+
+    // 6. If value is true, return "true". 7. If value is false, return "false".
+    if value.is_boolean() {
+        let b = value.as_boolean() == Some(true);
         vm.temp_roots.truncate(prev_temp);
         return Ok(Some(if b { "true".to_string() } else { "false".to_string() }));
     }
-    if cur_val.is_number() {
-        let n = vm.to_number_value(cur_val).unwrap_or(0.0);
+
+    // 8. If Type(value) is String, return QuoteJSONString(value).
+    if value.is_js_string() {
+        let s = vm.to_string_value(value);
+        vm.temp_roots.truncate(prev_temp);
+        return Ok(Some(format!("\"{}\"", escape_json_string(&s))));
+    }
+
+    // 9. If Type(value) is Number, then
+    if value.is_number() {
+        let n = vm.to_number_value(value).unwrap_or(0.0);
         vm.temp_roots.truncate(prev_temp);
         if n.is_nan() || n.is_infinite() {
             return Ok(Some("null".to_string()));
         } else {
-            return Ok(Some(vm.to_string_value(cur_val)));
+            return Ok(Some(vm.to_string_value(value)));
         }
     }
-    if cur_val.is_undefined() || cur_val.is_symbol() {
+
+    // 10. If Type(value) is BigInt, throw a TypeError exception.
+    if value.is_bigint() || (value.is_object() && value.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::BigIntObject(_)))) {
+        vm.temp_roots.truncate(prev_temp);
+        return Err(VmError::TypeError("Do not know how to serialize a BigInt".into()));
+    }
+
+    // 12. If value is undefined or symbol or callable, return undefined.
+    if value.is_undefined() || value.is_symbol() || vm.is_callable(value) {
         vm.temp_roots.truncate(prev_temp);
         return Ok(None);
     }
 
-    let cur_val = vm.temp_roots[prev_temp + 1];
-    if let Some(ptr) = cur_val.as_object_ptr() {
-        let obj = unsafe { &*(ptr as *mut JsObject) };
-        if matches!(obj.kind, ObjectKind::Function(_) | ObjectKind::NativeFunction(_)) {
-            vm.temp_roots.truncate(prev_temp);
-            return Ok(None);
-        }
-        if matches!(obj.kind, ObjectKind::Symbol(_)) {
-            vm.temp_roots.truncate(prev_temp);
-            return Ok(None);
-        }
-        if matches!(obj.kind, ObjectKind::BigInt(_)) {
-            vm.temp_roots.truncate(prev_temp);
-            return Err(VmError::TypeError("Do not know how to serialize a BigInt".into()));
-        }
-
-        let cur_val = vm.temp_roots[prev_temp + 1];
-        if stack.iter().any(|v| v.as_object_ptr() == cur_val.as_object_ptr()) {
+    // 11. If Type(value) is Object and IsCallable(value) is false:
+    if value.is_js_object() {
+        if stack.iter().any(|v| v.as_object_ptr() == value.as_object_ptr()) {
             vm.temp_roots.truncate(prev_temp);
             return Err(VmError::TypeError("Converting circular structure to JSON".into()));
         }
-        stack.push(cur_val);
+        stack.push(value);
 
-        let res = match &obj.kind {
-            ObjectKind::String(s) | ObjectKind::StringObject(s) => {
-                Ok(Some(format!("\"{}\"", escape_json_string(s))))
+        let is_arr = vm.is_array_result(value)?;
+        let res = if is_arr {
+            let len_val = vm.get_property_result(value, "length")?;
+            let len = vm.to_number_value(len_val).unwrap_or(0.0).max(0.0) as usize;
+            let mut items = Vec::with_capacity(len.min(1000));
+            let next_indent = if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
+            for i in 0..len {
+                let cur_value = vm.temp_roots[prev_temp + 1];
+                let s = json_stringify_walk(
+                    vm,
+                    cur_value,
+                    &i.to_string(),
+                    stack,
+                    replacer_fn,
+                    replacer_arr,
+                    gap,
+                    &next_indent,
+                )?;
+                items.push(s.unwrap_or_else(|| "null".to_string()));
             }
-            ObjectKind::NumberObject(n) => {
-                if n.is_nan() || n.is_infinite() {
-                    Ok(Some("null".to_string()))
-                } else {
-                    Ok(Some(vm.to_string_value(JsValue::from_double(*n))))
-                }
-            }
-            ObjectKind::BooleanObject(b) => {
-                Ok(Some(if *b { "true".to_string() } else { "false".to_string() }))
-            }
-            ObjectKind::Array(elements) => {
-                let len = elements.len();
-                let mut items = Vec::with_capacity(len);
-                let next_indent = if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
-                for i in 0..len {
-                    let cur_val = vm.temp_roots[prev_temp + 1];
-                    let elem = vm.get_property(cur_val, &i.to_string());
-                    let s = json_stringify_walk(vm, cur_val, &i.to_string(), elem, stack, replacer_fn, replacer_arr, gap, &next_indent)?;
-                    items.push(s.unwrap_or_else(|| "null".to_string()));
-                }
-                if items.is_empty() {
-                    Ok(Some("[]".to_string()))
-                } else if gap.is_empty() {
-                    Ok(Some(format!("[{}]", items.join(","))))
-                } else {
-                    let mut out = String::from("[\n");
-                    for (idx, item) in items.iter().enumerate() {
-                        if idx > 0 {
-                            out.push_str(",\n");
-                        }
-                        out.push_str(&next_indent);
-                        out.push_str(item);
+            if items.is_empty() {
+                Ok(Some("[]".to_string()))
+            } else if gap.is_empty() {
+                Ok(Some(format!("[{}]", items.join(","))))
+            } else {
+                let mut out = String::from("[\n");
+                for (idx, item) in items.iter().enumerate() {
+                    if idx > 0 {
+                        out.push_str(",\n");
                     }
-                    out.push('\n');
-                    out.push_str(indent);
-                    out.push(']');
-                    Ok(Some(out))
+                    out.push_str(&next_indent);
+                    out.push_str(item);
                 }
+                out.push('\n');
+                out.push_str(indent);
+                out.push(']');
+                Ok(Some(out))
             }
-            _ => {
-                let cur_val = vm.temp_roots[prev_temp + 1];
-                let keys = if let Some(arr_keys) = replacer_arr {
-                    arr_keys.to_vec()
-                } else {
-                    get_enumerable_keys(vm, cur_val)
-                };
+        } else {
+            let cur_value = vm.temp_roots[prev_temp + 1];
+            let keys = if let Some(arr_keys) = replacer_arr {
+                arr_keys.to_vec()
+            } else {
+                let key_vals = crate::builtins::object::enumerable_own_property_names(
+                    vm,
+                    cur_value,
+                    crate::builtins::object::EnumerableKind::Key,
+                )?;
+                key_vals.into_iter().map(|k| vm.to_string_value(k)).collect()
+            };
 
-                let mut pairs = Vec::new();
-                let next_indent = if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
-                for k in keys {
-                    let cur_val = vm.temp_roots[prev_temp + 1];
-                    let prop = vm.get_property(cur_val, &k);
-                    let s_opt = json_stringify_walk(vm, cur_val, &k, prop, stack, replacer_fn, replacer_arr, gap, &next_indent)?;
-                    if let Some(s) = s_opt {
-                        if gap.is_empty() {
-                            pairs.push(format!("\"{}\":{}", escape_json_string(&k), s));
-                        } else {
-                            pairs.push(format!("{}\"{}\": {}", next_indent, escape_json_string(&k), s));
-                        }
+            let mut pairs = Vec::new();
+            let next_indent = if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
+            for k in keys {
+                let cur_value = vm.temp_roots[prev_temp + 1];
+                let s_opt = json_stringify_walk(
+                    vm,
+                    cur_value,
+                    &k,
+                    stack,
+                    replacer_fn,
+                    replacer_arr,
+                    gap,
+                    &next_indent,
+                )?;
+                if let Some(s) = s_opt {
+                    if gap.is_empty() {
+                        pairs.push(format!("\"{}\":{}", escape_json_string(&k), s));
+                    } else {
+                        pairs.push(format!("{}\"{}\": {}", next_indent, escape_json_string(&k), s));
                     }
                 }
-                if pairs.is_empty() {
-                    Ok(Some("{}".to_string()))
-                } else if gap.is_empty() {
-                    Ok(Some(format!("{{{}}}", pairs.join(","))))
-                } else {
-                    let mut out = String::from("{\n");
-                    out.push_str(&pairs.join(",\n"));
-                    out.push('\n');
-                    out.push_str(indent);
-                    out.push('}');
-                    Ok(Some(out))
-                }
+            }
+            if pairs.is_empty() {
+                Ok(Some("{}".to_string()))
+            } else if gap.is_empty() {
+                Ok(Some(format!("{{{}}}", pairs.join(","))))
+            } else {
+                let mut out = String::from("{\n");
+                out.push_str(&pairs.join(",\n"));
+                out.push('\n');
+                out.push_str(indent);
+                out.push('}');
+                Ok(Some(out))
             }
         };
 
         stack.pop();
         vm.temp_roots.truncate(prev_temp);
-        res
-    } else {
-        vm.temp_roots.truncate(prev_temp);
-        Ok(Some("null".to_string()))
+        return res;
     }
+
+    vm.temp_roots.truncate(prev_temp);
+    Ok(None)
 }

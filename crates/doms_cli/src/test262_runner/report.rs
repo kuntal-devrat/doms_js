@@ -53,7 +53,7 @@ impl Test262Runner {
 
             let handle = std::thread::Builder::new()
                 .name(format!("test262-worker-{}", handles.len()))
-                .stack_size(4 * 1024 * 1024)
+                .stack_size(16 * 1024 * 1024)
                 .spawn(move || {
                 let mut local_stats = HashMap::<String, CategoryStats>::new();
                 for path in chunk {
@@ -198,7 +198,13 @@ impl Test262Runner {
             // Merge current run's categories (overwriting updated ones only on full suite runs)
             if self.config.path_filter.is_none() && self.config.max_tests.is_none() {
                 for (cat, st) in &sorted_cats {
-                    merged_categories.insert((*cat).clone(), (*st).clone());
+                    let is_full_cat = match &self.config.suite_filter {
+                        None => true,
+                        Some(sf) => sf == *cat,
+                    };
+                    if is_full_cat {
+                        merged_categories.insert((*cat).clone(), (*st).clone());
+                    }
                 }
             }
 

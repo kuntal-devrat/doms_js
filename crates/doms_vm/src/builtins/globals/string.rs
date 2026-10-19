@@ -34,11 +34,25 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     vm.set_property(string_proto, "toString", str_to_string);
 
     let str_ctor = vm.alloc_native_function("String", 1, |vm, _this, args| {
-        let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let arg = args.first().copied();
         if vm.is_constructing {
+            let s = match arg {
+                Some(v) => vm.to_string_spec(v)?,
+                None => String::new(),
+            };
             let proto = vm.string_proto;
             Ok(vm.alloc_string_object(s, proto))
         } else {
+            let s = match arg {
+                Some(v) => {
+                    if v.is_symbol() || v.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))) {
+                        vm.to_string_value(v)
+                    } else {
+                        vm.to_string_spec(v)?
+                    }
+                }
+                None => String::new(),
+            };
             Ok(vm.alloc_string(s))
         }
     });
@@ -76,7 +90,10 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     }
 
     let str_substr = vm.alloc_native_function("substr", 2, |vm, this, args| {
-        let s = vm.to_string_value(this);
+        if this.is_nullish() {
+            return Err(VmError::TypeError("String.prototype.substr called on null or undefined".into()));
+        }
+        let s = vm.to_string_spec(this)?;
         let chars: Vec<char> = s.chars().collect();
         let len = chars.len() as i32;
         let raw_start = args.first().and_then(|v| v.to_int32()).unwrap_or(0);
@@ -99,7 +116,10 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     vm.set_property_non_enumerable(string_proto, "substr".to_string());
 
     let str_trim_start = vm.alloc_native_function("trimStart", 0, |vm, this, _args| {
-        let s = vm.to_string_value(this);
+        if this.is_nullish() {
+            return Err(VmError::TypeError("String.prototype.trimStart called on null or undefined".into()));
+        }
+        let s = vm.to_string_spec(this)?;
         Ok(vm.alloc_string(s.trim_start().to_string()))
     });
     vm.set_property(string_proto, "trimStart", str_trim_start);
@@ -108,7 +128,10 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     vm.set_property_non_enumerable(string_proto, "trimLeft".to_string());
 
     let str_trim_end = vm.alloc_native_function("trimEnd", 0, |vm, this, _args| {
-        let s = vm.to_string_value(this);
+        if this.is_nullish() {
+            return Err(VmError::TypeError("String.prototype.trimEnd called on null or undefined".into()));
+        }
+        let s = vm.to_string_spec(this)?;
         Ok(vm.alloc_string(s.trim_end().to_string()))
     });
     vm.set_property(string_proto, "trimEnd", str_trim_end);
@@ -131,7 +154,10 @@ pub(super) fn register_string_global(vm: &mut Vm) {
 
     if let Some(sym_iter) = vm.symbol_iterator {
         let str_iter_fn = vm.alloc_native_function("[Symbol.iterator]", 0, |vm, this, _args| {
-            let s = vm.to_string_value(this);
+            if this.is_nullish() {
+                return Err(VmError::TypeError("String.prototype[Symbol.iterator] called on null or undefined".into()));
+            }
+            let s = vm.to_string_spec(this)?;
             let iter_obj = vm.alloc_object_with_exact_proto(vm.string_iterator_proto);
             if let Some(ptr) = iter_obj.as_object_ptr() {
                 let obj = unsafe { &mut *(ptr as *mut JsObject) };
@@ -146,8 +172,23 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     }
 
     let from_char_code_fn = vm.alloc_native_function("fromCharCode", 1, |vm, _this, args| {
-        let u16s: Vec<u16> = args.iter().map(|arg| vm.to_number_value(*arg).unwrap_or(0.0) as u32 as u16).collect();
-        let s: String = char::decode_utf16(u16s).map(|r| r.unwrap_or('\u{FFFD}')).collect();
+        let mut u16s = Vec::with_capacity(args.len());
+        for arg in args {
+            let n = vm.to_number_value(*arg)?;
+            let u = if n.is_nan() || n.is_infinite() || n == 0.0 {
+                0u16
+            } else {
+                let int = n.trunc();
+                let rem = (int % 65536.0) as i64;
+                if rem < 0 {
+                    (rem + 65536) as u16
+                } else {
+                    rem as u16
+                }
+            };
+            u16s.push(u);
+        }
+        let s = String::from_utf16_lossy(&u16s);
         Ok(vm.alloc_string(s))
     });
     vm.set_property(str_ctor, "fromCharCode", from_char_code_fn);
@@ -175,6 +216,47 @@ pub(super) fn register_string_global(vm: &mut Vm) {
     });
     vm.set_property(str_ctor, "fromCodePoint", from_code_point_fn);
 
+    let str_raw_fn = vm.alloc_native_function("raw", 1, |vm, _this, args| {
+        let template = args.first().copied().unwrap_or(JsValue::undefined());
+        let cooked = vm.to_object_value(template)?;
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(cooked);
+        let raw_val = vm.get_property_result(cooked, "raw")?;
+        let raw_obj = vm.to_object_value(raw_val)?;
+        vm.temp_roots.push(raw_obj);
+
+        let cur_raw = vm.temp_roots[prev_temp + 1];
+        let literal_segments = vm.length_of_array_like(cur_raw)?;
+        if literal_segments == 0 {
+            vm.temp_roots.truncate(prev_temp);
+            return Ok(vm.alloc_string(String::new()));
+        }
+
+        let substitutions = if args.len() > 1 { &args[1..] } else { &[] };
+        let mut result = String::new();
+
+        for i in 0..literal_segments {
+            let cur_raw = vm.temp_roots[prev_temp + 1];
+            let key = i.to_string();
+            let seg_val = vm.get_property_result(cur_raw, &key)?;
+            let seg_str = vm.to_string_spec(seg_val)?;
+            result.push_str(&seg_str);
+
+            if i + 1 == literal_segments {
+                break;
+            }
+
+            if i < substitutions.len() {
+                let sub_str = vm.to_string_spec(substitutions[i])?;
+                result.push_str(&sub_str);
+            }
+        }
+
+        vm.temp_roots.truncate(prev_temp);
+        Ok(vm.alloc_string(result))
+    });
+    vm.set_property(str_ctor, "raw", str_raw_fn);
+
     vm.globals.insert("String".to_string(), str_ctor);
     if vm.global_object.is_object() {
         vm.set_property(vm.global_object, "String", str_ctor);
@@ -182,10 +264,16 @@ pub(super) fn register_string_global(vm: &mut Vm) {
 }
 
 fn create_html(vm: &mut Vm, this: JsValue, tag: &str, attr: &str, val: Option<JsValue>) -> Result<JsValue, VmError> {
-    let s = vm.to_string_value(this);
+    if this.is_nullish() {
+        return Err(VmError::TypeError(format!("String.prototype.{} called on null or undefined", tag)));
+    }
+    let s = vm.to_string_spec(this)?;
     let mut p1 = format!("<{}", tag);
     if !attr.is_empty() {
-        let v = val.map(|v| vm.to_string_value(v)).unwrap_or_default();
+        let v = match val {
+            Some(v) => vm.to_string_spec(v)?,
+            None => "undefined".to_string(),
+        };
         let escaped = v.replace('"', "&quot;");
         p1.push_str(&format!(" {}=\"{}\"", attr, escaped));
     }
@@ -194,4 +282,5 @@ fn create_html(vm: &mut Vm, this: JsValue, tag: &str, attr: &str, val: Option<Js
     p1.push_str(&format!("</{}>", tag));
     Ok(vm.alloc_string(p1))
 }
+
 

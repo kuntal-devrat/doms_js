@@ -84,6 +84,24 @@ impl Vm {
         self.set_property_with_receiver_result(target, key, value, target)
     }
 
+    pub fn set_property_throw(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<(), VmError> {
+        let ok = self.set_property_with_receiver(target, key, value, target)?;
+        if !ok {
+            return Err(VmError::TypeError(format!(
+                "Cannot assign to property '{}' on {}",
+                key,
+                if target.is_null() {
+                    "null"
+                } else if target.is_undefined() {
+                    "undefined"
+                } else {
+                    "object"
+                }
+            )));
+        }
+        Ok(())
+    }
+
     pub fn set_property_with_receiver_result(
         &mut self,
         target: JsValue,
@@ -302,6 +320,13 @@ impl Vm {
             if key == "length" && !r_obj.is_array_length_writable() {
                 return Ok(false);
             }
+            if key == "length" && matches!(r_obj.kind, ObjectKind::Array(_)) {
+                let num = self.to_number_value(value)?;
+                let u32_len = num as u32;
+                if (u32_len as f64) != num || num.is_nan() || num.is_sign_negative() {
+                    return Err(VmError::RangeError("Invalid array length".into()));
+                }
+            }
             if !r_obj.is_extensible() && !self.shapes.has_property(r_obj.shape_id, key) {
                 return Ok(false);
             }
@@ -364,6 +389,14 @@ impl Vm {
         }
     }
 
+    pub fn delete_property_or_throw(&mut self, target: JsValue, key: &str) -> Result<(), VmError> {
+        let success = self.delete_property(target, key)?;
+        if !success {
+            return Err(VmError::TypeError(format!("Cannot delete property '{}'", key)));
+        }
+        Ok(())
+    }
+
     pub fn delete_property_key(&mut self, target: JsValue, key: &PropertyKeyVal) -> Result<bool, VmError> {
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -376,6 +409,19 @@ impl Vm {
             PropertyKeyVal::Symbol(sym) => {
                 if let Some(ptr) = target.as_object_ptr() {
                     let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                    if let Some(attrs) = obj.symbol_attributes.as_ref().and_then(|m| m.get(sym)) {
+                        if !attrs.configurable {
+                            return Ok(false);
+                        }
+                    }
+                    if let Some(accs) = obj.symbol_accessors.as_ref().and_then(|m| m.get(sym)) {
+                        if !accs.configurable {
+                            return Ok(false);
+                        }
+                    }
+                    if let Some(attrs_map) = &mut obj.symbol_attributes {
+                        attrs_map.remove(sym);
+                    }
                     if let Some(syms) = &mut obj.symbol_properties {
                         syms.remove(sym);
                     }

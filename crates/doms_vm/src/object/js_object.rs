@@ -19,6 +19,7 @@ pub struct JsObject {
     pub prop_order: Option<Vec<String>>,
     pub symbol_properties: Option<Box<std::collections::HashMap<JsValue, JsValue>>>,
     pub symbol_accessors: Option<Box<std::collections::HashMap<JsValue, Accessor>>>,
+    pub symbol_attributes: Option<Box<std::collections::HashMap<JsValue, PropertyAttributes>>>,
     pub symbol_order: Option<Vec<JsValue>>,
     pub private_elements: Option<Box<std::collections::HashMap<String, PrivateElement>>>,
 }
@@ -37,6 +38,7 @@ impl JsObject {
             prop_order: None,
             symbol_properties: None,
             symbol_accessors: None,
+            symbol_attributes: None,
             symbol_order: None,
             private_elements: None,
         }
@@ -105,6 +107,11 @@ impl JsObject {
         if !order.contains(&sym) {
             order.push(sym);
         }
+    }
+
+    pub fn set_symbol_attributes(&mut self, sym: JsValue, attrs: PropertyAttributes) {
+        let attrs_map = self.symbol_attributes.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        attrs_map.insert(sym, attrs);
     }
 
     pub fn insert_symbol_accessor_getter(&mut self, sym: JsValue, getter: JsValue) {

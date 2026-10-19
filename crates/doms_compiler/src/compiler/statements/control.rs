@@ -42,6 +42,11 @@ impl Compiler {
         self.chunk.emit(OpCode::SetLocal(disc_slot), 0);
         self.chunk.emit(OpCode::Pop, 0);
 
+        if !self.is_in_function && !self.internal_statements && !cases.is_empty() {
+            self.chunk.emit(OpCode::Pop, 0);
+            self.chunk.emit(OpCode::LoadUndefined, 0);
+        }
+
         self.break_targets.push(TargetScope { labels: Vec::new(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len() });
 
         let mut body_jumps = Vec::new();

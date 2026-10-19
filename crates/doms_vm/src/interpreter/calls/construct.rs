@@ -95,18 +95,27 @@ impl Vm {
                     let cur_callee = self.temp_roots[prev_temp];
                     let cur_nt = self.temp_roots[prev_temp + 1];
                     let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
-                    let proto = if new_target_val == cur_callee {
-                        f.prototype.unwrap_or_else(|| self.get_property(new_target_val, "prototype"))
+                    let proto = self.get_property_result(new_target_val, "prototype")?;
+                    let proto_obj = if proto.is_object() {
+                        Some(proto)
                     } else {
-                        self.get_property_result(new_target_val, "prototype")?
+                        self.object_proto
                     };
                     self.temp_roots.push(proto);
+                    if new_target_val == cur_callee {
+                        if let Some(callee_ptr) = cur_callee.as_object_ptr() {
+                            let callee_obj = unsafe { &mut *(callee_ptr as *mut JsObject) };
+                            if let ObjectKind::Function(ref mut callee_func) = callee_obj.kind {
+                                callee_func.prototype = proto_obj;
+                            }
+                        }
+                    }
                     let shape_id = if new_target_val == cur_callee {
                         f.initial_shape.unwrap_or(ShapeRegistry::ROOT_SHAPE_ID)
                     } else {
                         ShapeRegistry::ROOT_SHAPE_ID
                     };
-                    let this_obj = self.alloc_object_with_shape_and_proto(shape_id, if proto.is_object() { Some(proto) } else { None });
+                    let this_obj = self.alloc_object_with_shape_and_proto(shape_id, proto_obj);
                     self.temp_roots.push(this_obj);
                     let cur_callee = self.temp_roots[prev_temp];
                     let cur_this = self.temp_roots[args_start + args_len + 1];
@@ -249,21 +258,25 @@ impl Vm {
     }
 
     pub fn array_species_create(&mut self, original: JsValue, length: usize) -> Result<JsValue, VmError> {
-        if !self.is_array(original) {
-            if length > 4294967295 {
-                return Err(VmError::RangeError("Invalid array length".into()));
-            }
-            let cap = length.min(100_000);
-            return Ok(self.alloc_array(Vec::with_capacity(cap)));
-        }
-        let mut ctor = self.get_property_result(original, "constructor")?;
-        if self.is_constructor(ctor) {
-            if let Some(&array_ctor) = self.globals.get("Array") {
-                if ctor == array_ctor {
-                    ctor = JsValue::undefined();
+        let is_arr = self.is_array(original);
+        let mut ctor = if is_arr {
+            let c = self.get_property_result(original, "constructor")?;
+            if self.is_constructor(c) {
+                if let Some(&array_ctor) = self.globals.get("Array") {
+                    if c == array_ctor {
+                        JsValue::undefined()
+                    } else {
+                        c
+                    }
+                } else {
+                    c
                 }
+            } else {
+                c
             }
-        }
+        } else {
+            JsValue::undefined()
+        };
         if self.is_js_object(ctor) {
             let sp = if let Some(sym_species) = self.symbol_species {
                 self.get_symbol_property_result(ctor, sym_species)?
@@ -280,8 +293,15 @@ impl Vm {
             if length > 4294967295 {
                 return Err(VmError::RangeError("Invalid array length".into()));
             }
-            let cap = length.min(100_000);
-            return Ok(self.alloc_array(Vec::with_capacity(cap)));
+            let mut v = Vec::new();
+            if length <= 1024 {
+                v.resize(length, JsValue::hole());
+            }
+            let arr = self.alloc_array(v);
+            if length > 1024 {
+                self.set_property(arr, "length", JsValue::from_double(length as f64));
+            }
+            return Ok(arr);
         }
         if !self.is_constructor(ctor) {
             return Err(VmError::TypeError("Species is not a constructor".into()));

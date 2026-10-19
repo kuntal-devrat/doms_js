@@ -512,5 +512,14 @@ fn test_annex_b_escape_unescape() {
     assert_eq!(res.as_boolean(), Some(true));
 }
 
+#[test]
+fn test_fn_global_object() {
+    let mut vm = Vm::new();
+    let res = vm.eval("Function('return this;')()").unwrap();
+    assert_eq!(res, vm.global_object);
+    let res2 = vm.eval("var f = Function('return this;'); f()").unwrap();
+    assert_eq!(res2, vm.global_object);
+}
+
 
 

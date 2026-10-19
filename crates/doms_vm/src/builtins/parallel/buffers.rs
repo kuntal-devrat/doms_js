@@ -14,6 +14,7 @@ pub(super) fn register_buffers(vm: &mut Vm) {
     });
     let sab_proto = vm.alloc_object();
     vm.set_property(sab_ctor, "prototype", sab_proto);
+    helpers::add_species_getter(vm, sab_ctor);
     vm.globals.insert("SharedArrayBuffer".to_string(), sab_ctor);
 
     let ab_ctor = vm.alloc_native_function("ArrayBuffer", 1, |vm, _this, args| {
@@ -63,5 +64,6 @@ pub(super) fn register_buffers(vm: &mut Vm) {
     });
     vm.set_property(ab_proto, "slice", ab_slice);
     vm.set_property(ab_ctor, "prototype", ab_proto);
+    helpers::add_species_getter(vm, ab_ctor);
     vm.globals.insert("ArrayBuffer".to_string(), ab_ctor);
 }

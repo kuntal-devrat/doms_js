@@ -12,15 +12,23 @@ pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue)
         Ok(JsValue::from_double(ms))
     });
     let date_utc_fn = vm.alloc_native_function("UTC", 7, |vm, _this, args| {
-        let y = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-        let m = args.get(1).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-        let d = args.get(2).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(1.0) as i32;
-        let h = args.get(3).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-        let min = args.get(4).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-        let s = args.get(5).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-        let ms = args.get(6).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-        let final_y = if (0..=99).contains(&y) { y + 1900 } else { y };
-        Ok(JsValue::from_double(utc_to_ms(final_y, m, d, h, min, s, ms)))
+        if args.is_empty() {
+            return Ok(JsValue::from_double(f64::NAN));
+        }
+        let y_num = vm.to_number_value(args[0])?;
+        let m_num = if args.len() > 1 { vm.to_number_value(args[1])? } else { 0.0 };
+        let d_num = if args.len() > 2 { vm.to_number_value(args[2])? } else { 1.0 };
+        let h_num = if args.len() > 3 { vm.to_number_value(args[3])? } else { 0.0 };
+        let min_num = if args.len() > 4 { vm.to_number_value(args[4])? } else { 0.0 };
+        let s_num = if args.len() > 5 { vm.to_number_value(args[5])? } else { 0.0 };
+        let ms_num = if args.len() > 6 { vm.to_number_value(args[6])? } else { 0.0 };
+
+        if y_num.is_nan() || m_num.is_nan() || d_num.is_nan() || h_num.is_nan() || min_num.is_nan() || s_num.is_nan() || ms_num.is_nan() {
+            return Ok(JsValue::from_double(f64::NAN));
+        }
+        let y = y_num as i32;
+        let final_y = if (0..=99).contains(&y) && y_num.fract() == 0.0 { y + 1900 } else { y };
+        Ok(JsValue::from_double(utc_to_ms(final_y, m_num as i32, d_num as i32, h_num as i32, min_num as i32, s_num as i32, ms_num as i32)))
     });
     let date_parse_fn = vm.alloc_native_function("parse", 1, |vm, _this, args| {
         let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
@@ -63,18 +71,24 @@ pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue)
                     f64::NAN
                 }
             } else {
-                vm.to_number_value(arg).unwrap_or(f64::NAN)
+                vm.to_number_value(arg)?
             }
         } else {
-            let y = args.first().and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-            let m = args.get(1).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-            let d = args.get(2).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(1.0) as i32;
-            let h = args.get(3).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-            let min = args.get(4).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-            let s = args.get(5).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-            let ms = args.get(6).and_then(|v| vm.to_number_value(*v).ok()).unwrap_or(0.0) as i32;
-            let final_y = if (0..=99).contains(&y) { y + 1900 } else { y };
-            utc_to_ms(final_y, m, d, h, min, s, ms)
+            let y_num = vm.to_number_value(args[0])?;
+            let m_num = vm.to_number_value(args[1])?;
+            let d_num = if args.len() > 2 { vm.to_number_value(args[2])? } else { 1.0 };
+            let h_num = if args.len() > 3 { vm.to_number_value(args[3])? } else { 0.0 };
+            let min_num = if args.len() > 4 { vm.to_number_value(args[4])? } else { 0.0 };
+            let s_num = if args.len() > 5 { vm.to_number_value(args[5])? } else { 0.0 };
+            let ms_num = if args.len() > 6 { vm.to_number_value(args[6])? } else { 0.0 };
+
+            if y_num.is_nan() || m_num.is_nan() || d_num.is_nan() || h_num.is_nan() || min_num.is_nan() || s_num.is_nan() || ms_num.is_nan() {
+                f64::NAN
+            } else {
+                let y = y_num as i32;
+                let final_y = if (0..=99).contains(&y) && y_num.fract() == 0.0 { y + 1900 } else { y };
+                utc_to_ms(final_y, m_num as i32, d_num as i32, h_num as i32, min_num as i32, s_num as i32, ms_num as i32)
+            }
         };
         let proto = vm.date_proto.or(vm.object_proto);
         Ok(vm.alloc_date(proto, time_ms))

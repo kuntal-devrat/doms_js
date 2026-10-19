@@ -3,55 +3,39 @@
 
 use super::*;
 
+#[inline]
+fn index_to_js_value(idx: usize) -> JsValue {
+    if idx <= i32::MAX as usize {
+        JsValue::from_int32(idx as i32)
+    } else {
+        JsValue::from_double(idx as f64)
+    }
+}
+
 pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     let for_each_fn = vm.alloc_native_function("forEach", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("forEach callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property(this, "length");
-        let raw_len = len_val.to_number().unwrap_or(0.0);
-        if raw_len > 4_294_967_295.0 || raw_len < 0.0 || raw_len.is_infinite() {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let len = raw_len as usize;
-        if len > 100_000 {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
+        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
         vm.temp_roots.push(this_arg);
         for i in 0..len {
             let cur_this = vm.temp_roots[prev_temp];
-            let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &obj.kind {
-                    if i < elements.len() && !elements[i].is_hole() {
-                        true
-                    } else {
-                        let key = i.to_string();
-                        vm.has_property(cur_this, &key).unwrap_or(false)
-                    }
-                } else {
-                    let key = i.to_string();
-                    vm.has_property(cur_this, &key).unwrap_or(false)
-                }
-            } else {
-                let key = i.to_string();
-                vm.has_property(cur_this, &key).unwrap_or(false)
-            };
-
-            if is_present {
+            if vm.has_element_result(cur_this, i)? {
                 let cur_this = vm.temp_roots[prev_temp];
-                let el = vm.get_element(cur_this, i);
+                let el = vm.get_element_result(cur_this, i)?;
                 vm.temp_roots.push(el);
                 let cur_this = vm.temp_roots[prev_temp];
                 let cur_cb = vm.temp_roots[prev_temp + 1];
                 let cur_this_arg = vm.temp_roots[prev_temp + 2];
                 let cur_el = vm.temp_roots[prev_temp + 3];
-                let res = vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]);
+                let res = vm.call(cur_cb, cur_this_arg, &[cur_el, index_to_js_value(i), cur_this]);
                 vm.temp_roots.pop();
                 if let Err(e) = res {
                     vm.temp_roots.truncate(prev_temp);
@@ -65,164 +49,170 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "forEach", for_each_fn);
 
     let filter_fn = vm.alloc_native_function("filter", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("filter callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property(this, "length");
-        let raw_len = len_val.to_number().unwrap_or(0.0);
-        if raw_len > 4_294_967_295.0 || raw_len < 0.0 || raw_len.is_infinite() {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let len = raw_len as usize;
-        if len > 100_000 {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
+        let len = vm.length_of_array_like(obj)?;
+        let a = vm.array_species_create(obj, 0)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
         vm.temp_roots.push(this_arg);
-        let filtered_start = vm.temp_roots.len();
+        vm.temp_roots.push(a);
+        let mut to = 0usize;
         for i in 0..len {
             let cur_this = vm.temp_roots[prev_temp];
-            let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &obj.kind {
-                    if i < elements.len() && !elements[i].is_hole() {
-                        true
-                    } else {
-                        let key = i.to_string();
-                        vm.has_property(cur_this, &key).unwrap_or(false)
-                    }
-                } else {
-                    let key = i.to_string();
-                    vm.has_property(cur_this, &key).unwrap_or(false)
-                }
-            } else {
-                let key = i.to_string();
-                vm.has_property(cur_this, &key).unwrap_or(false)
-            };
-
-            if is_present {
+            if vm.has_element_result(cur_this, i)? {
                 let cur_this = vm.temp_roots[prev_temp];
-                let el = vm.get_element(cur_this, i);
+                let el = vm.get_element_result(cur_this, i)?;
                 vm.temp_roots.push(el);
                 let cur_this = vm.temp_roots[prev_temp];
                 let cur_cb = vm.temp_roots[prev_temp + 1];
                 let cur_this_arg = vm.temp_roots[prev_temp + 2];
                 let rooted_el = *vm.temp_roots.last().unwrap();
-                let keep = match vm.call(cur_cb, cur_this_arg, &[rooted_el, JsValue::from_int32(i as i32), cur_this]) {
+                let keep = match vm.call(cur_cb, cur_this_arg, &[rooted_el, index_to_js_value(i), cur_this]) {
                     Ok(k) => k,
                     Err(e) => {
                         vm.temp_roots.truncate(prev_temp);
                         return Err(e);
                     }
                 };
-                if !keep.is_truthy() {
-                    vm.temp_roots.pop();
+                if keep.is_truthy() {
+                    let cur_a = vm.temp_roots[prev_temp + 3];
+                    let to_key = to.to_string();
+                    vm.create_data_property_or_throw(cur_a, &to_key, rooted_el)?;
+                    to += 1;
                 }
+                vm.temp_roots.pop();
             }
         }
-        let mut filtered = Vec::with_capacity(vm.temp_roots.len() - filtered_start);
-        for k in filtered_start..vm.temp_roots.len() {
-            filtered.push(vm.temp_roots[k]);
-        }
+        let res_a = vm.temp_roots[prev_temp + 3];
         vm.temp_roots.truncate(prev_temp);
-        Ok(vm.alloc_array(filtered))
+        Ok(res_a)
     });
     vm.set_property(array_proto, "filter", filter_fn);
 
     let concat_fn = vm.alloc_native_function("concat", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
+        let a = vm.array_species_create(obj, 0)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         for &arg in args {
             vm.temp_roots.push(arg);
         }
+        vm.temp_roots.push(a);
         let num_items = args.len() + 1;
         let sym_spread = vm.symbol_is_concat_spreadable;
-        let out_start = vm.temp_roots.len();
+        let mut n = 0usize;
 
         for item_idx in 0..num_items {
             let item = vm.temp_roots[prev_temp + item_idx];
-            let is_spreadable = if let Some(sym) = sym_spread {
-                let spread_val = vm.get_symbol_property_result(item, sym).unwrap_or(JsValue::undefined());
+            let is_spreadable = if item.as_object_ptr().is_none() {
+                false
+            } else if let Some(sym) = sym_spread {
+                let spread_val = vm.get_symbol_property_result(item, sym)?;
                 if !spread_val.is_undefined() {
                     spread_val.is_truthy()
-                } else if let Some(ptr) = item.as_object_ptr() {
-                    let obj = unsafe { &*(ptr as *mut JsObject) };
-                    matches!(obj.kind, ObjectKind::Array(_))
                 } else {
-                    false
+                    vm.is_array_result(item)?
                 }
-            } else if let Some(ptr) = item.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                matches!(obj.kind, ObjectKind::Array(_))
             } else {
-                false
+                vm.is_array_result(item)?
             };
 
             let item = vm.temp_roots[prev_temp + item_idx];
             if is_spreadable {
-                let len_val = vm.get_property(item, "length");
-                let len = len_val.to_number().unwrap_or(0.0) as usize;
-                if len > 100_000 {
+                let len = vm.length_of_array_like(item)?;
+                if (n as f64) + (len as f64) > 9007199254740991.0 {
                     vm.temp_roots.truncate(prev_temp);
-                    return Err(VmError::RangeError("Invalid array length".into()));
+                    return Err(VmError::TypeError("Array.prototype.concat length exceeds MAX_SAFE_INTEGER".into()));
                 }
                 for i in 0..len {
                     let item = vm.temp_roots[prev_temp + item_idx];
-                    let el = vm.get_element(item, i);
-                    vm.temp_roots.push(el);
+                    let exists = vm.has_element_result(item, i)?;
+                    if exists {
+                        let item = vm.temp_roots[prev_temp + item_idx];
+                        let el = vm.get_element_result(item, i)?;
+                        let cur_a = vm.temp_roots[prev_temp + num_items];
+                        vm.create_data_property_or_throw(cur_a, &n.to_string(), el)?;
+                    }
+                    n += 1;
                 }
             } else {
-                vm.temp_roots.push(item);
+                if (n as f64) + 1.0 > 9007199254740991.0 {
+                    vm.temp_roots.truncate(prev_temp);
+                    return Err(VmError::TypeError("Array.prototype.concat length exceeds MAX_SAFE_INTEGER".into()));
+                }
+                let cur_a = vm.temp_roots[prev_temp + num_items];
+                vm.create_data_property_or_throw(cur_a, &n.to_string(), item)?;
+                n += 1;
             }
         }
 
-        let total_len = vm.temp_roots.len() - out_start;
-        if total_len > 100_000 {
-            vm.temp_roots.truncate(prev_temp);
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let mut out = Vec::with_capacity(total_len);
-        for k in out_start..vm.temp_roots.len() {
-            out.push(vm.temp_roots[k]);
-        }
+        let res_a = vm.temp_roots[prev_temp + num_items];
+        vm.set_property_throw(res_a, "length", JsValue::from_double(n as f64))?;
         vm.temp_roots.truncate(prev_temp);
-        Ok(vm.alloc_array(out))
+        Ok(res_a)
     });
     vm.set_property(array_proto, "concat", concat_fn);
 
     let reverse_fn = vm.alloc_native_function("reverse", 0, |vm, this, _args| {
-        if let Some(ptr) = this.as_object_ptr() {
-            let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::Array(ref mut elems) = obj.kind {
-                elems.reverse();
-                return Ok(this);
+        let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
+        if let Some(ptr) = obj.as_object_ptr() {
+            let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+            if jsobj.accessors.is_none() && !matches!(jsobj.kind, ObjectKind::Proxy { .. }) {
+                if let ObjectKind::Array(ref mut elems) = jsobj.kind {
+                    if elems.len() == len && !elems.iter().any(|v| v.is_hole()) {
+                        elems.reverse();
+                        return Ok(obj);
+                    }
+                }
             }
         }
-        let len_val = vm.get_property(this, "length");
-        let raw_len = len_val.to_number().unwrap_or(0.0);
-        if raw_len > 4_294_967_295.0 || raw_len < 0.0 || raw_len.is_infinite() {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let len = raw_len as usize;
-        if len > 100_000 {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
-        let mut i = 0;
-        let mut j = len.saturating_sub(1);
-        while i < j {
+        vm.temp_roots.push(obj);
+        let mut lower = 0usize;
+        let middle = len / 2;
+        while lower < middle {
+            let upper = len - lower - 1;
+            let lower_s = lower.to_string();
+            let upper_s = upper.to_string();
             let cur_this = vm.temp_roots[prev_temp];
-            let vi = vm.get_element(cur_this, i);
-            let vj = vm.get_element(cur_this, j);
-            vm.set_element(cur_this, i, vj);
-            vm.set_element(cur_this, j, vi);
-            i += 1;
-            j = j.saturating_sub(1);
+            let lower_exists = vm.has_property(cur_this, &lower_s)?;
+            let lower_val = if lower_exists {
+                let cur_this = vm.temp_roots[prev_temp];
+                vm.get_property_result(cur_this, &lower_s)?
+            } else {
+                JsValue::undefined()
+            };
+            let cur_this = vm.temp_roots[prev_temp];
+            let upper_exists = vm.has_property(cur_this, &upper_s)?;
+            let upper_val = if upper_exists {
+                let cur_this = vm.temp_roots[prev_temp];
+                vm.get_property_result(cur_this, &upper_s)?
+            } else {
+                JsValue::undefined()
+            };
+
+            let cur_this = vm.temp_roots[prev_temp];
+            if lower_exists && upper_exists {
+                vm.set_property_throw(cur_this, &lower_s, upper_val)?;
+                let cur_this = vm.temp_roots[prev_temp];
+                vm.set_property_throw(cur_this, &upper_s, lower_val)?;
+            } else if !lower_exists && upper_exists {
+                vm.set_property_throw(cur_this, &lower_s, upper_val)?;
+                let cur_this = vm.temp_roots[prev_temp];
+                vm.delete_property_or_throw(cur_this, &upper_s)?;
+            } else if lower_exists && !upper_exists {
+                vm.delete_property_or_throw(cur_this, &lower_s)?;
+                let cur_this = vm.temp_roots[prev_temp];
+                vm.set_property_throw(cur_this, &upper_s, lower_val)?;
+            }
+            lower += 1;
         }
         let cur_this = vm.temp_roots[prev_temp];
         vm.temp_roots.truncate(prev_temp);
@@ -231,22 +221,15 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "reverse", reverse_fn);
 
     let reduce_fn = vm.alloc_native_function("reduce", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("reduce callback must be callable".into()));
         }
-        let len_val = vm.get_property(this, "length");
-        let raw_len = len_val.to_number().unwrap_or(0.0);
-        if raw_len > 4_294_967_295.0 || raw_len < 0.0 || raw_len.is_infinite() {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let len = raw_len as usize;
-        if len > 100_000 {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
+        let len = vm.length_of_array_like(obj)?;
 
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
 
         let mut k = 0usize;
@@ -256,27 +239,9 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             let mut found = None;
             while k < len {
                 let cur_this = vm.temp_roots[prev_temp];
-                let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
-                    let obj = unsafe { &*(ptr as *mut JsObject) };
-                    if let ObjectKind::Array(elements) = &obj.kind {
-                        if k < elements.len() && !elements[k].is_hole() {
-                            true
-                        } else {
-                            let key = k.to_string();
-                            vm.has_property(cur_this, &key).unwrap_or(false)
-                        }
-                    } else {
-                        let key = k.to_string();
-                        vm.has_property(cur_this, &key).unwrap_or(false)
-                    }
-                } else {
-                    let key = k.to_string();
-                    vm.has_property(cur_this, &key).unwrap_or(false)
-                };
-
-                if is_present {
+                if vm.has_element_result(cur_this, k)? {
                     let cur_this = vm.temp_roots[prev_temp];
-                    let val = vm.get_element(cur_this, k);
+                    let val = vm.get_element_result(cur_this, k)?;
                     found = Some(val);
                     k += 1;
                     break;
@@ -296,33 +261,15 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
         while k < len {
             let cur_this = vm.temp_roots[prev_temp];
-            let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &obj.kind {
-                    if k < elements.len() && !elements[k].is_hole() {
-                        true
-                    } else {
-                        let key = k.to_string();
-                        vm.has_property(cur_this, &key).unwrap_or(false)
-                    }
-                } else {
-                    let key = k.to_string();
-                    vm.has_property(cur_this, &key).unwrap_or(false)
-                }
-            } else {
-                let key = k.to_string();
-                vm.has_property(cur_this, &key).unwrap_or(false)
-            };
-
-            if is_present {
+            if vm.has_element_result(cur_this, k)? {
                 let cur_this = vm.temp_roots[prev_temp];
-                let el = vm.get_element(cur_this, k);
+                let el = vm.get_element_result(cur_this, k)?;
                 vm.temp_roots.push(el); // prev_temp + 3
                 let cur_this = vm.temp_roots[prev_temp];
                 let cur_cb = vm.temp_roots[prev_temp + 1];
                 let cur_acc = vm.temp_roots[prev_temp + 2];
                 let cur_el = vm.temp_roots[prev_temp + 3];
-                let res = vm.call(cur_cb, JsValue::undefined(), &[cur_acc, cur_el, JsValue::from_int32(k as i32), cur_this]);
+                let res = vm.call(cur_cb, JsValue::undefined(), &[cur_acc, cur_el, index_to_js_value(k), cur_this]);
                 vm.temp_roots.pop(); // pop el
                 match res {
                     Ok(new_acc) => {
@@ -344,53 +291,28 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "reduce", reduce_fn);
 
     let some_fn = vm.alloc_native_function("some", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("some callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property(this, "length");
-        let raw_len = len_val.to_number().unwrap_or(0.0);
-        if raw_len > 4_294_967_295.0 || raw_len < 0.0 || raw_len.is_infinite() {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let len = raw_len as usize;
-        if len > 100_000 {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
+        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
         vm.temp_roots.push(this_arg);
         for i in 0..len {
             let cur_this = vm.temp_roots[prev_temp];
-            let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &obj.kind {
-                    if i < elements.len() && !elements[i].is_hole() {
-                        true
-                    } else {
-                        let key = i.to_string();
-                        vm.has_property(cur_this, &key).unwrap_or(false)
-                    }
-                } else {
-                    let key = i.to_string();
-                    vm.has_property(cur_this, &key).unwrap_or(false)
-                }
-            } else {
-                let key = i.to_string();
-                vm.has_property(cur_this, &key).unwrap_or(false)
-            };
-
-            if is_present {
+            if vm.has_element_result(cur_this, i)? {
                 let cur_this = vm.temp_roots[prev_temp];
-                let el = vm.get_element(cur_this, i);
+                let el = vm.get_element_result(cur_this, i)?;
                 vm.temp_roots.push(el);
                 let cur_this = vm.temp_roots[prev_temp];
                 let cur_cb = vm.temp_roots[prev_temp + 1];
                 let cur_this_arg = vm.temp_roots[prev_temp + 2];
                 let cur_el = vm.temp_roots[prev_temp + 3];
-                let res = vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]);
+                let res = vm.call(cur_cb, cur_this_arg, &[cur_el, index_to_js_value(i), cur_this]);
                 vm.temp_roots.pop();
                 match res {
                     Ok(r) => {
@@ -412,53 +334,28 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "some", some_fn);
 
     let every_fn = vm.alloc_native_function("every", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("every callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property(this, "length");
-        let raw_len = len_val.to_number().unwrap_or(0.0);
-        if raw_len > 4_294_967_295.0 || raw_len < 0.0 || raw_len.is_infinite() {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let len = raw_len as usize;
-        if len > 100_000 {
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
+        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
         vm.temp_roots.push(this_arg);
         for i in 0..len {
             let cur_this = vm.temp_roots[prev_temp];
-            let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &obj.kind {
-                    if i < elements.len() && !elements[i].is_hole() {
-                        true
-                    } else {
-                        let key = i.to_string();
-                        vm.has_property(cur_this, &key).unwrap_or(false)
-                    }
-                } else {
-                    let key = i.to_string();
-                    vm.has_property(cur_this, &key).unwrap_or(false)
-                }
-            } else {
-                let key = i.to_string();
-                vm.has_property(cur_this, &key).unwrap_or(false)
-            };
-
-            if is_present {
+            if vm.has_element_result(cur_this, i)? {
                 let cur_this = vm.temp_roots[prev_temp];
-                let el = vm.get_element(cur_this, i);
+                let el = vm.get_element_result(cur_this, i)?;
                 vm.temp_roots.push(el);
                 let cur_this = vm.temp_roots[prev_temp];
                 let cur_cb = vm.temp_roots[prev_temp + 1];
                 let cur_this_arg = vm.temp_roots[prev_temp + 2];
                 let cur_el = vm.temp_roots[prev_temp + 3];
-                let res = vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]);
+                let res = vm.call(cur_cb, cur_this_arg, &[cur_el, index_to_js_value(i), cur_this]);
                 vm.temp_roots.pop();
                 match res {
                     Ok(r) => {
@@ -480,20 +377,20 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "every", every_fn);
 
     let find_fn = vm.alloc_native_function("find", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("Array.prototype.find callback must be a function".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property(this, "length");
-        let len = len_val.to_number().unwrap_or(0.0).max(0.0) as usize;
+        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
         vm.temp_roots.push(this_arg);
         for i in 0..len {
             let cur_this = vm.temp_roots[prev_temp];
-            let mut el = vm.get_element(cur_this, i);
+            let mut el = vm.get_element_result(cur_this, i)?;
             if el.is_hole() {
                 el = JsValue::undefined();
             }
@@ -502,7 +399,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             let cur_cb = vm.temp_roots[prev_temp + 1];
             let cur_this_arg = vm.temp_roots[prev_temp + 2];
             let cur_el = vm.temp_roots[prev_temp + 3];
-            let res = vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]);
+            let res = vm.call(cur_cb, cur_this_arg, &[cur_el, index_to_js_value(i), cur_this]);
             match res {
                 Ok(r) => {
                     if r.is_truthy() {
@@ -524,20 +421,20 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "find", find_fn);
 
     let find_index_fn = vm.alloc_native_function("findIndex", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("Array.prototype.findIndex callback must be a function".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property(this, "length");
-        let len = len_val.to_number().unwrap_or(0.0).max(0.0) as usize;
+        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
         vm.temp_roots.push(this_arg);
         for i in 0..len {
             let cur_this = vm.temp_roots[prev_temp];
-            let mut el = vm.get_element(cur_this, i);
+            let mut el = vm.get_element_result(cur_this, i)?;
             if el.is_hole() {
                 el = JsValue::undefined();
             }
@@ -546,13 +443,13 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             let cur_cb = vm.temp_roots[prev_temp + 1];
             let cur_this_arg = vm.temp_roots[prev_temp + 2];
             let cur_el = vm.temp_roots[prev_temp + 3];
-            let res = vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]);
+            let res = vm.call(cur_cb, cur_this_arg, &[cur_el, index_to_js_value(i), cur_this]);
             vm.temp_roots.pop();
             match res {
                 Ok(r) => {
                     if r.is_truthy() {
                         vm.temp_roots.truncate(prev_temp);
-                        return Ok(JsValue::from_int32(i as i32));
+                        return Ok(index_to_js_value(i));
                     }
                 }
                 Err(e) => {
@@ -567,20 +464,20 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "findIndex", find_index_fn);
 
     let find_last_fn = vm.alloc_native_function("findLast", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("Array.prototype.findLast callback must be a function".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property(this, "length");
-        let len = len_val.to_number().unwrap_or(0.0).max(0.0) as usize;
+        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
         vm.temp_roots.push(this_arg);
         for i in (0..len).rev() {
             let cur_this = vm.temp_roots[prev_temp];
-            let mut el = vm.get_element(cur_this, i);
+            let mut el = vm.get_element_result(cur_this, i)?;
             if el.is_hole() {
                 el = JsValue::undefined();
             }
@@ -589,7 +486,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             let cur_cb = vm.temp_roots[prev_temp + 1];
             let cur_this_arg = vm.temp_roots[prev_temp + 2];
             let cur_el = vm.temp_roots[prev_temp + 3];
-            let res = vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]);
+            let res = vm.call(cur_cb, cur_this_arg, &[cur_el, index_to_js_value(i), cur_this]);
             match res {
                 Ok(r) => {
                     if r.is_truthy() {
@@ -611,20 +508,20 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "findLast", find_last_fn);
 
     let find_last_index_fn = vm.alloc_native_function("findLastIndex", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("Array.prototype.findLastIndex callback must be a function".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property(this, "length");
-        let len = len_val.to_number().unwrap_or(0.0).max(0.0) as usize;
+        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
         vm.temp_roots.push(this_arg);
         for i in (0..len).rev() {
             let cur_this = vm.temp_roots[prev_temp];
-            let mut el = vm.get_element(cur_this, i);
+            let mut el = vm.get_element_result(cur_this, i)?;
             if el.is_hole() {
                 el = JsValue::undefined();
             }
@@ -633,13 +530,13 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             let cur_cb = vm.temp_roots[prev_temp + 1];
             let cur_this_arg = vm.temp_roots[prev_temp + 2];
             let cur_el = vm.temp_roots[prev_temp + 3];
-            let res = vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]);
+            let res = vm.call(cur_cb, cur_this_arg, &[cur_el, index_to_js_value(i), cur_this]);
             vm.temp_roots.pop();
             match res {
                 Ok(r) => {
                     if r.is_truthy() {
                         vm.temp_roots.truncate(prev_temp);
-                        return Ok(JsValue::from_int32(i as i32));
+                        return Ok(index_to_js_value(i));
                     }
                 }
                 Err(e) => {
@@ -668,13 +565,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
         } else {
             1i64
         };
-        let len_val = vm.get_property_result(obj, "length")?;
-        let source_len_num = vm.to_number_value(len_val)?;
-        let source_len = if source_len_num.is_nan() || source_len_num <= 0.0 {
-            0usize
-        } else {
-            (source_len_num.trunc() as i64).min(9007199254740991) as usize
-        };
+        let source_len = vm.length_of_array_like(obj)?;
         let target = vm.array_species_create(obj, 0)?;
         flatten_into_array(vm, target, obj, source_len, 0, depth, None, JsValue::undefined())?;
         Ok(target)
@@ -688,13 +579,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             return Err(VmError::TypeError("Array.prototype.flatMap callback must be a function".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len_val = vm.get_property_result(obj, "length")?;
-        let source_len_num = vm.to_number_value(len_val)?;
-        let source_len = if source_len_num.is_nan() || source_len_num <= 0.0 {
-            0usize
-        } else {
-            (source_len_num.trunc() as i64).min(9007199254740991) as usize
-        };
+        let source_len = vm.length_of_array_like(obj)?;
         let target = vm.array_species_create(obj, 0)?;
         flatten_into_array(vm, target, obj, source_len, 0, 1, Some(cb), this_arg)?;
         Ok(target)
@@ -708,27 +593,19 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
                 return Err(VmError::TypeError("The comparison function must be either a function or undefined".into()));
             }
         }
+        let obj = vm.to_object_value(this)?;
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         let compare_fn_rooted = compare_fn.unwrap_or(JsValue::undefined());
         vm.temp_roots.push(compare_fn_rooted);
 
-        let len_val = vm.get_property(this, "length");
-        let len = len_val.to_number().unwrap_or(0.0).max(0.0) as usize;
+        let cur_this = vm.temp_roots[prev_temp];
+        let len = vm.length_of_array_like(cur_this)?;
         let elements_start = vm.temp_roots.len();
-        if let Some(ptr) = this.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::Array(elements) = &obj.kind {
-                for el in elements.iter().take(len) {
-                    vm.temp_roots.push(*el);
-                }
-            }
-        }
-        if vm.temp_roots.len() == elements_start {
-            for i in 0..len {
-                let el = vm.get_element(this, i);
-                vm.temp_roots.push(el);
-            }
+        let cur_this = vm.temp_roots[prev_temp];
+        for i in 0..len {
+            let el = vm.get_element_result(cur_this, i)?;
+            vm.temp_roots.push(el);
         }
 
         let res = sort_rooted_elements(vm, elements_start, len, prev_temp + 1);
@@ -740,20 +617,29 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
         let cur_this = vm.temp_roots[prev_temp];
         if let Some(ptr) = cur_this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::Array(elements) = &mut obj.kind {
-                elements.clear();
-                for i in 0..len {
-                    elements.push(vm.temp_roots[elements_start + i]);
+            if obj.accessors.is_none() && !matches!(obj.kind, ObjectKind::Proxy { .. }) {
+                if let ObjectKind::Array(elements) = &mut obj.kind {
+                    elements.clear();
+                    for i in 0..len {
+                        elements.push(vm.temp_roots[elements_start + i]);
+                    }
+                    vm.temp_roots.truncate(prev_temp);
+                    return Ok(cur_this);
                 }
-                vm.temp_roots.truncate(prev_temp);
-                return Ok(cur_this);
             }
         }
 
         for i in 0..len {
             let el = vm.temp_roots[elements_start + i];
-            vm.set_element(cur_this, i, el);
+            let key = i.to_string();
+            let cur_this = vm.temp_roots[prev_temp];
+            if el.is_hole() {
+                vm.delete_property_or_throw(cur_this, &key)?;
+            } else {
+                vm.set_property_throw(cur_this, &key, el)?;
+            }
         }
+        let cur_this = vm.temp_roots[prev_temp];
         vm.temp_roots.truncate(prev_temp);
         Ok(cur_this)
     });
@@ -839,52 +725,31 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "toReversed", to_reversed_fn);
 
     let reduce_right_fn = vm.alloc_native_function("reduceRight", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("Array.prototype.reduceRight callback must be a function".into()));
         }
-        let len_val = vm.get_property(this, "length");
-        let len = len_val.to_number().unwrap_or(0.0).max(0.0) as usize;
-        if len == 0 && args.len() < 2 {
-            return Err(VmError::TypeError("Reduce of empty array with no initial value".into()));
-        }
+        let len = vm.length_of_array_like(obj)?;
 
         let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(this);
+        vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
 
-        let mut idx = len as i64 - 1;
-        let acc = if args.len() >= 2 {
+        let mut k = len;
+        let acc = if args.len() > 1 {
             args[1]
         } else {
             let mut found = None;
-            while idx >= 0 {
+            while k > 0 {
+                k -= 1;
                 let cur_this = vm.temp_roots[prev_temp];
-                let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
-                    let obj = unsafe { &*(ptr as *mut JsObject) };
-                    if let ObjectKind::Array(elements) = &obj.kind {
-                        if (idx as usize) < elements.len() && !elements[idx as usize].is_hole() {
-                            true
-                        } else {
-                            let key = idx.to_string();
-                            vm.has_property(cur_this, &key).unwrap_or(false)
-                        }
-                    } else {
-                        let key = idx.to_string();
-                        vm.has_property(cur_this, &key).unwrap_or(false)
-                    }
-                } else {
-                    let key = idx.to_string();
-                    vm.has_property(cur_this, &key).unwrap_or(false)
-                };
-
-                if is_present {
+                if vm.has_element_result(cur_this, k)? {
                     let cur_this = vm.temp_roots[prev_temp];
-                    found = Some(vm.get_element(cur_this, idx as usize));
-                    idx -= 1;
+                    let val = vm.get_element_result(cur_this, k)?;
+                    found = Some(val);
                     break;
                 }
-                idx -= 1;
             }
             match found {
                 Some(val) => val,
@@ -897,37 +762,19 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
         vm.temp_roots.push(acc); // prev_temp + 2
 
-        let mut i = idx;
-        while i >= 0 {
+        while k > 0 {
+            k -= 1;
             let cur_this = vm.temp_roots[prev_temp];
-            let is_present = if let Some(ptr) = cur_this.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &obj.kind {
-                    if (i as usize) < elements.len() && !elements[i as usize].is_hole() {
-                        true
-                    } else {
-                        let key = i.to_string();
-                        vm.has_property(cur_this, &key).unwrap_or(false)
-                    }
-                } else {
-                    let key = i.to_string();
-                    vm.has_property(cur_this, &key).unwrap_or(false)
-                }
-            } else {
-                let key = i.to_string();
-                vm.has_property(cur_this, &key).unwrap_or(false)
-            };
-
-            if is_present {
+            if vm.has_element_result(cur_this, k)? {
                 let cur_this = vm.temp_roots[prev_temp];
-                let el = vm.get_element(cur_this, i as usize);
+                let el = vm.get_element_result(cur_this, k)?;
                 vm.temp_roots.push(el); // prev_temp + 3
                 let cur_this = vm.temp_roots[prev_temp];
                 let cur_cb = vm.temp_roots[prev_temp + 1];
                 let cur_acc = vm.temp_roots[prev_temp + 2];
                 let cur_el = vm.temp_roots[prev_temp + 3];
-                let res = vm.call(cur_cb, JsValue::undefined(), &[cur_acc, cur_el, JsValue::from_int32(i as i32), cur_this]);
-                vm.temp_roots.pop();
+                let res = vm.call(cur_cb, JsValue::undefined(), &[cur_acc, cur_el, index_to_js_value(k), cur_this]);
+                vm.temp_roots.pop(); // pop el
                 match res {
                     Ok(new_acc) => {
                         vm.temp_roots[prev_temp + 2] = new_acc;
@@ -938,8 +785,8 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
                     }
                 }
             }
-            i -= 1;
         }
+
         let final_acc = vm.temp_roots[prev_temp + 2];
         vm.temp_roots.truncate(prev_temp);
         Ok(final_acc)
@@ -988,7 +835,13 @@ fn sort_rooted_elements(
             let cur_cb = vm.temp_roots[cb_idx];
             match vm.call(cur_cb, JsValue::undefined(), &[a, b]) {
                 Ok(res) => {
-                    let n = res.to_number().unwrap_or(0.0);
+                    let n = match vm.to_number_value(res) {
+                        Ok(num) => num,
+                        Err(e) => {
+                            err = Some(e);
+                            return std::cmp::Ordering::Equal;
+                        }
+                    };
                     if n.is_nan() || n == 0.0 {
                         std::cmp::Ordering::Equal
                     } else if n < 0.0 {
@@ -1003,6 +856,10 @@ fn sort_rooted_elements(
                 }
             }
         } else {
+            if a.is_symbol() || b.is_symbol() {
+                err = Some(VmError::TypeError("Cannot convert a Symbol value to a string".into()));
+                return std::cmp::Ordering::Equal;
+            }
             let sa = vm.to_string_value(a);
             let sb = vm.to_string_value(b);
             sa.cmp(&sb)

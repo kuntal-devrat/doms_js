@@ -74,12 +74,31 @@ impl Vm {
             if let ObjectKind::Array(elements) = &jsobj.kind {
                 if name == "length" {
                     chunk.record_feedback_array_length(call_site_ip);
-                    let len = elements.len();
-                    let val = if len <= i32::MAX as usize {
-                        JsValue::from_int32(len as i32)
+                    let val = if let Some(info) = self.shapes.get_property_info(jsobj.shape_id, "length") {
+                        if let Some(v) = jsobj.get_slot(info.offset) {
+                            if let Some(n) = v.to_number() {
+                                if (n as usize) >= elements.len() {
+                                    Some(v)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     } else {
-                        JsValue::from_double(len as f64)
+                        None
                     };
+                    let val = val.unwrap_or_else(|| {
+                        let len = elements.len();
+                        if len <= i32::MAX as usize {
+                            JsValue::from_int32(len as i32)
+                        } else {
+                            JsValue::from_double(len as f64)
+                        }
+                    });
                     self.push(val);
                     return Ok(());
                 }

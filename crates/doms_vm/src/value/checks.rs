@@ -87,7 +87,7 @@ impl JsValue {
         }
         if let Some(ptr) = self.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
-            !matches!(obj.kind, crate::object::ObjectKind::String(_) | crate::object::ObjectKind::Symbol(_) | crate::object::ObjectKind::BigInt(_))
+            !matches!(obj.kind, crate::object::ObjectKind::String(_) | crate::object::ObjectKind::ConsString { .. } | crate::object::ObjectKind::Symbol(_) | crate::object::ObjectKind::BigInt(_))
         } else {
             false
         }
@@ -120,6 +120,16 @@ impl JsValue {
     #[inline]
     pub fn is_symbol(&self) -> bool {
         (self.0 & TAG_MASK) == TAG_SYMBOL
+    }
+
+    #[inline]
+    pub fn is_bigint(&self) -> bool {
+        if let Some(ptr) = self.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
+            matches!(obj.kind, crate::object::ObjectKind::BigInt(_))
+        } else {
+            false
+        }
     }
 
     #[inline]

@@ -10,14 +10,15 @@ pub(super) fn register_constructor(vm: &mut Vm) -> (JsValue, JsValue) {
                     return Err(VmError::RangeError("Invalid array length".into()));
                 }
                 let len = n as usize;
-                if len > 100_000 {
-                    return Err(VmError::RangeError("Invalid array length".into()));
+                let mut v = Vec::new();
+                if len <= 1024 {
+                    v.resize(len, JsValue::hole());
                 }
-                let mut v = Vec::with_capacity(len.min(1024));
-                for _ in 0..len {
-                    v.push(JsValue::hole());
+                let arr = vm.alloc_array(v);
+                if len > 1024 {
+                    vm.set_property(arr, "length", JsValue::from_double(n));
                 }
-                return Ok(vm.alloc_array(v));
+                return Ok(arr);
             }
         }
         Ok(vm.alloc_array(args.to_vec()))
@@ -25,7 +26,7 @@ pub(super) fn register_constructor(vm: &mut Vm) -> (JsValue, JsValue) {
 
     let is_array_fn = vm.alloc_native_function("isArray", 1, |vm, _this, args| {
         let arg = args.first().copied().unwrap_or(JsValue::undefined());
-        Ok(JsValue::from_boolean(vm.is_array(arg)))
+        Ok(JsValue::from_boolean(vm.is_array_result(arg)?))
     });
     (array_constructor, is_array_fn)
 }

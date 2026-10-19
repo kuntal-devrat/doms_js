@@ -3,6 +3,7 @@
 use super::*;
 use std::time::Instant;
 
+#[allow(dead_code)]
 pub(super) fn get_enumerable_keys(vm: &Vm, arg: JsValue) -> Vec<String> {
     let mut raw_names: Vec<String> = Vec::new();
     if let Some(ptr) = arg.as_object_ptr() {
@@ -85,9 +86,15 @@ pub(crate) fn add_species_getter(vm: &mut Vm, ctor: JsValue) {
         if let Some(ptr) = ctor.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             obj.insert_symbol_accessor_getter(sym_species, species_getter);
+            if let Some(accs) = obj.symbol_accessors.as_mut() {
+                if let Some(acc) = accs.get_mut(&sym_species) {
+                    acc.enumerable = false;
+                }
+            }
         }
     }
 }
+
 
 pub(crate) fn iterate_to_vec(vm: &mut Vm, iterable: JsValue) -> Result<Vec<JsValue>, VmError> {
     if iterable.is_nullish() {

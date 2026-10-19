@@ -14,6 +14,28 @@ impl Vm {
         if let Some(ptr) = callee.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Function(ref mut f) = obj.kind {
+                let effective_this = if !f.is_strict {
+                    if this_val.is_undefined() || this_val.is_null() {
+                        self.global_object
+                    } else {
+                        let is_primitive = this_val.is_number()
+                            || this_val.is_boolean()
+                            || this_val.is_symbol()
+                            || this_val.is_string()
+                            || this_val.as_object_ptr().is_some_and(|ptr| {
+                                let obj = unsafe { &*(ptr as *mut JsObject) };
+                                matches!(obj.kind, ObjectKind::String(_) | ObjectKind::Symbol(_) | ObjectKind::BigInt(_))
+                            });
+                        if is_primitive {
+                            self.to_object_value(this_val).unwrap_or(this_val)
+                        } else {
+                            this_val
+                        }
+                    }
+                } else {
+                    this_val
+                };
+
                 if !f.is_generator && !f.is_async && !self.is_constructing {
                     f.call_count = f.call_count.saturating_add(1);
                     if f.call_count >= crate::jit::JIT_HOT_THRESHOLD && !f.jit_attempted {
@@ -37,7 +59,7 @@ impl Vm {
                                         stack_args[slot as usize] = callee.0;
                                     }
                                 }
-                                unsafe { (func_fn)(stack_args.as_mut_ptr(), locals_count, this_val.0) }
+                                unsafe { (func_fn)(stack_args.as_mut_ptr(), locals_count, effective_this.0) }
                             } else {
                                 let mut raw_args: Vec<u64> = self.stack[stack_args_start..stack_args_start + argc].iter().map(|v| v.0).collect();
                                 if raw_args.len() < locals_count {
@@ -48,7 +70,7 @@ impl Vm {
                                         raw_args[slot as usize] = callee.0;
                                     }
                                 }
-                                unsafe { (func_fn)(raw_args.as_mut_ptr(), raw_args.len(), this_val.0) }
+                                unsafe { (func_fn)(raw_args.as_mut_ptr(), raw_args.len(), effective_this.0) }
                             };
 
                             if res != crate::jit::JIT_DEOPT_SENTINEL {
@@ -57,6 +79,13 @@ impl Vm {
                         }
                     }
                 }
+                let prev_temp = self.temp_roots.len();
+                self.temp_roots.push(callee);
+                self.temp_roots.push(effective_this);
+                let args_start = self.temp_roots.len();
+                self.temp_roots.extend_from_slice(&self.stack[stack_args_start..stack_args_start + argc]);
+                let args_len = argc;
+                return self.execute_call_common(prev_temp, args_start, args_len);
             }
         }
         let prev_temp = self.temp_roots.len();
@@ -119,57 +148,6 @@ impl Vm {
                     Ok(Some(res?))
                 }
                 ObjectKind::Function(f) => {
-                    if !f.is_generator && !f.is_async && !self.is_constructing {
-                        f.call_count = f.call_count.saturating_add(1);
-                        if f.call_count >= crate::jit::JIT_HOT_THRESHOLD && !f.jit_attempted {
-                            f.jit_attempted = true;
-                            f.jit_entry = crate::jit::JitCompiler::compile_native(&f.chunk);
-                        }
-                        if let Some(jit) = &f.jit_entry {
-                            if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } = &jit.code {
-                                let locals_count = *num_locals;
-                                let self_slot = f.self_slot;
-                                let func_fn = *func_ptr;
-                                let cur_callee = self.temp_roots[prev_temp];
-
-                                let res = if locals_count <= 16 {
-                                    let mut stack_args = [crate::value::TAG_UNDEFINED; 16];
-                                    let to_copy = args_len.min(locals_count);
-                                    for i in 0..to_copy {
-                                        stack_args[i] = self.temp_roots[args_start + i].0;
-                                    }
-                                    if let Some(slot) = self_slot {
-                                        if (slot as usize) < locals_count {
-                                            stack_args[slot as usize] = cur_callee.0;
-                                        }
-                                    }
-                                    let cur_this = self.temp_roots[prev_temp + 1];
-                                    unsafe { (func_fn)(stack_args.as_mut_ptr(), locals_count, cur_this.0) }
-                                } else {
-                                    let mut raw_args: Vec<u64> = self.temp_roots[args_start..args_start + args_len].iter().map(|v| v.0).collect();
-                                    if raw_args.len() < locals_count {
-                                        raw_args.resize(locals_count, crate::value::TAG_UNDEFINED);
-                                    }
-                                    if let Some(slot) = self_slot {
-                                        if (slot as usize) < raw_args.len() {
-                                            raw_args[slot as usize] = cur_callee.0;
-                                        }
-                                    }
-                                    let cur_this = self.temp_roots[prev_temp + 1];
-                                    unsafe { (func_fn)(raw_args.as_mut_ptr(), raw_args.len(), cur_this.0) }
-                                };
-
-                                if res != crate::jit::JIT_DEOPT_SENTINEL {
-                                    self.temp_roots.truncate(prev_temp);
-                                    return Ok(Some(JsValue(res)));
-                                } else {
-                                    // Deoptimization: speculative guard failed, fall back to interpreter
-                                    f.jit_entry = None;
-                                }
-                            }
-                        }
-                    }
-
                     let func = f.clone();
                     let is_strict_func = func.is_strict;
                     let cur_this = self.temp_roots[prev_temp + 1];
@@ -195,6 +173,55 @@ impl Vm {
                         cur_this
                     };
                     self.temp_roots[prev_temp + 1] = effective_this;
+
+                    if !f.is_generator && !f.is_async && !self.is_constructing {
+                        f.call_count = f.call_count.saturating_add(1);
+                        if f.call_count >= crate::jit::JIT_HOT_THRESHOLD && !f.jit_attempted {
+                            f.jit_attempted = true;
+                            f.jit_entry = crate::jit::JitCompiler::compile_native(&f.chunk);
+                        }
+                        if let Some(jit) = &f.jit_entry {
+                            if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } = &jit.code {
+                                let locals_count = *num_locals;
+                                let self_slot = f.self_slot;
+                                let func_fn = *func_ptr;
+                                let cur_callee = self.temp_roots[prev_temp];
+
+                                let res = if locals_count <= 16 {
+                                    let mut stack_args = [crate::value::TAG_UNDEFINED; 16];
+                                    let to_copy = args_len.min(locals_count);
+                                    for i in 0..to_copy {
+                                        stack_args[i] = self.temp_roots[args_start + i].0;
+                                    }
+                                    if let Some(slot) = self_slot {
+                                        if (slot as usize) < locals_count {
+                                            stack_args[slot as usize] = cur_callee.0;
+                                        }
+                                    }
+                                    unsafe { (func_fn)(stack_args.as_mut_ptr(), locals_count, effective_this.0) }
+                                } else {
+                                    let mut raw_args: Vec<u64> = self.temp_roots[args_start..args_start + args_len].iter().map(|v| v.0).collect();
+                                    if raw_args.len() < locals_count {
+                                        raw_args.resize(locals_count, crate::value::TAG_UNDEFINED);
+                                    }
+                                    if let Some(slot) = self_slot {
+                                        if (slot as usize) < raw_args.len() {
+                                            raw_args[slot as usize] = cur_callee.0;
+                                        }
+                                    }
+                                    unsafe { (func_fn)(raw_args.as_mut_ptr(), raw_args.len(), effective_this.0) }
+                                };
+
+                                if res != crate::jit::JIT_DEOPT_SENTINEL {
+                                    self.temp_roots.truncate(prev_temp);
+                                    return Ok(Some(JsValue(res)));
+                                } else {
+                                    // Deoptimization: speculative guard failed, fall back to interpreter
+                                    f.jit_entry = None;
+                                }
+                            }
+                        }
+                    }
 
                     let has_rest = func.params.last().map(|p| p.starts_with("...")).unwrap_or(false);
                     let rest_idx = if has_rest { func.params.len() - 1 } else { usize::MAX };

@@ -79,8 +79,12 @@ pub(super) fn register_function_builtins(vm: &mut Vm) {
         Ok(bound_closure)
     });
 
-    let to_string_fn = vm.alloc_native_function("toString", 0, |vm, _this, _args| {
-        Ok(vm.alloc_string("function () { [native code] }".into()))
+    let to_string_fn = vm.alloc_native_function("toString", 0, |vm, this, _args| {
+        if !vm.is_callable(this) {
+            return Err(VmError::TypeError("Function.prototype.toString called on non-function".into()));
+        }
+        let s = vm.to_string_value(this);
+        Ok(vm.alloc_string(s))
     });
 
     let function_proto = vm.function_proto.unwrap();

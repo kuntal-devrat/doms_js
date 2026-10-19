@@ -407,14 +407,31 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
 
     let with_fn = vm.alloc_native_function("with", 2, |vm, this, args| {
         let ta = validate_typed_array(this)?;
-        let len = ta.length as i64;
-        let raw_idx = args.first().and_then(|v| v.to_number()).unwrap_or(0.0) as i64;
-        let k = if raw_idx < 0 { len + raw_idx } else { raw_idx };
-        if k < 0 || k >= len {
+        let len = ta.length;
+        let idx_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let raw_num = vm.to_number_value(idx_val)?;
+        let relative_index = if raw_num.is_nan() || raw_num == 0.0 {
+            0.0
+        } else {
+            raw_num.trunc()
+        };
+        let raw_val = args.get(1).copied().unwrap_or(JsValue::undefined());
+        let numeric_val = if matches!(ta.kind, TypedArrayKind::BigInt64 | TypedArrayKind::BigUint64) {
+            let bi = vm.to_bigint_op(raw_val)?;
+            vm.alloc_bigint(bi)
+        } else {
+            let n = vm.to_number_value(raw_val)?;
+            JsValue::from_double(n)
+        };
+        let actual_index = if relative_index < 0.0 {
+            (len as f64) + relative_index
+        } else {
+            relative_index
+        };
+        if actual_index < 0.0 || actual_index >= (len as f64) || actual_index.is_infinite() {
             return Err(VmError::RangeError("Invalid index".into()));
         }
-        let value = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = ta.length;
+        let k = actual_index as usize;
         let bpe = ta.kind.bytes_per_element();
         let new_sab = doms_parallel::SharedArrayBuffer::try_new(len * bpe)
             .map_err(|e| VmError::RuntimeError(e.into()))?;
@@ -425,7 +442,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, proto: JsValue) {
             byte_offset: 0,
         };
         for i in 0..len {
-            let val = if i == k as usize { value } else { vm.read_typed_array_element_vm(&ta, i).unwrap_or(JsValue::undefined()) };
+            let val = if i == k { numeric_val } else { vm.read_typed_array_element_vm(&ta, i).unwrap_or(JsValue::undefined()) };
             vm.write_typed_array_element_vm(&mut dst_ta, i, val)?;
         }
         Ok(vm.alloc_typed_array(dst_ta))

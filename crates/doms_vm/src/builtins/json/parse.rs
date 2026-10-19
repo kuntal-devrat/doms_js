@@ -281,7 +281,7 @@ impl<'a> JsonParser<'a> {
                 return Err(VmError::SyntaxError("Expected ':' after property name in JSON object".into()));
             }
             let val = self.parse_value(vm)?;
-            vm.set_property(obj, &key, val);
+            vm.create_data_property_or_throw(obj, &key, val)?;
 
             self.skip_whitespace();
             match self.peek() {

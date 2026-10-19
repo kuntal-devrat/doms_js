@@ -45,6 +45,13 @@ impl Trace for JsObject {
                 }
             }
         }
+        if let Some(sym_attrs) = &self.symbol_attributes {
+            for (k, _) in sym_attrs.iter() {
+                if let Some(p) = k.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
+        }
         if let Some(sym_accs) = &self.symbol_accessors {
             for (k, acc) in sym_accs.iter() {
                 if let Some(p) = k.as_heap_ptr() {
@@ -359,6 +366,14 @@ impl JsObject {
                 updated.insert(k, v);
             }
             **syms = updated;
+        }
+        if let Some(sym_attrs) = &mut self.symbol_attributes {
+            let mut updated = std::collections::HashMap::with_capacity(sym_attrs.len());
+            for (mut k, attrs) in sym_attrs.drain() {
+                visitor(&mut k);
+                updated.insert(k, attrs);
+            }
+            **sym_attrs = updated;
         }
         if let Some(sym_accs) = &mut self.symbol_accessors {
             let mut updated = std::collections::HashMap::with_capacity(sym_accs.len());

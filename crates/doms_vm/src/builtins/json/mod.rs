@@ -29,19 +29,27 @@ pub(super) fn register_json(vm: &mut Vm) {
             None
         };
         let replacer_arr: Option<Vec<String>> = if cur_replacer.is_object() && !vm.is_callable(cur_replacer) {
-            if let Some(ptr) = cur_replacer.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &obj.kind {
-                    let mut keys = Vec::new();
-                    for elem in elements {
-                        if elem.is_string() || elem.is_number() {
-                            keys.push(vm.to_string_value(*elem));
+            if vm.is_array_result(cur_replacer)? {
+                let len_val = vm.get_property_result(cur_replacer, "length")?;
+                let len = vm.to_number_value(len_val).unwrap_or(0.0).max(0.0) as usize;
+                let mut keys = Vec::new();
+                for i in 0..len {
+                    let mut elem = vm.get_property_result(cur_replacer, &i.to_string())?;
+                    if let Some(ptr) = elem.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        if matches!(obj.kind, ObjectKind::NumberObject(_) | ObjectKind::StringObject(_)) {
+                            let s = vm.to_string_spec(elem)?;
+                            elem = vm.alloc_string(s);
                         }
                     }
-                    Some(keys)
-                } else {
-                    None
+                    if elem.is_string() || elem.is_number() {
+                        let k = vm.to_string_value(elem);
+                        if !keys.contains(&k) {
+                            keys.push(k);
+                        }
+                    }
                 }
+                Some(keys)
             } else {
                 None
             }
@@ -49,13 +57,28 @@ pub(super) fn register_json(vm: &mut Vm) {
             None
         };
 
-        let cur_space = vm.temp_roots[prev_temp + 2];
+        let mut cur_space = vm.temp_roots[prev_temp + 2];
+        if let Some(ptr) = cur_space.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::NumberObject(n) = obj.kind {
+                cur_space = JsValue::from_double(n);
+            } else if let ObjectKind::StringObject(_) = obj.kind {
+                if let Ok(s) = vm.to_string_spec(cur_space) {
+                    cur_space = vm.alloc_string(s);
+                }
+            }
+        }
         let gap = if cur_space.is_number() {
-            let n = cur_space.to_number().unwrap_or(0.0).max(0.0).min(10.0) as usize;
-            " ".repeat(n)
+            let num = cur_space.to_number().unwrap_or(0.0);
+            if num.is_nan() || num <= 0.0 {
+                String::new()
+            } else {
+                let n = (num.floor() as usize).min(10);
+                " ".repeat(n)
+            }
         } else if cur_space.is_string() {
             let s = vm.to_string_value(cur_space);
-            s[..s.len().min(10)].to_string()
+            s.chars().take(10).collect::<String>()
         } else {
             String::new()
         };
@@ -67,13 +90,11 @@ pub(super) fn register_json(vm: &mut Vm) {
         vm.set_property(cur_wrapper, "", cur_val);
 
         let mut stack = Vec::new();
-        let cur_val = vm.temp_roots[prev_temp];
         let cur_wrapper = vm.temp_roots[prev_temp + 3];
         let res = json_stringify_walk(
             vm,
             cur_wrapper,
             "",
-            cur_val,
             &mut stack,
             replacer_fn,
             replacer_arr.as_deref(),
@@ -94,7 +115,7 @@ pub(super) fn register_json(vm: &mut Vm) {
         if text_arg.is_symbol() {
             return Err(VmError::TypeError("Cannot convert a Symbol value to a string".into()));
         }
-        let text = vm.to_string_value(text_arg);
+        let text = vm.to_string_spec(text_arg)?;
         let reviver = args.get(1).copied().filter(|r| vm.is_callable(*r));
 
         let mut parser = JsonParser::new(&text);
@@ -114,7 +135,25 @@ pub(super) fn register_json(vm: &mut Vm) {
     });
 
     vm.set_property(json_obj, "stringify", stringify_fn);
+    vm.set_property_non_enumerable(json_obj, "stringify".to_string());
     vm.set_property(json_obj, "parse", parse_fn);
+    vm.set_property_non_enumerable(json_obj, "parse".to_string());
+
+    if let Some(tag_sym) = vm.symbol_to_string_tag {
+        let tag_val = vm.alloc_string("JSON".into());
+        vm.set_symbol_property(json_obj, tag_sym, tag_val);
+        if let Some(ptr) = json_obj.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            obj.set_symbol_attributes(tag_sym, PropertyAttributes {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            });
+        }
+    }
 
     vm.globals.insert("JSON".to_string(), json_obj);
+    if vm.global_object.is_object() {
+        vm.set_property(vm.global_object, "JSON", json_obj);
+    }
 }

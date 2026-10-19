@@ -279,7 +279,7 @@ impl Vm {
         self.has_own_property_key(target, &PropertyKeyVal::String(key.to_string()))
     }
 
-    pub fn create_data_property_or_throw(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<(), VmError> {
+    pub fn create_data_property(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<bool, VmError> {
         let key_string = key.to_string();
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -295,28 +295,32 @@ impl Vm {
                     self.set_property(desc, "enumerable", JsValue::from_boolean(true));
                     self.set_property(desc, "configurable", JsValue::from_boolean(true));
                     let res = self.call(trap, hdl, &[tgt, key_val, desc])?;
-                    if !res.is_truthy() {
-                        return Err(VmError::TypeError(format!("Proxy trap defineProperty returned false for '{}'", key)));
-                    }
-                    return Ok(());
+                    return Ok(res.is_truthy());
                 } else {
-                    return self.create_data_property_or_throw(tgt, key, value);
+                    return self.create_data_property(tgt, key, value);
                 }
             }
 
             // Check non-configurable: CreateDataProperty requires configurable: true.
             // If property is already non-configurable, redefining it as configurable fails.
             if !self.is_own_property_configurable(target, key) {
-                return Err(VmError::TypeError(format!("Cannot redefine non-configurable property '{}'", key)));
+                return Ok(false);
             }
 
             // Check non-extensible
             if !self.is_extensible_object(target) && !self.has_own_property(target, key) {
-                return Err(VmError::TypeError(format!("Cannot add property '{}' to non-extensible object", key)));
+                return Ok(false);
             }
         }
 
         self.set_own_property(target, key, value);
+        Ok(true)
+    }
+
+    pub fn create_data_property_or_throw(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<(), VmError> {
+        if !self.create_data_property(target, key, value)? {
+            return Err(VmError::TypeError(format!("Cannot create data property '{}'", key)));
+        }
         Ok(())
     }
 

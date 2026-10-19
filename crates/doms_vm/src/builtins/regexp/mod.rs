@@ -756,6 +756,8 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         vm.set_property_non_enumerable(regexp_ctor, "$'".to_string());
     }
 
+    helpers::add_species_getter(vm, regexp_ctor);
+
     vm.globals.insert("RegExp".to_string(), regexp_ctor);
     if vm.global_object.is_object() {
         vm.set_property(vm.global_object, "RegExp", regexp_ctor);
