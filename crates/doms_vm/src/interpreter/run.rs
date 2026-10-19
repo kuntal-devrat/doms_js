@@ -96,6 +96,11 @@ impl Vm {
                 }
             }
             if self.instruction_count % 1024 == 0 {
+                if let Some(ref flag) = self.interrupt_flag {
+                    if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err(VmError::RuntimeError("Execution interrupted".to_string()));
+                    }
+                }
                 if let Some(deadline) = self.deadline {
                     if Instant::now() > deadline {
                         return Err(VmError::RuntimeError(

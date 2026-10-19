@@ -8,6 +8,38 @@
 
 use crate::value::JsValue;
 use doms_gc::heap::{Heap, HeapConfig};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+/// Handle for asynchronously interrupting JavaScript execution from another thread.
+#[derive(Debug, Clone, Default)]
+pub struct InterruptHandle {
+    interrupted: Arc<AtomicBool>,
+}
+
+impl InterruptHandle {
+    /// Create a new un-triggered interrupt handle.
+    pub fn new() -> Self {
+        Self {
+            interrupted: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Trigger an interruption, causing the associated isolate to abort execution promptly.
+    pub fn interrupt(&self) {
+        self.interrupted.store(true, Ordering::Relaxed);
+    }
+
+    /// Check whether an interruption has been triggered.
+    pub fn is_interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::Relaxed)
+    }
+
+    /// Reset the interruption signal to allow future execution.
+    pub fn reset(&self) {
+        self.interrupted.store(false, Ordering::Relaxed);
+    }
+}
 
 /// Process-global engine instance.
 ///
@@ -23,7 +55,7 @@ use doms_gc::heap::{Heap, HeapConfig};
 /// let isolate = engine.create_isolate();
 /// ```
 pub struct Engine {
-    // TODO: Thread pool, shared compiled code cache, etc.
+    // Shared compiled code cache, thread pool, etc.
     _private: (),
 }
 
@@ -78,6 +110,37 @@ impl Isolate {
     /// Create a new execution context within this isolate.
     pub fn create_context(&mut self) -> Context<'_> {
         Context::new(self)
+    }
+
+    /// Get or create an [`InterruptHandle`] to interrupt this isolate asynchronously.
+    pub fn get_or_create_interrupt_handle(&mut self) -> InterruptHandle {
+        if let Some(ref flag) = self.vm.interrupt_flag {
+            InterruptHandle { interrupted: Arc::clone(flag) }
+        } else {
+            let handle = InterruptHandle::new();
+            self.vm.interrupt_flag = Some(Arc::clone(&handle.interrupted));
+            handle
+        }
+    }
+
+    /// Attach an external [`InterruptHandle`] to this isolate.
+    pub fn set_interrupt_handle(&mut self, handle: &InterruptHandle) {
+        self.vm.interrupt_flag = Some(Arc::clone(&handle.interrupted));
+    }
+
+    /// Set an execution step (fuel) limit for the VM.
+    pub fn set_max_fuel(&mut self, max_instructions: Option<usize>) {
+        self.vm.max_instructions = max_instructions;
+    }
+
+    /// Get the remaining fuel (instructions) before timeout, if a limit is configured.
+    pub fn fuel_remaining(&self) -> Option<usize> {
+        self.vm.max_instructions.map(|max| max.saturating_sub(self.vm.instruction_count))
+    }
+
+    /// Get the number of instructions executed by this isolate so far.
+    pub fn fuel_consumed(&self) -> usize {
+        self.vm.instruction_count
     }
 }
 
@@ -300,4 +363,58 @@ mod tests {
         let val = ctx.isolate.vm.get_property(mod_res, "res").to_int32();
         assert_eq!(val, Some(42));
     }
+
+    #[test]
+    fn test_interrupt_handle() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let handle = isolate.get_or_create_interrupt_handle();
+        assert!(!handle.is_interrupted());
+
+        handle.interrupt();
+        assert!(handle.is_interrupted());
+
+        let mut ctx = isolate.create_context();
+        // Since interrupted is set, a long loop aborts promptly
+        let res = ctx.eval("while (true) {}");
+        assert!(matches!(res, Err(EngineError::Runtime(_))));
+    }
+
+    #[test]
+    fn test_fuel_metering() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        isolate.set_max_fuel(Some(100));
+
+        let mut ctx = isolate.create_context();
+        // A loop exceeding 100 instructions fails with step limit exceeded
+        let res = ctx.eval("var x = 0; while (true) { x++; }");
+        assert!(matches!(res, Err(EngineError::Runtime(_))));
+        assert!(isolate.fuel_consumed() > 100);
+    }
+
+    #[test]
+    fn test_type_conversions() {
+        use crate::convert::{FromJs, IntoJs};
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+
+        let val_bool = true.into_js(&mut isolate.vm);
+        assert_eq!(bool::from_js(val_bool, &mut isolate.vm).unwrap(), true);
+
+        let val_i32 = 42i32.into_js(&mut isolate.vm);
+        assert_eq!(i32::from_js(val_i32, &mut isolate.vm).unwrap(), 42);
+
+        let val_str = "hello doms".into_js(&mut isolate.vm);
+        assert_eq!(String::from_js(val_str, &mut isolate.vm).unwrap(), "hello doms");
+
+        let opt_some: Option<i32> = Some(99);
+        let val_opt = opt_some.into_js(&mut isolate.vm);
+        assert_eq!(Option::<i32>::from_js(val_opt, &mut isolate.vm).unwrap(), Some(99));
+
+        let opt_none: Option<i32> = None;
+        let val_none = opt_none.into_js(&mut isolate.vm);
+        assert_eq!(Option::<i32>::from_js(val_none, &mut isolate.vm).unwrap(), None);
+    }
 }
+

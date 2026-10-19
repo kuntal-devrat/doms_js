@@ -457,4 +457,29 @@ impl BytecodeChunk {
             *finally_start = start;
         }
     }
+
+    /// Emit a forward jump placeholder instruction and return a type-safe `Label` to be bound later.
+    #[inline]
+    pub fn forward_jump(&mut self, op_builder: impl FnOnce(i32) -> OpCode, line: usize) -> Label {
+        let idx = self.emit(op_builder(0), line);
+        Label(idx)
+    }
+
+    /// Bind a forward jump `Label` to the current instruction offset.
+    #[inline]
+    pub fn bind_label(&mut self, label: Label) {
+        let target = self.instructions.len() as i32;
+        self.patch_jump(label.0, target);
+    }
+
+    /// Bind a forward jump `Label` to a specific instruction target offset.
+    #[inline]
+    pub fn bind_label_to(&mut self, label: Label, target: i32) {
+        self.patch_jump(label.0, target);
+    }
 }
+
+/// Type-safe jump target label for control-flow patching in the compiler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Label(pub usize);
+

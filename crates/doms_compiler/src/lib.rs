@@ -7,7 +7,7 @@ pub mod compiler;
 pub mod scope;
 pub mod source_map;
 
-pub use bytecode::{BytecodeChunk, Constant, FeedbackSlot, FeedbackVector, OpCode, TypeMask};
+pub use bytecode::{BytecodeChunk, Constant, FeedbackSlot, FeedbackVector, Label, OpCode, TypeMask};
 pub use compiler::{CompileError, Compiler};
 pub use scope::{Local, SymbolTable, UpvalueInfo};
 pub use source_map::{decode_vlq, Mapping, OriginalPosition, SourceMap};

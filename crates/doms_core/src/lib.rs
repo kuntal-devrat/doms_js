@@ -10,9 +10,11 @@
 //! - [`Isolate`] — Independent JavaScript execution environment.
 //! - [`Context`] — Execution context within an isolate.
 
+pub mod convert;
 pub mod engine;
 pub mod value;
 
-pub use engine::{Context, Engine, EngineError, Isolate};
+pub use convert::{FromJs, IntoJs};
+pub use engine::{Context, Engine, EngineError, InterruptHandle, Isolate};
 pub use value::JsValue;
 
