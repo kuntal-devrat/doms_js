@@ -137,11 +137,7 @@ impl<'a> Parser<'a> {
         in_method: bool,
         in_function: bool,
     ) -> Result<Self, ParseError> {
-        let mut p = if is_strict {
-            Self::new_strict(source)?
-        } else {
-            Self::new(source)?
-        };
+        let mut p = if is_strict { Self::new_strict(source)? } else { Self::new(source)? };
         p.in_method = in_method;
         p.in_function = in_function;
         p.in_non_arrow_function = in_function;
@@ -214,10 +210,20 @@ impl<'a> Parser<'a> {
         let name = match tok.kind {
             TokenKind::Ident(ref id) => {
                 if tok.has_escape && crate::lexer::is_reserved_word(id) {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(id.clone()), tok.line, tok.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Ident(id.clone()),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
-                if self.is_strict && (is_strict_reserved_word(id) || id == "eval" || id == "arguments") {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(id.clone()), tok.line, tok.col));
+                if self.is_strict
+                    && (is_strict_reserved_word(id) || id == "eval" || id == "arguments")
+                {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Ident(id.clone()),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 id.clone()
             }
@@ -300,7 +306,8 @@ mod tests {
 
     #[test]
     fn test_parse_for_and_ternary() {
-        let mut parser = Parser::new("for (let i = 0; i < 10; i = i + 1) { let res = i > 5 ? 1 : 0; }").unwrap();
+        let mut parser =
+            Parser::new("for (let i = 0; i < 10; i = i + 1) { let res = i > 5 ? 1 : 0; }").unwrap();
         let prog = parser.parse_program().unwrap();
         assert_eq!(prog.body.len(), 1);
     }

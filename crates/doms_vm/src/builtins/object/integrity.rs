@@ -17,7 +17,11 @@ pub enum IntegrityLevel {
     Frozen,
 }
 
-pub fn set_integrity_level(vm: &mut Vm, target: JsValue, level: IntegrityLevel) -> Result<bool, VmError> {
+pub fn set_integrity_level(
+    vm: &mut Vm,
+    target: JsValue,
+    level: IntegrityLevel,
+) -> Result<bool, VmError> {
     let status = prevent_extensions_internal(vm, target)?;
     if !status {
         return Ok(false);
@@ -31,7 +35,8 @@ pub fn set_integrity_level(vm: &mut Vm, target: JsValue, level: IntegrityLevel) 
                 super::define_property::define_property_internal(vm, target, key, desc)?;
             }
             IntegrityLevel::Frozen => {
-                let current = super::descriptor::get_own_property_descriptor_internal(vm, target, &key)?;
+                let current =
+                    super::descriptor::get_own_property_descriptor_internal(vm, target, &key)?;
                 if !current.is_undefined() {
                     let desc = vm.alloc_object();
                     vm.set_property(desc, "configurable", JsValue::from_boolean(false));
@@ -48,7 +53,11 @@ pub fn set_integrity_level(vm: &mut Vm, target: JsValue, level: IntegrityLevel) 
     Ok(true)
 }
 
-pub fn test_integrity_level(vm: &mut Vm, target: JsValue, level: IntegrityLevel) -> Result<bool, VmError> {
+pub fn test_integrity_level(
+    vm: &mut Vm,
+    target: JsValue,
+    level: IntegrityLevel,
+) -> Result<bool, VmError> {
     if !target.is_js_object() {
         return Ok(true);
     }
@@ -78,18 +87,23 @@ pub fn test_integrity_level(vm: &mut Vm, target: JsValue, level: IntegrityLevel)
 pub(super) fn register_integrity(
     vm: &mut Vm,
 ) -> (JsValue, JsValue, JsValue, JsValue, JsValue, JsValue) {
-    let prevent_extensions_fn = vm.alloc_native_function("preventExtensions", 1, |vm, _this, args| {
-        let target = match args.first() {
-            Some(t) if t.is_js_object() => *t,
-            Some(t) => return Ok(*t),
-            _ => return Err(VmError::TypeError("Object.preventExtensions called on undefined or null".into())),
-        };
-        let status = prevent_extensions_internal(vm, target)?;
-        if !status {
-            return Err(VmError::TypeError("Cannot prevent extensions".into()));
-        }
-        Ok(target)
-    });
+    let prevent_extensions_fn =
+        vm.alloc_native_function("preventExtensions", 1, |vm, _this, args| {
+            let target = match args.first() {
+                Some(t) if t.is_js_object() => *t,
+                Some(t) => return Ok(*t),
+                _ => {
+                    return Err(VmError::TypeError(
+                        "Object.preventExtensions called on undefined or null".into(),
+                    ));
+                }
+            };
+            let status = prevent_extensions_internal(vm, target)?;
+            if !status {
+                return Err(VmError::TypeError("Cannot prevent extensions".into()));
+            }
+            Ok(target)
+        });
 
     let is_extensible_fn = vm.alloc_native_function("isExtensible", 1, |vm, _this, args| {
         let target = match args.first() {
@@ -104,7 +118,9 @@ pub(super) fn register_integrity(
         let target = match args.first() {
             Some(t) if t.is_js_object() => *t,
             Some(t) => return Ok(*t),
-            _ => return Err(VmError::TypeError("Object.freeze called on undefined or null".into())),
+            _ => {
+                return Err(VmError::TypeError("Object.freeze called on undefined or null".into()));
+            }
         };
         let status = set_integrity_level(vm, target, IntegrityLevel::Frozen)?;
         if !status {
@@ -144,12 +160,5 @@ pub(super) fn register_integrity(
         Ok(JsValue::from_boolean(res))
     });
 
-    (
-        prevent_extensions_fn,
-        is_extensible_fn,
-        freeze_fn,
-        is_frozen_fn,
-        seal_fn,
-        is_sealed_fn,
-    )
+    (prevent_extensions_fn, is_extensible_fn, freeze_fn, is_frozen_fn, seal_fn, is_sealed_fn)
 }

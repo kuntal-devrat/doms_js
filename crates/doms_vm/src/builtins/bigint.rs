@@ -25,11 +25,20 @@ fn to_bigint_value(vm: &mut Vm, val: JsValue) -> Result<BigInt, VmError> {
             return Err(VmError::RangeError(format!("Cannot convert {} to a BigInt", n)));
         }
         if n.fract() != 0.0 {
-            return Err(VmError::RangeError(format!("The number {} cannot be converted to a BigInt because it is not an integer", n)));
+            return Err(VmError::RangeError(format!(
+                "The number {} cannot be converted to a BigInt because it is not an integer",
+                n
+            )));
         }
-        return BigInt::from_f64(n).ok_or_else(|| VmError::RangeError(format!("Cannot convert {} to a BigInt", n)));
+        return BigInt::from_f64(n)
+            .ok_or_else(|| VmError::RangeError(format!("Cannot convert {} to a BigInt", n)));
     }
-    if prim.is_string() || (prim.is_object() && prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_)))) {
+    if prim.is_string()
+        || (prim.is_object()
+            && prim.as_object_ptr().is_some_and(|p| {
+                matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))
+            }))
+    {
         let s = vm.to_string_value(prim);
         let trimmed = s.trim();
         if trimmed.is_empty() {
@@ -42,24 +51,34 @@ fn to_bigint_value(vm: &mut Vm, val: JsValue) -> Result<BigInt, VmError> {
         } else {
             (false, trimmed)
         };
-        let bi_res = if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
+        let bi_res = if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X"))
+        {
             if is_neg {
-                return Err(VmError::SyntaxError("Cannot convert string with sign and hex prefix to a BigInt".into()));
+                return Err(VmError::SyntaxError(
+                    "Cannot convert string with sign and hex prefix to a BigInt".into(),
+                ));
             }
             BigInt::parse_bytes(hex.as_bytes(), 16)
         } else if let Some(bin) = rest.strip_prefix("0b").or_else(|| rest.strip_prefix("0B")) {
             if is_neg {
-                return Err(VmError::SyntaxError("Cannot convert string with sign and binary prefix to a BigInt".into()));
+                return Err(VmError::SyntaxError(
+                    "Cannot convert string with sign and binary prefix to a BigInt".into(),
+                ));
             }
             BigInt::parse_bytes(bin.as_bytes(), 2)
         } else if let Some(oct) = rest.strip_prefix("0o").or_else(|| rest.strip_prefix("0O")) {
             if is_neg {
-                return Err(VmError::SyntaxError("Cannot convert string with sign and octal prefix to a BigInt".into()));
+                return Err(VmError::SyntaxError(
+                    "Cannot convert string with sign and octal prefix to a BigInt".into(),
+                ));
             }
             BigInt::parse_bytes(oct.as_bytes(), 8)
         } else {
-            if rest.contains('.') || rest.contains('e') || rest.contains('E') || rest.contains('n') {
-                return Err(VmError::SyntaxError("Cannot convert string with decimal or exponent to a BigInt".into()));
+            if rest.contains('.') || rest.contains('e') || rest.contains('E') || rest.contains('n')
+            {
+                return Err(VmError::SyntaxError(
+                    "Cannot convert string with decimal or exponent to a BigInt".into(),
+                ));
             }
             BigInt::parse_bytes(rest.as_bytes(), 10).map(|mut bi| {
                 if is_neg {
@@ -68,7 +87,9 @@ fn to_bigint_value(vm: &mut Vm, val: JsValue) -> Result<BigInt, VmError> {
                 bi
             })
         };
-        return bi_res.ok_or_else(|| VmError::SyntaxError(format!("Cannot convert string '{}' to a BigInt", s)));
+        return bi_res.ok_or_else(|| {
+            VmError::SyntaxError(format!("Cannot convert string '{}' to a BigInt", s))
+        });
     }
     Err(VmError::TypeError("Cannot convert value to a BigInt".into()))
 }
@@ -82,21 +103,40 @@ pub(super) fn register_bigint(vm: &mut Vm) {
             if let ObjectKind::BigInt(val) = &obj.kind {
                 val.clone()
             } else {
-                return Err(VmError::TypeError("BigInt.prototype.toString requires that 'this' be a BigInt".into()));
+                return Err(VmError::TypeError(
+                    "BigInt.prototype.toString requires that 'this' be a BigInt".into(),
+                ));
             }
         } else {
-            return Err(VmError::TypeError("BigInt.prototype.toString requires that 'this' be a BigInt".into()));
+            return Err(VmError::TypeError(
+                "BigInt.prototype.toString requires that 'this' be a BigInt".into(),
+            ));
         };
         let radix = if let Some(r_val) = args.first() {
             if r_val.is_undefined() {
                 10
             } else {
-                if r_val.is_symbol() || (r_val.is_object() && r_val.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::BigInt(_)))) {
-                    return Err(VmError::TypeError("Cannot convert Symbol or BigInt to number".into()));
+                if r_val.is_symbol()
+                    || (r_val.is_object()
+                        && r_val.as_object_ptr().is_some_and(|p| {
+                            matches!(
+                                unsafe { &(*(p as *mut JsObject)).kind },
+                                ObjectKind::BigInt(_)
+                            )
+                        }))
+                {
+                    return Err(VmError::TypeError(
+                        "Cannot convert Symbol or BigInt to number".into(),
+                    ));
                 }
-                let r = vm.to_number_value(*r_val).map_err(|_| VmError::TypeError("radix must be convertible to number".into()))? as i32;
+                let r = vm
+                    .to_number_value(*r_val)
+                    .map_err(|_| VmError::TypeError("radix must be convertible to number".into()))?
+                    as i32;
                 if !(2..=36).contains(&r) {
-                    return Err(VmError::RangeError("radix must be an integer at least 2 and no greater than 36".into()));
+                    return Err(VmError::RangeError(
+                        "radix must be an integer at least 2 and no greater than 36".into(),
+                    ));
                 }
                 r
             }
@@ -170,7 +210,9 @@ pub(super) fn register_bigint(vm: &mut Vm) {
             if bi.is_negative() && ((-&bi).bits() as usize) < bits {
                 return Ok(vm.alloc_bigint(bi));
             }
-            return Err(VmError::RangeError("BigInt bit length exceeds maximum supported size".into()));
+            return Err(VmError::RangeError(
+                "BigInt bit length exceeds maximum supported size".into(),
+            ));
         }
         let two_to_bits = BigInt::one() << bits;
         let mut mod_val = bi % &two_to_bits;
@@ -197,7 +239,9 @@ pub(super) fn register_bigint(vm: &mut Vm) {
             if !bi.is_negative() && (bi.bits() as usize) <= bits {
                 return Ok(vm.alloc_bigint(bi));
             }
-            return Err(VmError::RangeError("BigInt bit length exceeds maximum supported size".into()));
+            return Err(VmError::RangeError(
+                "BigInt bit length exceeds maximum supported size".into(),
+            ));
         }
         let two_to_bits = BigInt::one() << bits;
         let mut mod_val = bi % &two_to_bits;

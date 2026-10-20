@@ -24,7 +24,9 @@ impl Vm {
         if trimmed == "-Infinity" {
             return f64::NEG_INFINITY;
         }
-        if trimmed.to_ascii_lowercase().contains("inf") || trimmed.to_ascii_lowercase().contains("nan") {
+        if trimmed.to_ascii_lowercase().contains("inf")
+            || trimmed.to_ascii_lowercase().contains("nan")
+        {
             return f64::NAN;
         }
         if let Some(hex_part) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
@@ -116,7 +118,11 @@ impl Vm {
                 }
                 ObjectKind::NumberObject(n) => return Ok(*n),
                 ObjectKind::BooleanObject(b) => return Ok(if *b { 1.0 } else { 0.0 }),
-                ObjectKind::BigInt(_) => return Err(VmError::TypeError("Cannot convert a BigInt value to a number".into())),
+                ObjectKind::BigInt(_) => {
+                    return Err(VmError::TypeError(
+                        "Cannot convert a BigInt value to a number".into(),
+                    ));
+                }
                 _ => return Ok(f64::NAN),
             }
         }

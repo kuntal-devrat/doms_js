@@ -23,7 +23,9 @@ impl Vm {
                 let hint_val = self.alloc_string(hint_str.to_string());
                 let res = self.call(exotic, val, &[hint_val])?;
                 if !self.is_primitive_value(res) {
-                    return Err(VmError::TypeError("Cannot convert object to primitive value".into()));
+                    return Err(VmError::TypeError(
+                        "Cannot convert object to primitive value".into(),
+                    ));
                 }
                 return Ok(res);
             }
@@ -46,11 +48,8 @@ impl Vm {
                 }
             }
             if matches!(obj.kind, ObjectKind::Date(_)) {
-                let actual_hint = if hint == PreferredType::Default {
-                    PreferredType::String
-                } else {
-                    hint
-                };
+                let actual_hint =
+                    if hint == PreferredType::Default { PreferredType::String } else { hint };
                 let methods = if actual_hint == PreferredType::String {
                     ["toString", "valueOf"]
                 } else {
@@ -100,10 +99,13 @@ impl Vm {
             }
         }
         let prim = self.to_primitive(val, PreferredType::String)?;
-        if prim.is_symbol() || prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))) {
+        if prim.is_symbol()
+            || prim.as_object_ptr().is_some_and(|p| {
+                matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))
+            })
+        {
             return Err(VmError::TypeError("Cannot convert a Symbol value to a string".into()));
         }
         Ok(self.to_string_value(prim))
     }
 }
-

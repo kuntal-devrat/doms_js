@@ -1,8 +1,8 @@
 //! Regular expression literal scanning.
 
+use super::Lexer;
 use super::chars::is_line_terminator;
 use super::token::{LexError, TokenKind};
-use super::Lexer;
 
 impl<'a> Lexer<'a> {
     pub(super) fn read_regexp(&mut self, line: usize, col: usize) -> Result<TokenKind, LexError> {
@@ -37,7 +37,9 @@ impl<'a> Lexer<'a> {
                     }
                     if fc.is_ascii_alphabetic() {
                         let idx = (fc as u8).wrapping_sub(b'a') as usize;
-                        if !matches!(fc, 'd' | 'g' | 'i' | 'm' | 's' | 'u' | 'v' | 'y') || seen_flags[idx] {
+                        if !matches!(fc, 'd' | 'g' | 'i' | 'm' | 's' | 'u' | 'v' | 'y')
+                            || seen_flags[idx]
+                        {
                             return Err(LexError::UnexpectedChar(fc, line, col));
                         }
                         seen_flags[idx] = true;

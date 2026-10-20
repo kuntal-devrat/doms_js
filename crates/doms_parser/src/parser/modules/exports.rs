@@ -4,7 +4,11 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_export_statement(&mut self, is_top: bool) -> Result<Statement, ParseError> {
         let export_tok = self.advance()?; // export
         if !self.is_module || !is_top {
-            return Err(ParseError::UnexpectedToken(TokenKind::Export, export_tok.line, export_tok.col));
+            return Err(ParseError::UnexpectedToken(
+                TokenKind::Export,
+                export_tok.line,
+                export_tok.col,
+            ));
         }
 
         if self.match_token(&TokenKind::Star)? {
@@ -53,13 +57,17 @@ impl<'a> Parser<'a> {
                 let src_tok = self.advance()?;
                 match src_tok.kind {
                     TokenKind::StringLit { value, .. } => Some(value),
-                    other => return Err(ParseError::UnexpectedToken(other, src_tok.line, src_tok.col)),
+                    other => {
+                        return Err(ParseError::UnexpectedToken(other, src_tok.line, src_tok.col));
+                    }
                 }
             } else {
                 None
             };
             if source.is_none() && has_string_local {
-                return Err(ParseError::General("Export specifier cannot be a string literal without a from clause".to_string()));
+                return Err(ParseError::General(
+                    "Export specifier cannot be a string literal without a from clause".to_string(),
+                ));
             }
             self.consume_semicolon()?;
             return Ok(Statement::Export {

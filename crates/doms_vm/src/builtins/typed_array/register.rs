@@ -2,7 +2,11 @@
 
 use super::*;
 
-pub(super) fn typed_array_from(vm: &mut Vm, this: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
+pub(super) fn typed_array_from(
+    vm: &mut Vm,
+    this: JsValue,
+    args: &[JsValue],
+) -> Result<JsValue, VmError> {
     if !vm.is_constructor(this) {
         return Err(VmError::TypeError("TypedArray.from called on non-constructor".into()));
     }
@@ -11,7 +15,9 @@ pub(super) fn typed_array_from(vm: &mut Vm, this: JsValue, args: &[JsValue]) -> 
     let this_arg = args.get(2).copied().unwrap_or(JsValue::undefined());
     let has_map = !map_fn.is_undefined();
     if has_map && !vm.is_callable(map_fn) {
-        return Err(VmError::TypeError("TypedArray.from: when provided, mapFn must be callable".into()));
+        return Err(VmError::TypeError(
+            "TypedArray.from: when provided, mapFn must be callable".into(),
+        ));
     }
 
     let prev_temp = vm.temp_roots.len();
@@ -22,11 +28,13 @@ pub(super) fn typed_array_from(vm: &mut Vm, this: JsValue, args: &[JsValue]) -> 
 
     let cur_source = vm.temp_roots[prev_temp + 1];
     let items = if let Some(sym_iter) = vm.symbol_iterator {
-        let iter_fn = vm.get_symbol_property_result(cur_source, sym_iter).unwrap_or(JsValue::undefined());
+        let iter_fn =
+            vm.get_symbol_property_result(cur_source, sym_iter).unwrap_or(JsValue::undefined());
         if vm.is_callable(iter_fn) {
             helpers::iterate_to_vec(vm, cur_source)?
         } else {
-            let len = vm.get_property(cur_source, "length").to_number().unwrap_or(0.0).max(0.0) as usize;
+            let len =
+                vm.get_property(cur_source, "length").to_number().unwrap_or(0.0).max(0.0) as usize;
             let mut list = Vec::with_capacity(len);
             for i in 0..len {
                 list.push(vm.get_element(cur_source, i));
@@ -34,7 +42,8 @@ pub(super) fn typed_array_from(vm: &mut Vm, this: JsValue, args: &[JsValue]) -> 
             list
         }
     } else {
-        let len = vm.get_property(cur_source, "length").to_number().unwrap_or(0.0).max(0.0) as usize;
+        let len =
+            vm.get_property(cur_source, "length").to_number().unwrap_or(0.0).max(0.0) as usize;
         let mut list = Vec::with_capacity(len);
         for i in 0..len {
             list.push(vm.get_element(cur_source, i));
@@ -65,7 +74,11 @@ pub(super) fn typed_array_from(vm: &mut Vm, this: JsValue, args: &[JsValue]) -> 
     Ok(ret)
 }
 
-pub(super) fn typed_array_of(vm: &mut Vm, this: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
+pub(super) fn typed_array_of(
+    vm: &mut Vm,
+    this: JsValue,
+    args: &[JsValue],
+) -> Result<JsValue, VmError> {
     if !vm.is_constructor(this) {
         return Err(VmError::TypeError("TypedArray.of called on non-constructor".into()));
     }
@@ -87,7 +100,9 @@ pub(super) fn typed_array_of(vm: &mut Vm, this: JsValue, args: &[JsValue]) -> Re
 pub(crate) fn register_typed_arrays(vm: &mut Vm) {
     // 1. %TypedArray% constructor
     let typed_array_ctor = vm.alloc_native_function("TypedArray", 0, |_vm, _this, _args| {
-        Err(VmError::TypeError("Abstract class %TypedArray% cannot be instantiated directly".into()))
+        Err(VmError::TypeError(
+            "Abstract class %TypedArray% cannot be instantiated directly".into(),
+        ))
     });
     // Set prototype of %TypedArray% to Function.prototype
     if let Some(fn_proto) = vm.function_proto {

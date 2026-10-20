@@ -45,9 +45,11 @@ impl Vm {
                         let has = self.has_property(scope_val, name)?;
                         if has {
                             if let Some(sym_unscopables) = self.symbol_unscopables {
-                                let unscopables = self.get_symbol_property_result(scope_val, sym_unscopables)?;
+                                let unscopables =
+                                    self.get_symbol_property_result(scope_val, sym_unscopables)?;
                                 if unscopables.is_object() {
-                                    let blocked = self.get_property_result(unscopables, name)?.is_truthy();
+                                    let blocked =
+                                        self.get_property_result(unscopables, name)?.is_truthy();
                                     if blocked {
                                         continue;
                                     }
@@ -64,7 +66,9 @@ impl Vm {
             for frame in self.frames.iter().rev() {
                 for (i, local_name) in frame.local_names.iter().enumerate().rev() {
                     if local_name == name {
-                        return Ok(Some(frame.locals.get(i).copied().unwrap_or(JsValue::undefined())));
+                        return Ok(Some(
+                            frame.locals.get(i).copied().unwrap_or(JsValue::undefined()),
+                        ));
                     }
                 }
             }
@@ -72,7 +76,9 @@ impl Vm {
             if frame.scopes.len() > frame.upvalues_count {
                 for (i, local_name) in frame.local_names.iter().enumerate().rev() {
                     if local_name == name {
-                        return Ok(Some(frame.locals.get(i).copied().unwrap_or(JsValue::undefined())));
+                        return Ok(Some(
+                            frame.locals.get(i).copied().unwrap_or(JsValue::undefined()),
+                        ));
                     }
                 }
             }

@@ -26,13 +26,24 @@ impl Vm {
             }
             match &obj.kind {
                 ObjectKind::Function(f) => {
-                    !f.is_generator && !f.is_async && self.shapes.has_property(obj.shape_id, "prototype")
+                    !f.is_generator
+                        && !f.is_async
+                        && self.shapes.has_property(obj.shape_id, "prototype")
                 }
                 ObjectKind::NativeFunction(n) => {
                     const NON_CONSTRUCTORS: &[&str] = &[
-                        "encodeURI", "decodeURI", "encodeURIComponent", "decodeURIComponent",
-                        "parseInt", "parseFloat", "isNaN", "isFinite", "eval", "Symbol",
-                        "escape", "unescape",
+                        "encodeURI",
+                        "decodeURI",
+                        "encodeURIComponent",
+                        "decodeURIComponent",
+                        "parseInt",
+                        "parseFloat",
+                        "isNaN",
+                        "isFinite",
+                        "eval",
+                        "Symbol",
+                        "escape",
+                        "unescape",
                     ];
                     if NON_CONSTRUCTORS.contains(&n.name.as_str()) || n.name.contains('.') {
                         return false;
@@ -62,7 +73,10 @@ impl Vm {
         }
         if let Some(ptr) = val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            matches!(obj.kind, ObjectKind::String(_) | ObjectKind::ConsString { .. } | ObjectKind::BigInt(_))
+            matches!(
+                obj.kind,
+                ObjectKind::String(_) | ObjectKind::ConsString { .. } | ObjectKind::BigInt(_)
+            )
         } else {
             true
         }

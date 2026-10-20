@@ -12,9 +12,7 @@ pub(super) fn register_temporal_builtins(vm: &mut Vm) {
         vm.set_property(inst, "epochMilliseconds", JsValue::from_double(ms));
         vm.set_property(inst, "epochNanoseconds", JsValue::from_double(ms * 1_000_000.0));
         let to_str = vm.alloc_native_function("toString", 0, |vm, this, _args| {
-            let ms_val = vm.get_property(this, "epochMilliseconds")
-                .to_number()
-                .unwrap_or(0.0);
+            let ms_val = vm.get_property(this, "epochMilliseconds").to_number().unwrap_or(0.0);
             Ok(vm.alloc_string(format!("{}Z", ms_val)))
         });
         vm.set_property(inst, "toString", to_str);
@@ -32,9 +30,7 @@ pub(super) fn register_temporal_builtins(vm: &mut Vm) {
         vm.set_property(inst, "epochMilliseconds", JsValue::from_double(ms));
         vm.set_property(inst, "epochNanoseconds", JsValue::from_double(ms * 1_000_000.0));
         let to_str = vm.alloc_native_function("toString", 0, |vm, this, _args| {
-            let ms_val = vm.get_property(this, "epochMilliseconds")
-                .to_number()
-                .unwrap_or(0.0);
+            let ms_val = vm.get_property(this, "epochMilliseconds").to_number().unwrap_or(0.0);
             Ok(vm.alloc_string(format!("{}Z", ms_val)))
         });
         vm.set_property(inst, "toString", to_str);

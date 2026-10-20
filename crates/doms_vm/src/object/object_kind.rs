@@ -14,7 +14,10 @@ pub enum ObjectKind {
         right: JsValue,
         length: usize,
     },
-    Error { name: String, message: String },
+    Error {
+        name: String,
+        message: String,
+    },
     Promise(JsPromise),
     Generator(JsGenerator),
     ArrayBuffer(Arc<doms_parallel::SharedArrayBuffer>),
@@ -97,13 +100,34 @@ pub enum ObjectKind {
 
 #[derive(Debug, Clone)]
 pub enum IteratorHelperKind {
-    Map { mapper: JsValue },
-    Filter { predicate: JsValue },
-    Take { remaining: f64 },
-    Drop { remaining: f64 },
-    FlatMap { mapper: JsValue, inner_iter: Option<JsValue>, inner_next: Option<JsValue> },
-    Concat { iterables: Vec<JsValue>, current_idx: usize, current_iter: Option<JsValue>, current_next: Option<JsValue> },
-    Zip { others: Vec<JsValue>, mode: ZipMode, padding: Option<JsValue> },
+    Map {
+        mapper: JsValue,
+    },
+    Filter {
+        predicate: JsValue,
+    },
+    Take {
+        remaining: f64,
+    },
+    Drop {
+        remaining: f64,
+    },
+    FlatMap {
+        mapper: JsValue,
+        inner_iter: Option<JsValue>,
+        inner_next: Option<JsValue>,
+    },
+    Concat {
+        iterables: Vec<JsValue>,
+        current_idx: usize,
+        current_iter: Option<JsValue>,
+        current_next: Option<JsValue>,
+    },
+    Zip {
+        others: Vec<JsValue>,
+        mode: ZipMode,
+        padding: Option<JsValue>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,41 +167,21 @@ pub struct Accessor {
 
 impl Accessor {
     pub fn new(getter: Option<JsValue>, setter: Option<JsValue>) -> Self {
-        Self {
-            getter,
-            setter,
-            enumerable: true,
-            configurable: true,
-        }
+        Self { getter, setter, enumerable: true, configurable: true }
     }
 
     pub fn with_getter(getter: JsValue) -> Self {
-        Self {
-            getter: Some(getter),
-            setter: None,
-            enumerable: true,
-            configurable: true,
-        }
+        Self { getter: Some(getter), setter: None, enumerable: true, configurable: true }
     }
 
     pub fn with_setter(setter: JsValue) -> Self {
-        Self {
-            getter: None,
-            setter: Some(setter),
-            enumerable: true,
-            configurable: true,
-        }
+        Self { getter: None, setter: Some(setter), enumerable: true, configurable: true }
     }
 }
 
 impl Default for Accessor {
     fn default() -> Self {
-        Self {
-            getter: None,
-            setter: None,
-            enumerable: true,
-            configurable: true,
-        }
+        Self { getter: None, setter: None, enumerable: true, configurable: true }
     }
 }
 
@@ -186,4 +190,3 @@ pub enum PrivateElement {
     Value(JsValue),
     Accessor(Accessor),
 }
-

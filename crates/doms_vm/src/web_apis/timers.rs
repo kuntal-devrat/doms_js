@@ -12,16 +12,8 @@ pub(super) fn register_timers(vm: &mut Vm) {
         vm.next_timer_id += 1;
         let due_time = Instant::now() + Duration::from_millis(delay_ms);
 
-        vm.timers.insert(
-            id,
-            TimerEntry {
-                id,
-                callback,
-                args: extra_args,
-                due_time,
-                interval: None,
-            },
-        );
+        vm.timers
+            .insert(id, TimerEntry { id, callback, args: extra_args, due_time, interval: None });
         Ok(JsValue::from_int32(id as i32))
     });
     vm.globals.insert("setTimeout".to_string(), set_timeout);
@@ -47,13 +39,7 @@ pub(super) fn register_timers(vm: &mut Vm) {
 
         vm.timers.insert(
             id,
-            TimerEntry {
-                id,
-                callback,
-                args: extra_args,
-                due_time,
-                interval: Some(interval),
-            },
+            TimerEntry { id, callback, args: extra_args, due_time, interval: Some(interval) },
         );
         Ok(JsValue::from_int32(id as i32))
     });

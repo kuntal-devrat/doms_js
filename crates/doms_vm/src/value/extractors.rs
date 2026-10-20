@@ -59,7 +59,11 @@ impl JsValue {
 
     #[inline]
     pub fn as_string_ptr(&self) -> Option<*mut u8> {
-        if (self.0 & TAG_MASK) == TAG_STRING { Some((self.0 & PAYLOAD_MASK) as *mut u8) } else { None }
+        if (self.0 & TAG_MASK) == TAG_STRING {
+            Some((self.0 & PAYLOAD_MASK) as *mut u8)
+        } else {
+            None
+        }
     }
 
     #[inline]

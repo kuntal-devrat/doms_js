@@ -3,7 +3,11 @@
 use super::*;
 
 impl Vm {
-    pub fn get_symbol_property_result(&mut self, target: JsValue, key: JsValue) -> Result<JsValue, VmError> {
+    pub fn get_symbol_property_result(
+        &mut self,
+        target: JsValue,
+        key: JsValue,
+    ) -> Result<JsValue, VmError> {
         if target.is_null() || target.is_undefined() {
             return Err(VmError::TypeError("Cannot read property of null or undefined".into()));
         }
@@ -182,7 +186,8 @@ impl Vm {
                 }
             }
 
-            let has_own_data = obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
+            let has_own_data =
+                obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
             if has_own_data {
                 let is_writable = if let Some(attrs_map) = &obj.symbol_attributes {
                     attrs_map.get(&key).map(|a| a.writable).unwrap_or(!is_to_string_tag)
@@ -213,11 +218,15 @@ impl Vm {
                         }
                         if let Some(syms) = &proto_obj.symbol_properties {
                             if syms.contains_key(&key) {
-                                let is_writable = if let Some(attrs_map) = &proto_obj.symbol_attributes {
-                                    attrs_map.get(&key).map(|a| a.writable).unwrap_or(!is_to_string_tag)
-                                } else {
-                                    !is_to_string_tag
-                                };
+                                let is_writable =
+                                    if let Some(attrs_map) = &proto_obj.symbol_attributes {
+                                        attrs_map
+                                            .get(&key)
+                                            .map(|a| a.writable)
+                                            .unwrap_or(!is_to_string_tag)
+                                    } else {
+                                        !is_to_string_tag
+                                    };
                                 if !is_writable {
                                     return Ok(false);
                                 }
@@ -252,7 +261,8 @@ impl Vm {
                     return Ok(false);
                 }
             }
-            let has_sym = r_obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
+            let has_sym =
+                r_obj.symbol_properties.as_ref().map(|m| m.contains_key(&key)).unwrap_or(false);
             if !r_obj.is_extensible() && !has_sym {
                 return Ok(false);
             }
@@ -273,7 +283,12 @@ impl Vm {
         Ok(false)
     }
 
-    pub fn set_symbol_property_result(&mut self, target: JsValue, key: JsValue, value: JsValue) -> Result<(), VmError> {
+    pub fn set_symbol_property_result(
+        &mut self,
+        target: JsValue,
+        key: JsValue,
+        value: JsValue,
+    ) -> Result<(), VmError> {
         self.set_symbol_property_with_receiver_result(target, key, value, target)
     }
 
@@ -304,7 +319,11 @@ impl Vm {
         self.heap.contains(ptr)
     }
 
-    pub fn has_property_key(&mut self, target: JsValue, key: &PropertyKeyVal) -> Result<bool, VmError> {
+    pub fn has_property_key(
+        &mut self,
+        target: JsValue,
+        key: &PropertyKeyVal,
+    ) -> Result<bool, VmError> {
         if !target.is_object() {
             return Ok(false);
         }
@@ -351,12 +370,19 @@ impl Vm {
         match prop_key {
             PropertyKeyVal::Symbol(sym) => {
                 if let Some(sym_iter) = self.symbol_iterator {
-                    if *sym == sym_iter && matches!(&obj.kind, ObjectKind::Map(_) | ObjectKind::Set(_) | ObjectKind::Generator(_)) {
+                    if *sym == sym_iter
+                        && matches!(
+                            &obj.kind,
+                            ObjectKind::Map(_) | ObjectKind::Set(_) | ObjectKind::Generator(_)
+                        )
+                    {
                         return true;
                     }
                 }
                 if let Some(sym_async) = self.symbol_async_iterator {
-                    if *sym == sym_async && matches!(&obj.kind, ObjectKind::Generator(g) if g.function.is_async) {
+                    if *sym == sym_async
+                        && matches!(&obj.kind, ObjectKind::Generator(g) if g.function.is_async)
+                    {
                         return true;
                     }
                 }
@@ -390,13 +416,19 @@ impl Vm {
                         }
                     }
                     ObjectKind::String(s) | ObjectKind::StringObject(s) => {
-                        if key == "length" || key.parse::<usize>().map(|idx| idx < s.chars().count()).unwrap_or(false) {
+                        if key == "length"
+                            || key
+                                .parse::<usize>()
+                                .map(|idx| idx < s.chars().count())
+                                .unwrap_or(false)
+                        {
                             return true;
                         }
                     }
                     ObjectKind::TypedArray(ta) => {
                         if matches!(key.as_str(), "length" | "byteLength" | "byteOffset" | "buffer")
-                            || key.parse::<usize>().map(|idx| idx < ta.length).unwrap_or(false) {
+                            || key.parse::<usize>().map(|idx| idx < ta.length).unwrap_or(false)
+                        {
                             return true;
                         }
                     }

@@ -22,14 +22,18 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
     });
     vm.set_property(object_proto, "isPrototypeOf", is_prototype_of_fn);
 
-    let value_of_fn = vm.alloc_native_function("valueOf", 0, |_vm, this, _args| {
-        Ok(this)
-    });
+    let value_of_fn = vm.alloc_native_function("valueOf", 0, |_vm, this, _args| Ok(this));
     vm.set_property(object_proto, "valueOf", value_of_fn);
 
     // Create Function.prototype early so all native functions get Function.prototype
-    let native = crate::object::NativeFunction::new_fn("".to_string(), 0, |_vm, _this, _args| Ok(JsValue::undefined()));
-    let fn_proto_obj = JsObject::new_native_function(crate::shape::ShapeRegistry::ROOT_SHAPE_ID, Some(object_proto), native);
+    let native = crate::object::NativeFunction::new_fn("".to_string(), 0, |_vm, _this, _args| {
+        Ok(JsValue::undefined())
+    });
+    let fn_proto_obj = JsObject::new_native_function(
+        crate::shape::ShapeRegistry::ROOT_SHAPE_ID,
+        Some(object_proto),
+        native,
+    );
     let fn_proto_ptr = vm.allocate_js_object(fn_proto_obj);
     let function_proto = unsafe { JsValue::from_object_ptr(fn_proto_ptr as *mut u8) };
     vm.function_proto = Some(function_proto);
@@ -98,11 +102,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm, object_proto: JsValue) {
         if this.is_nullish() {
             return Err(VmError::TypeError("Cannot read property of null or undefined".into()));
         }
-        let o = if this.is_object() {
-            this
-        } else {
-            vm.to_object_value(this)?
-        };
+        let o = if this.is_object() { this } else { vm.to_object_value(this)? };
         vm.get_prototype_of_val(o)
     });
 

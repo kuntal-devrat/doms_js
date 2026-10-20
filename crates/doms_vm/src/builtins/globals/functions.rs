@@ -4,7 +4,8 @@ use super::*;
 
 pub(super) fn register_global_functions(vm: &mut Vm) {
     let parse_int = vm.alloc_native_function("parseInt", 2, |vm, _this, args| {
-        let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| "undefined".to_string());
+        let s =
+            args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| "undefined".to_string());
         let trimmed = s.trim_start();
         if trimmed.is_empty() {
             return Ok(JsValue::from_double(f64::NAN));
@@ -68,7 +69,8 @@ pub(super) fn register_global_functions(vm: &mut Vm) {
     });
 
     let parse_float = vm.alloc_native_function("parseFloat", 1, |vm, _this, args| {
-        let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| "undefined".to_string());
+        let s =
+            args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| "undefined".to_string());
         let trimmed = s.trim_start();
         if trimmed.is_empty() {
             return Ok(JsValue::from_double(f64::NAN));
@@ -84,7 +86,13 @@ pub(super) fn register_global_functions(vm: &mut Vm) {
             if let Ok(sub) = std::str::from_utf8(&trimmed.as_bytes()[..i]) {
                 if let Ok(f) = sub.parse::<f64>() {
                     last_valid = Some(f);
-                } else if last_valid.is_some() && !sub.ends_with('e') && !sub.ends_with('E') && !sub.ends_with('+') && !sub.ends_with('-') && !sub.ends_with('.') {
+                } else if last_valid.is_some()
+                    && !sub.ends_with('e')
+                    && !sub.ends_with('E')
+                    && !sub.ends_with('+')
+                    && !sub.ends_with('-')
+                    && !sub.ends_with('.')
+                {
                     break;
                 }
             }
@@ -157,7 +165,10 @@ pub(super) fn register_global_functions(vm: &mut Vm) {
         let mut r = String::with_capacity(s.len() * 2);
         for ch in s.chars() {
             let cp = ch as u32;
-            if cp <= 127 && (ch.is_ascii_alphanumeric() || matches!(ch, '@' | '*' | '_' | '+' | '-' | '.' | '/')) {
+            if cp <= 127
+                && (ch.is_ascii_alphanumeric()
+                    || matches!(ch, '@' | '*' | '_' | '+' | '-' | '.' | '/'))
+            {
                 r.push(ch);
             } else if cp < 256 {
                 r.push_str(&format!("%{:02X}", cp));

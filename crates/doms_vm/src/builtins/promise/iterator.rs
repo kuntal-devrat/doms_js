@@ -13,9 +13,8 @@ pub fn get_iterator(vm: &mut Vm, iterable: JsValue) -> Result<IteratorRecord, Vm
     if !iterable.is_object() {
         return Err(VmError::TypeError("Value is not iterable".into()));
     }
-    let sym_iter = vm
-        .symbol_iterator
-        .ok_or_else(|| VmError::TypeError("No Symbol.iterator".into()))?;
+    let sym_iter =
+        vm.symbol_iterator.ok_or_else(|| VmError::TypeError("No Symbol.iterator".into()))?;
     let method = vm.get_symbol_property_result(iterable, sym_iter)?;
     if !vm.is_callable(method) {
         return Err(VmError::TypeError("Value is not iterable".into()));
@@ -28,17 +27,10 @@ pub fn get_iterator(vm: &mut Vm, iterable: JsValue) -> Result<IteratorRecord, Vm
     if !vm.is_callable(next_method) {
         return Err(VmError::TypeError("Iterator next is not callable".into()));
     }
-    Ok(IteratorRecord {
-        iterator,
-        next_method,
-        done: false,
-    })
+    Ok(IteratorRecord { iterator, next_method, done: false })
 }
 
-pub fn iterator_step(
-    vm: &mut Vm,
-    record: &mut IteratorRecord,
-) -> Result<Option<JsValue>, VmError> {
+pub fn iterator_step(vm: &mut Vm, record: &mut IteratorRecord) -> Result<Option<JsValue>, VmError> {
     let result = match vm.call(record.next_method, record.iterator, &[]) {
         Ok(res) => res,
         Err(e) => {

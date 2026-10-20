@@ -8,7 +8,11 @@ impl<'a> Parser<'a> {
             // Postfix / Infix operations
             if self.check(&TokenKind::LParen) {
                 if matches!(lhs, Expression::Super) && !self.in_derived_constructor {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Super, self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Super,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 // Function call
                 self.advance()?;
@@ -30,8 +34,15 @@ impl<'a> Parser<'a> {
             }
 
             if self.check(&TokenKind::Dot) {
-                if matches!(lhs, Expression::Super) && !self.in_method && !self.in_derived_constructor {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Super, self.current.line, self.current.col));
+                if matches!(lhs, Expression::Super)
+                    && !self.in_method
+                    && !self.in_derived_constructor
+                {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Super,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 self.advance()?;
                 let prop_tok = self.advance()?;
@@ -62,8 +73,15 @@ impl<'a> Parser<'a> {
             }
 
             if self.check(&TokenKind::LBracket) {
-                if matches!(lhs, Expression::Super) && !self.in_method && !self.in_derived_constructor {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Super, self.current.line, self.current.col));
+                if matches!(lhs, Expression::Super)
+                    && !self.in_method
+                    && !self.in_derived_constructor
+                {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Super,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 // Index access: lhs[expr]
                 self.advance()?;
@@ -74,7 +92,11 @@ impl<'a> Parser<'a> {
             }
 
             if matches!(lhs, Expression::Super) {
-                return Err(ParseError::UnexpectedToken(TokenKind::Super, self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Super,
+                    self.current.line,
+                    self.current.col,
+                ));
             }
 
             if self.check(&TokenKind::Question) {
@@ -95,37 +117,57 @@ impl<'a> Parser<'a> {
 
             if self.check(&TokenKind::PlusPlus) && !self.current.has_preceding_line_terminator {
                 self.advance()?;
-                if !matches!(&lhs, Expression::Identifier(_) | Expression::Member { .. } | Expression::Index { .. }) {
-                    return Err(ParseError::UnexpectedToken(TokenKind::PlusPlus, self.current.line, self.current.col));
+                if !matches!(
+                    &lhs,
+                    Expression::Identifier(_)
+                        | Expression::Member { .. }
+                        | Expression::Index { .. }
+                ) {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::PlusPlus,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 if let Expression::Identifier(ref name) = lhs {
                     if self.is_strict && (name == "eval" || name == "arguments") {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Ident(name.clone()), self.current.line, self.current.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Ident(name.clone()),
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                 }
-                lhs = Expression::Update {
-                    op: UpdateOp::Inc,
-                    is_prefix: false,
-                    expr: Box::new(lhs),
-                };
+                lhs =
+                    Expression::Update { op: UpdateOp::Inc, is_prefix: false, expr: Box::new(lhs) };
                 continue;
             }
 
             if self.check(&TokenKind::MinusMinus) && !self.current.has_preceding_line_terminator {
                 self.advance()?;
-                if !matches!(&lhs, Expression::Identifier(_) | Expression::Member { .. } | Expression::Index { .. }) {
-                    return Err(ParseError::UnexpectedToken(TokenKind::MinusMinus, self.current.line, self.current.col));
+                if !matches!(
+                    &lhs,
+                    Expression::Identifier(_)
+                        | Expression::Member { .. }
+                        | Expression::Index { .. }
+                ) {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::MinusMinus,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 if let Expression::Identifier(ref name) = lhs {
                     if self.is_strict && (name == "eval" || name == "arguments") {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Ident(name.clone()), self.current.line, self.current.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Ident(name.clone()),
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                 }
-                lhs = Expression::Update {
-                    op: UpdateOp::Dec,
-                    is_prefix: false,
-                    expr: Box::new(lhs),
-                };
+                lhs =
+                    Expression::Update { op: UpdateOp::Dec, is_prefix: false, expr: Box::new(lhs) };
                 continue;
             }
 
@@ -169,17 +211,27 @@ impl<'a> Parser<'a> {
                 match target_pattern {
                     Expression::Identifier(name) => {
                         if self.is_strict && (name == "eval" || name == "arguments") {
-                            return Err(ParseError::UnexpectedToken(TokenKind::Ident(name), self.current.line, self.current.col));
+                            return Err(ParseError::UnexpectedToken(
+                                TokenKind::Ident(name),
+                                self.current.line,
+                                self.current.col,
+                            ));
                         }
                         lhs = Expression::Assignment { target: name, value: Box::new(value) };
                     }
                     Expression::Member { object, property } => {
-                        lhs = Expression::MemberAssignment { object, property, value: Box::new(value) };
+                        lhs = Expression::MemberAssignment {
+                            object,
+                            property,
+                            value: Box::new(value),
+                        };
                     }
                     Expression::Index { object, index } => {
                         lhs = Expression::IndexAssignment { object, index, value: Box::new(value) };
                     }
-                    p @ Expression::Array(_) | p @ Expression::Object(_) if opt_bin_op.is_none() => {
+                    p @ Expression::Array(_) | p @ Expression::Object(_)
+                        if opt_bin_op.is_none() =>
+                    {
                         self.validate_assignment_pattern(&p)?;
                         lhs = Expression::DestructuringAssignment {
                             pattern: Box::new(p),
@@ -243,22 +295,40 @@ impl<'a> Parser<'a> {
             }
 
             if op == BinaryOp::Exp && matches!(lhs, Expression::Unary { .. }) {
-                return Err(ParseError::UnexpectedToken(TokenKind::StarStar, self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::StarStar,
+                    self.current.line,
+                    self.current.col,
+                ));
             }
 
             self.advance()?;
             let rhs = self.parse_expression(r_bp)?;
             if matches!(rhs, Expression::PrivateIdentifier(_)) {
-                return Err(ParseError::UnexpectedToken(TokenKind::In, self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::In,
+                    self.current.line,
+                    self.current.col,
+                ));
             }
-            if matches!(lhs, Expression::PrivateIdentifier(_)) && matches!(rhs, Expression::ArrowExpr { .. }) {
-                return Err(ParseError::UnexpectedToken(TokenKind::FatArrow, self.current.line, self.current.col));
+            if matches!(lhs, Expression::PrivateIdentifier(_))
+                && matches!(rhs, Expression::ArrowExpr { .. })
+            {
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::FatArrow,
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             lhs = Expression::Binary { op, left: Box::new(lhs), right: Box::new(rhs) };
         }
 
         if matches!(lhs, Expression::PrivateIdentifier(_)) {
-            return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+            return Err(ParseError::UnexpectedToken(
+                self.current.kind.clone(),
+                self.current.line,
+                self.current.col,
+            ));
         }
 
         Ok(lhs)

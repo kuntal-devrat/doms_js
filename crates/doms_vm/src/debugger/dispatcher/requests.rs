@@ -44,10 +44,7 @@ impl CdpDispatcher {
             }
             Some("Debugger.enable") => {
                 self.session.enabled = true;
-                format!(
-                    r#"{{"id":{},"result":{{"debuggerId":"doms-debugger-1"}}}}"#,
-                    id_val
-                )
+                format!(r#"{{"id":{},"result":{{"debuggerId":"doms-debugger-1"}}}}"#, id_val)
             }
             Some("Debugger.disable") => {
                 self.session.enabled = false;
@@ -111,7 +108,8 @@ impl CdpDispatcher {
                 let src = self.session.scripts.get(&script_id).cloned().unwrap_or_default();
                 format!(
                     r#"{{"id":{},"result":{{"scriptSource":"{}"}}}}"#,
-                    id_val, src.replace('\n', "\\n").replace('"', "\\\"")
+                    id_val,
+                    src.replace('\n', "\\n").replace('"', "\\\"")
                 )
             }
             _ => {

@@ -5,16 +5,31 @@ use doms_parser::ast::*;
 use std::sync::Arc;
 
 impl Compiler {
-    pub(crate) fn compile_class_definition(&mut self, class_def: &ClassDefinition) -> Result<(), CompileError> {
+    pub(crate) fn compile_class_definition(
+        &mut self,
+        class_def: &ClassDefinition,
+    ) -> Result<(), CompileError> {
         self.compile_class_definition_with_name(class_def, None)
     }
 
-    pub(crate) fn compile_class_definition_with_name(&mut self, class_def: &ClassDefinition, override_name: Option<String>) -> Result<(), CompileError> {
+    pub(crate) fn compile_class_definition_with_name(
+        &mut self,
+        class_def: &ClassDefinition,
+        override_name: Option<String>,
+    ) -> Result<(), CompileError> {
         let name = override_name.or_else(|| class_def.name.clone());
-        let mut def = Self::compile_function(name, class_def.ctor_params.clone(), &class_def.ctor_body, self.is_strict)?;
+        let mut def = Self::compile_function(
+            name,
+            class_def.ctor_params.clone(),
+            &class_def.ctor_body,
+            self.is_strict,
+        )?;
         if class_def.super_class.is_some() {
             let len = def.chunk.instructions.len();
-            if len >= 2 && def.chunk.instructions[len - 2] == OpCode::LoadUndefined && def.chunk.instructions[len - 1] == OpCode::Return {
+            if len >= 2
+                && def.chunk.instructions[len - 2] == OpCode::LoadUndefined
+                && def.chunk.instructions[len - 1] == OpCode::Return
+            {
                 def.chunk.instructions[len - 2] = OpCode::This;
             }
         }
@@ -62,39 +77,60 @@ impl Compiler {
                             PropertyKey::Literal(s) if s.starts_with('#') => {
                                 if let Some(init_expr) = init_opt {
                                     self.chunk.emit(OpCode::Dup, 0); // Ctor for CallWithThis
-                                    let def = Self::compile_function(None, vec![], &[Statement::Return(Some(init_expr.clone()))], self.is_strict)?;
-                                    let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
+                                    let def = Self::compile_function(
+                                        None,
+                                        vec![],
+                                        &[Statement::Return(Some(init_expr.clone()))],
+                                        self.is_strict,
+                                    )?;
+                                    let const_idx =
+                                        self.chunk.add_constant(Constant::Function(Arc::new(def)));
                                     self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
                                     self.chunk.emit(OpCode::CallWithThis(0), 0);
                                 } else {
                                     self.chunk.emit(OpCode::LoadUndefined, 0);
                                 }
-                                let const_idx = self.chunk.add_constant(Constant::String(s.clone()));
+                                let const_idx =
+                                    self.chunk.add_constant(Constant::String(s.clone()));
                                 self.chunk.emit(OpCode::DefinePrivateField(const_idx), 0);
                                 self.chunk.emit(OpCode::Pop, 0);
                             }
                             PropertyKey::Literal(s) => {
                                 if let Some(init_expr) = init_opt {
                                     self.chunk.emit(OpCode::Dup, 0); // Ctor for CallWithThis
-                                    let def = Self::compile_function(None, vec![], &[Statement::Return(Some(init_expr.clone()))], self.is_strict)?;
-                                    let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
+                                    let def = Self::compile_function(
+                                        None,
+                                        vec![],
+                                        &[Statement::Return(Some(init_expr.clone()))],
+                                        self.is_strict,
+                                    )?;
+                                    let const_idx =
+                                        self.chunk.add_constant(Constant::Function(Arc::new(def)));
                                     self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
                                     self.chunk.emit(OpCode::CallWithThis(0), 0);
                                 } else {
                                     self.chunk.emit(OpCode::LoadUndefined, 0);
                                 }
-                                let const_idx = self.chunk.add_constant(Constant::String(s.clone()));
+                                let const_idx =
+                                    self.chunk.add_constant(Constant::String(s.clone()));
                                 self.chunk.emit(OpCode::SetProp(const_idx), 0);
                                 self.chunk.emit(OpCode::Pop, 0);
                             }
                             PropertyKey::Computed(k_expr) => {
                                 if let Some(init_expr) = init_opt {
                                     self.chunk.emit(OpCode::Dup, 0); // duplicate Ctor for CallWithThis
-                                    let def = Self::compile_function(None, vec![], &[Statement::Return(Some(init_expr.clone()))], self.is_strict)?;
-                                    let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
+                                    let def = Self::compile_function(
+                                        None,
+                                        vec![],
+                                        &[Statement::Return(Some(init_expr.clone()))],
+                                        self.is_strict,
+                                    )?;
+                                    let const_idx =
+                                        self.chunk.add_constant(Constant::Function(Arc::new(def)));
                                     self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
                                     self.chunk.emit(OpCode::CallWithThis(0), 0);
-                                    let val_tmp = self.symbols.define_local("@static_val".to_string());
+                                    let val_tmp =
+                                        self.symbols.define_local("@static_val".to_string());
                                     self.chunk.emit(OpCode::SetLocal(val_tmp), 0);
                                     self.chunk.emit(OpCode::Pop, 0);
                                     self.compile_expression(k_expr)?;
@@ -112,8 +148,13 @@ impl Compiler {
                 ClassElementKind::Method(_)
                 | ClassElementKind::Getter(_)
                 | ClassElementKind::Setter(_) => {
-                    if element.is_static && matches!(&element.key, PropertyKey::Literal(s) if s.starts_with('#')) {
-                        let s = match &element.key { PropertyKey::Literal(s) => s.clone(), _ => unreachable!() };
+                    if element.is_static
+                        && matches!(&element.key, PropertyKey::Literal(s) if s.starts_with('#'))
+                    {
+                        let s = match &element.key {
+                            PropertyKey::Literal(s) => s.clone(),
+                            _ => unreachable!(),
+                        };
                         let m_expr = match &element.kind {
                             ClassElementKind::Method(m) => m,
                             ClassElementKind::Getter(g) => g,
@@ -133,7 +174,9 @@ impl Compiler {
                         self.chunk.emit(OpCode::Pop, 0);
                         continue;
                     }
-                    if !element.is_static && matches!(&element.key, PropertyKey::Literal(s) if s.starts_with('#')) {
+                    if !element.is_static
+                        && matches!(&element.key, PropertyKey::Literal(s) if s.starts_with('#'))
+                    {
                         continue;
                     }
                     self.chunk.emit(OpCode::Dup, 0);

@@ -17,7 +17,8 @@ impl PropertyAttributes {
     pub const DEFAULT: Self = Self { writable: true, enumerable: true, configurable: true };
     pub const BUILTIN: Self = Self { writable: true, enumerable: false, configurable: true };
     pub const BUILTIN_METHOD: Self = Self { writable: true, enumerable: false, configurable: true };
-    pub const NON_WRITABLE_NON_ENUMERABLE: Self = Self { writable: false, enumerable: false, configurable: false };
+    pub const NON_WRITABLE_NON_ENUMERABLE: Self =
+        Self { writable: false, enumerable: false, configurable: false };
     pub const FROZEN: Self = Self { writable: false, enumerable: true, configurable: false };
 
     #[inline]
@@ -43,14 +44,8 @@ pub struct PropertyInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShapeTransition {
     Root,
-    Add {
-        key: String,
-        offset: u32,
-        attributes: PropertyAttributes,
-    },
-    Remove {
-        key: String,
-    },
+    Add { key: String, offset: u32, attributes: PropertyAttributes },
+    Remove { key: String },
 }
 
 /// A hidden class representing the property layout of a JavaScript object.
@@ -116,10 +111,7 @@ impl ShapeRegistry {
                                 return None;
                             }
                         }
-                        return Some(PropertyInfo {
-                            offset: *offset,
-                            attributes: *attributes,
-                        });
+                        return Some(PropertyInfo { offset: *offset, attributes: *attributes });
                     }
                 }
                 ShapeTransition::Remove { key: del_key } => {
@@ -175,11 +167,7 @@ impl ShapeRegistry {
         let new_shape = Shape {
             id: new_id,
             parent: Some(current_shape_id),
-            transition: ShapeTransition::Add {
-                key: key.to_string(),
-                offset,
-                attributes,
-            },
+            transition: ShapeTransition::Add { key: key.to_string(), offset, attributes },
             next_offset: offset + 1,
             num_properties: parent.num_properties + 1,
             transitions: HashMap::new(),
@@ -187,9 +175,7 @@ impl ShapeRegistry {
         };
 
         self.shapes.push(new_shape);
-        self.shapes[current_shape_id as usize]
-            .transitions
-            .insert(key.to_string(), new_id);
+        self.shapes[current_shape_id as usize].transitions.insert(key.to_string(), new_id);
 
         (new_id, offset)
     }
@@ -207,11 +193,7 @@ impl ShapeRegistry {
         let new_shape = Shape {
             id: new_id,
             parent: Some(current_shape_id),
-            transition: ShapeTransition::Add {
-                key: key.to_string(),
-                offset,
-                attributes,
-            },
+            transition: ShapeTransition::Add { key: key.to_string(), offset, attributes },
             next_offset: parent.next_offset,
             num_properties: parent.num_properties,
             transitions: HashMap::new(),
@@ -289,11 +271,7 @@ impl ShapeRegistry {
 
         while let Some(shape) = self.shapes.get(shape_id as usize) {
             match &shape.transition {
-                ShapeTransition::Add {
-                    key,
-                    offset,
-                    attributes,
-                } => {
+                ShapeTransition::Add { key, offset, attributes } => {
                     let is_deleted = deleted.as_ref().map(|d| d.contains(key)).unwrap_or(false);
                     if !is_deleted && seen.insert(key.clone()) {
                         entries.push((key.clone(), *offset, *attributes));
@@ -353,9 +331,7 @@ impl ShapeRegistry {
         };
 
         self.shapes.push(new_shape);
-        self.shapes[current_shape_id as usize]
-            .delete_transitions
-            .insert(key.to_string(), new_id);
+        self.shapes[current_shape_id as usize].delete_transitions.insert(key.to_string(), new_id);
 
         new_id
     }

@@ -13,7 +13,9 @@ impl Vm {
             Constant::String(s) => s.clone(),
             _ => return Err(VmError::TypeError("Global name must be string".into())),
         };
-        if name == "undefined" || name == "NaN" || name == "Infinity"
+        if name == "undefined"
+            || name == "NaN"
+            || name == "Infinity"
             || !self.is_own_property_configurable(self.global_object, &name)
             || self.global_lexicals.contains_key(&name)
             || self.var_names.contains(&name)
@@ -38,7 +40,9 @@ impl Vm {
             Constant::String(s) => s.clone(),
             _ => return Err(VmError::TypeError("Global name must be string".into())),
         };
-        if name == "undefined" || name == "NaN" || name == "Infinity"
+        if name == "undefined"
+            || name == "NaN"
+            || name == "Infinity"
             || !self.is_own_property_configurable(self.global_object, &name)
             || self.global_lexicals.contains_key(&name)
             || self.var_names.contains(&name)

@@ -76,9 +76,20 @@ pub enum TokenKind {
     PrivateIdent(String),
     Number(f64),
     BigInt(BigInt),
-    StringLit { value: String, has_escape: bool, has_legacy_escape: bool, has_unpaired_surrogate: bool },
-    TemplateLiteral { quasis: Vec<String>, raw_exprs: Vec<String> },
-    RegExp { pattern: String, flags: String },
+    StringLit {
+        value: String,
+        has_escape: bool,
+        has_legacy_escape: bool,
+        has_unpaired_surrogate: bool,
+    },
+    TemplateLiteral {
+        quasis: Vec<String>,
+        raw_exprs: Vec<String>,
+    },
+    RegExp {
+        pattern: String,
+        flags: String,
+    },
 
     // Operators & Punctuation
     Plus,

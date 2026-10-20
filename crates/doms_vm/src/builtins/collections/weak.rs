@@ -35,7 +35,9 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method WeakMap.prototype.get called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method WeakMap.prototype.get called on incompatible receiver".into(),
+        ))
     });
 
     let wm_set = vm.alloc_native_function("set", 2, |_vm, this, args| {
@@ -57,7 +59,9 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
                 return Ok(this);
             }
         }
-        Err(VmError::TypeError("Method WeakMap.prototype.set called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method WeakMap.prototype.set called on incompatible receiver".into(),
+        ))
     });
 
     let wm_has = vm.alloc_native_function("has", 1, |_vm, this, args| {
@@ -76,7 +80,9 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
                 return Ok(JsValue::from_boolean(false));
             }
         }
-        Err(VmError::TypeError("Method WeakMap.prototype.has called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method WeakMap.prototype.has called on incompatible receiver".into(),
+        ))
     });
 
     let wm_delete = vm.alloc_native_function("delete", 1, |_vm, this, args| {
@@ -94,7 +100,9 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
                 return Ok(JsValue::from_boolean(false));
             }
         }
-        Err(VmError::TypeError("Method WeakMap.prototype.delete called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method WeakMap.prototype.delete called on incompatible receiver".into(),
+        ))
     });
 
     vm.set_property(wm_proto, "get", wm_get);
@@ -149,7 +157,9 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
                     let cur_item = vm.temp_roots[items_start + i];
                     if !cur_item.is_object() {
                         vm.temp_roots.truncate(prev_temp);
-                        return Err(VmError::TypeError("Iterator value is not an entry object".into()));
+                        return Err(VmError::TypeError(
+                            "Iterator value is not an entry object".into(),
+                        ));
                     }
                     let k = vm.get_property(cur_item, "0");
                     vm.temp_roots.push(k);
@@ -195,7 +205,9 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
                 return Ok(this);
             }
         }
-        Err(VmError::TypeError("Method WeakSet.prototype.add called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method WeakSet.prototype.add called on incompatible receiver".into(),
+        ))
     });
 
     let ws_has = vm.alloc_native_function("has", 1, |_vm, this, args| {
@@ -209,7 +221,9 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
                 return Ok(JsValue::from_boolean(elements.contains(&val)));
             }
         }
-        Err(VmError::TypeError("Method WeakSet.prototype.has called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method WeakSet.prototype.has called on incompatible receiver".into(),
+        ))
     });
 
     let ws_delete = vm.alloc_native_function("delete", 1, |_vm, this, args| {
@@ -227,7 +241,9 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
                 return Ok(JsValue::from_boolean(false));
             }
         }
-        Err(VmError::TypeError("Method WeakSet.prototype.delete called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method WeakSet.prototype.delete called on incompatible receiver".into(),
+        ))
     });
 
     vm.set_property(ws_proto, "add", ws_add);
@@ -296,5 +312,4 @@ pub(super) fn register_weak_builtins(vm: &mut Vm) {
     vm.set_property(ws_proto, "constructor", weakset_ctor);
     vm.set_property_non_enumerable(ws_proto, "constructor".to_string());
     vm.globals.insert("WeakSet".to_string(), weakset_ctor);
-
 }

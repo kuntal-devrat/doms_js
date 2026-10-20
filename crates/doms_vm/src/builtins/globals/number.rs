@@ -111,7 +111,9 @@ pub(super) fn register_number_global(vm: &mut Vm) {
         let frac_val = args.first().copied().unwrap_or(JsValue::undefined());
         let f = vm.to_integer_or_infinity(frac_val)?;
         if f < 0.0 || f > 100.0 {
-            return Err(VmError::RangeError("toFixed() digits argument must be between 0 and 100".into()));
+            return Err(VmError::RangeError(
+                "toFixed() digits argument must be between 0 and 100".into(),
+            ));
         }
         if n.is_nan() || n.is_infinite() {
             return Ok(vm.alloc_string(vm.to_string_value(JsValue::from_double(n))));
@@ -131,7 +133,9 @@ pub(super) fn register_number_global(vm: &mut Vm) {
         } else {
             let f = vm.to_integer_or_infinity(frac_arg)?;
             if f < 0.0 || f > 100.0 {
-                return Err(VmError::RangeError("toExponential() argument must be between 0 and 100".into()));
+                return Err(VmError::RangeError(
+                    "toExponential() argument must be between 0 and 100".into(),
+                ));
             }
             Some(f as usize)
         };
@@ -150,7 +154,9 @@ pub(super) fn register_number_global(vm: &mut Vm) {
         }
         let p = vm.to_integer_or_infinity(prec_arg)?;
         if p < 1.0 || p > 100.0 {
-            return Err(VmError::RangeError("toPrecision() argument must be between 1 and 100".into()));
+            return Err(VmError::RangeError(
+                "toPrecision() argument must be between 1 and 100".into(),
+            ));
         }
         if n.is_nan() || n.is_infinite() {
             return Ok(vm.alloc_string(vm.to_string_value(JsValue::from_double(n))));
@@ -158,7 +164,8 @@ pub(super) fn register_number_global(vm: &mut Vm) {
         let p_usize = p as usize;
         let abs_n = n.abs();
         if abs_n == 0.0 {
-            let frac = if p_usize > 1 { format!(".{}", "0".repeat(p_usize - 1)) } else { String::new() };
+            let frac =
+                if p_usize > 1 { format!(".{}", "0".repeat(p_usize - 1)) } else { String::new() };
             return Ok(vm.alloc_string(format!("0{}", frac)));
         }
         let e = abs_n.log10().floor() as i32;
@@ -188,11 +195,7 @@ pub(super) fn register_number_global(vm: &mut Vm) {
     }
 
     let num_ctor = vm.alloc_native_function("Number", 1, |vm, _this, args| {
-        let n = if let Some(arg) = args.first() {
-            vm.to_number_value(*arg)?
-        } else {
-            0.0
-        };
+        let n = if let Some(arg) = args.first() { vm.to_number_value(*arg)? } else { 0.0 };
         if vm.is_constructing {
             let proto = vm.number_proto;
             Ok(vm.alloc_number_object(n, proto))

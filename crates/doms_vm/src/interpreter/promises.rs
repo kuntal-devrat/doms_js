@@ -10,17 +10,25 @@ impl Vm {
                 let then_fn = self.get_property(resolution, "then");
                 if then_fn.is_object() {
                     let p_resolve = promise_val;
-                    let fulfill_cb = self.alloc_closure_native_function("chain_resolve", 1, Arc::new(move |vm, _, args| {
-                        let inner_val = args.first().copied().unwrap_or(JsValue::undefined());
-                        vm.resolve_promise(p_resolve, inner_val);
-                        Ok(JsValue::undefined())
-                    }));
+                    let fulfill_cb = self.alloc_closure_native_function(
+                        "chain_resolve",
+                        1,
+                        Arc::new(move |vm, _, args| {
+                            let inner_val = args.first().copied().unwrap_or(JsValue::undefined());
+                            vm.resolve_promise(p_resolve, inner_val);
+                            Ok(JsValue::undefined())
+                        }),
+                    );
                     let p_reject = promise_val;
-                    let reject_cb = self.alloc_closure_native_function("chain_reject", 1, Arc::new(move |vm, _, args| {
-                        let inner_err = args.first().copied().unwrap_or(JsValue::undefined());
-                        vm.reject_promise(p_reject, inner_err);
-                        Ok(JsValue::undefined())
-                    }));
+                    let reject_cb = self.alloc_closure_native_function(
+                        "chain_reject",
+                        1,
+                        Arc::new(move |vm, _, args| {
+                            let inner_err = args.first().copied().unwrap_or(JsValue::undefined());
+                            vm.reject_promise(p_reject, inner_err);
+                            Ok(JsValue::undefined())
+                        }),
+                    );
                     let _ = self.call(then_fn, resolution, &[fulfill_cb, reject_cb]);
                     return;
                 }
@@ -60,8 +68,15 @@ impl Vm {
         }
     }
 
-    pub fn promise_then(&mut self, promise_val: JsValue, on_fulfilled: JsValue, on_rejected: JsValue) -> Result<JsValue, VmError> {
-        let ptr = promise_val.as_object_ptr().ok_or_else(|| VmError::TypeError("Promise.prototype.then called on non-object".into()))?;
+    pub fn promise_then(
+        &mut self,
+        promise_val: JsValue,
+        on_fulfilled: JsValue,
+        on_rejected: JsValue,
+    ) -> Result<JsValue, VmError> {
+        let ptr = promise_val.as_object_ptr().ok_or_else(|| {
+            VmError::TypeError("Promise.prototype.then called on non-object".into())
+        })?;
         let is_promise = {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             matches!(obj.kind, ObjectKind::Promise(_))
@@ -78,22 +93,30 @@ impl Vm {
                     let val = p.result;
                     let next_p = next_promise;
                     if on_fulfilled.is_object() {
-                        let cb_task = self.alloc_closure_native_function("then_cb", 0, Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
-                            match vm.call(on_fulfilled, JsValue::undefined(), &[val]) {
-                                Ok(res) => vm.resolve_promise(next_p, res),
-                                Err(e) => {
-                                    let err_val = vm.vm_error_to_js_value(&e);
-                                    vm.reject_promise(next_p, err_val);
+                        let cb_task = self.alloc_closure_native_function(
+                            "then_cb",
+                            0,
+                            Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
+                                match vm.call(on_fulfilled, JsValue::undefined(), &[val]) {
+                                    Ok(res) => vm.resolve_promise(next_p, res),
+                                    Err(e) => {
+                                        let err_val = vm.vm_error_to_js_value(&e);
+                                        vm.reject_promise(next_p, err_val);
+                                    }
                                 }
-                            }
-                            Ok(JsValue::undefined())
-                        }));
+                                Ok(JsValue::undefined())
+                            }),
+                        );
                         self.enqueue_microtask(cb_task, Vec::new());
                     } else {
-                        let cb_task = self.alloc_closure_native_function("fwd_cb", 0, Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
-                            vm.resolve_promise(next_p, val);
-                            Ok(JsValue::undefined())
-                        }));
+                        let cb_task = self.alloc_closure_native_function(
+                            "fwd_cb",
+                            0,
+                            Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
+                                vm.resolve_promise(next_p, val);
+                                Ok(JsValue::undefined())
+                            }),
+                        );
                         self.enqueue_microtask(cb_task, Vec::new());
                     }
                 }
@@ -101,68 +124,112 @@ impl Vm {
                     let err = p.result;
                     let next_p = next_promise;
                     if on_rejected.is_object() {
-                        let cb_task = self.alloc_closure_native_function("catch_cb", 0, Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
-                            match vm.call(on_rejected, JsValue::undefined(), &[err]) {
-                                Ok(res) => vm.resolve_promise(next_p, res),
-                                Err(e) => {
-                                    let err_val = vm.vm_error_to_js_value(&e);
-                                    vm.reject_promise(next_p, err_val);
+                        let cb_task = self.alloc_closure_native_function(
+                            "catch_cb",
+                            0,
+                            Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
+                                match vm.call(on_rejected, JsValue::undefined(), &[err]) {
+                                    Ok(res) => vm.resolve_promise(next_p, res),
+                                    Err(e) => {
+                                        let err_val = vm.vm_error_to_js_value(&e);
+                                        vm.reject_promise(next_p, err_val);
+                                    }
                                 }
-                            }
-                            Ok(JsValue::undefined())
-                        }));
+                                Ok(JsValue::undefined())
+                            }),
+                        );
                         self.enqueue_microtask(cb_task, Vec::new());
                     } else {
-                        let cb_task = self.alloc_closure_native_function("rfwd_cb", 0, Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
-                            vm.reject_promise(next_p, err);
-                            Ok(JsValue::undefined())
-                        }));
+                        let cb_task = self.alloc_closure_native_function(
+                            "rfwd_cb",
+                            0,
+                            Arc::new(move |vm: &mut Vm, _, _| -> Result<JsValue, VmError> {
+                                vm.reject_promise(next_p, err);
+                                Ok(JsValue::undefined())
+                            }),
+                        );
                         self.enqueue_microtask(cb_task, Vec::new());
                     }
                 }
                 PromiseState::Pending => {
                     let next_p = next_promise;
                     if on_fulfilled.is_object() {
-                        let cb_task = self.alloc_closure_native_function("pending_then", 1, Arc::new(move |vm: &mut Vm, _, args: &[JsValue]| -> Result<JsValue, VmError> {
-                            let val = args.first().copied().unwrap_or_default();
-                            match vm.call(on_fulfilled, JsValue::undefined(), &[val]) {
-                                Ok(res) => vm.resolve_promise(next_p, res),
-                                Err(e) => {
-                                    let err_val = vm.vm_error_to_js_value(&e);
-                                    vm.reject_promise(next_p, err_val);
-                                }
-                            }
-                            Ok(JsValue::undefined())
-                        }));
+                        let cb_task = self.alloc_closure_native_function(
+                            "pending_then",
+                            1,
+                            Arc::new(
+                                move |vm: &mut Vm,
+                                      _,
+                                      args: &[JsValue]|
+                                      -> Result<JsValue, VmError> {
+                                    let val = args.first().copied().unwrap_or_default();
+                                    match vm.call(on_fulfilled, JsValue::undefined(), &[val]) {
+                                        Ok(res) => vm.resolve_promise(next_p, res),
+                                        Err(e) => {
+                                            let err_val = vm.vm_error_to_js_value(&e);
+                                            vm.reject_promise(next_p, err_val);
+                                        }
+                                    }
+                                    Ok(JsValue::undefined())
+                                },
+                            ),
+                        );
                         p.fulfill_reactions.push(cb_task);
                     } else {
-                        let cb_task = self.alloc_closure_native_function("pending_fwd", 1, Arc::new(move |vm: &mut Vm, _, args: &[JsValue]| -> Result<JsValue, VmError> {
-                            let val = args.first().copied().unwrap_or_default();
-                            vm.resolve_promise(next_p, val);
-                            Ok(JsValue::undefined())
-                        }));
+                        let cb_task = self.alloc_closure_native_function(
+                            "pending_fwd",
+                            1,
+                            Arc::new(
+                                move |vm: &mut Vm,
+                                      _,
+                                      args: &[JsValue]|
+                                      -> Result<JsValue, VmError> {
+                                    let val = args.first().copied().unwrap_or_default();
+                                    vm.resolve_promise(next_p, val);
+                                    Ok(JsValue::undefined())
+                                },
+                            ),
+                        );
                         p.fulfill_reactions.push(cb_task);
                     }
 
                     if on_rejected.is_object() {
-                        let cb_task = self.alloc_closure_native_function("pending_catch", 1, Arc::new(move |vm: &mut Vm, _, args: &[JsValue]| -> Result<JsValue, VmError> {
-                            let err = args.first().copied().unwrap_or_default();
-                            match vm.call(on_rejected, JsValue::undefined(), &[err]) {
-                                Ok(res) => vm.resolve_promise(next_p, res),
-                                Err(e) => {
-                                    let err_val = vm.vm_error_to_js_value(&e);
-                                    vm.reject_promise(next_p, err_val);
-                                }
-                            }
-                            Ok(JsValue::undefined())
-                        }));
+                        let cb_task = self.alloc_closure_native_function(
+                            "pending_catch",
+                            1,
+                            Arc::new(
+                                move |vm: &mut Vm,
+                                      _,
+                                      args: &[JsValue]|
+                                      -> Result<JsValue, VmError> {
+                                    let err = args.first().copied().unwrap_or_default();
+                                    match vm.call(on_rejected, JsValue::undefined(), &[err]) {
+                                        Ok(res) => vm.resolve_promise(next_p, res),
+                                        Err(e) => {
+                                            let err_val = vm.vm_error_to_js_value(&e);
+                                            vm.reject_promise(next_p, err_val);
+                                        }
+                                    }
+                                    Ok(JsValue::undefined())
+                                },
+                            ),
+                        );
                         p.reject_reactions.push(cb_task);
                     } else {
-                        let cb_task = self.alloc_closure_native_function("pending_rfwd", 1, Arc::new(move |vm: &mut Vm, _, args: &[JsValue]| -> Result<JsValue, VmError> {
-                            let err = args.first().copied().unwrap_or_default();
-                            vm.reject_promise(next_p, err);
-                            Ok(JsValue::undefined())
-                        }));
+                        let cb_task = self.alloc_closure_native_function(
+                            "pending_rfwd",
+                            1,
+                            Arc::new(
+                                move |vm: &mut Vm,
+                                      _,
+                                      args: &[JsValue]|
+                                      -> Result<JsValue, VmError> {
+                                    let err = args.first().copied().unwrap_or_default();
+                                    vm.reject_promise(next_p, err);
+                                    Ok(JsValue::undefined())
+                                },
+                            ),
+                        );
                         p.reject_reactions.push(cb_task);
                     }
                 }
@@ -173,26 +240,44 @@ impl Vm {
     }
 
     pub(crate) fn get_promise_then(&mut self, promise_val: JsValue) -> Option<JsValue> {
-        Some(self.alloc_closure_native_function("then", 2, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-            let on_fulfilled = args.first().copied().unwrap_or_default();
-            let on_rejected = args.get(1).copied().unwrap_or_default();
-            vm.promise_then(promise_val, on_fulfilled, on_rejected)
-        })))
+        Some(self.alloc_closure_native_function(
+            "then",
+            2,
+            Arc::new(
+                move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                    let on_fulfilled = args.first().copied().unwrap_or_default();
+                    let on_rejected = args.get(1).copied().unwrap_or_default();
+                    vm.promise_then(promise_val, on_fulfilled, on_rejected)
+                },
+            ),
+        ))
     }
 
     pub(crate) fn get_promise_catch(&mut self, promise_val: JsValue) -> Option<JsValue> {
-        Some(self.alloc_closure_native_function("catch", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-            let on_rejected = args.first().copied().unwrap_or_default();
-            let then_fn = vm.get_property(promise_val, "then");
-            vm.call(then_fn, promise_val, &[JsValue::undefined(), on_rejected])
-        })))
+        Some(self.alloc_closure_native_function(
+            "catch",
+            1,
+            Arc::new(
+                move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                    let on_rejected = args.first().copied().unwrap_or_default();
+                    let then_fn = vm.get_property(promise_val, "then");
+                    vm.call(then_fn, promise_val, &[JsValue::undefined(), on_rejected])
+                },
+            ),
+        ))
     }
 
     pub(crate) fn get_promise_finally(&mut self, promise_val: JsValue) -> Option<JsValue> {
-        Some(self.alloc_closure_native_function("finally", 1, Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-            let on_finally = args.first().copied().unwrap_or_default();
-            let then_fn = vm.get_property(promise_val, "then");
-            vm.call(then_fn, promise_val, &[on_finally, on_finally])
-        })))
+        Some(self.alloc_closure_native_function(
+            "finally",
+            1,
+            Arc::new(
+                move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                    let on_finally = args.first().copied().unwrap_or_default();
+                    let then_fn = vm.get_property(promise_val, "then");
+                    vm.call(then_fn, promise_val, &[on_finally, on_finally])
+                },
+            ),
+        ))
     }
 }

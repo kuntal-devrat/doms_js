@@ -2,7 +2,12 @@
 
 use super::*;
 
-pub(super) fn json_walk(vm: &mut Vm, reviver: JsValue, holder: JsValue, name: &str) -> Result<JsValue, VmError> {
+pub(super) fn json_walk(
+    vm: &mut Vm,
+    reviver: JsValue,
+    holder: JsValue,
+    name: &str,
+) -> Result<JsValue, VmError> {
     let prev_temp = vm.temp_roots.len();
     vm.temp_roots.push(holder);
     vm.temp_roots.push(reviver);
@@ -34,7 +39,8 @@ pub(super) fn json_walk(vm: &mut Vm, reviver: JsValue, holder: JsValue, name: &s
                     cur_val,
                     crate::builtins::object::EnumerableKind::Key,
                 )?;
-                let keys: Vec<String> = key_vals.into_iter().map(|k| vm.to_string_value(k)).collect();
+                let keys: Vec<String> =
+                    key_vals.into_iter().map(|k| vm.to_string_value(k)).collect();
                 for k in keys {
                     let cur_v = vm.temp_roots[prev_temp + 2];
                     let cur_r = vm.temp_roots[prev_temp + 1];

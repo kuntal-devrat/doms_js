@@ -37,7 +37,8 @@ impl Compiler {
         cases: &[SwitchCase],
     ) -> Result<(), CompileError> {
         self.compile_expression(discriminant)?;
-        let disc_slot = self.symbols.define_local(format!("@switch_{}", self.chunk.instructions.len()));
+        let disc_slot =
+            self.symbols.define_local(format!("@switch_{}", self.chunk.instructions.len()));
         self.chunk.emit(OpCode::SetLocal(disc_slot), 0);
         self.chunk.emit(OpCode::Pop, 0);
 
@@ -82,7 +83,15 @@ impl Compiler {
             self.chunk.emit(OpCode::LoadUndefined, 0);
         }
 
-        self.break_targets.push(TargetScope { labels: Vec::new(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
+        self.break_targets.push(TargetScope {
+            labels: Vec::new(),
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: self.break_targets.len(),
+            catch_depth: self.catch_depth,
+        });
 
         let has_lex_scope = !case_lex_names.is_empty();
         if has_lex_scope {
@@ -158,20 +167,29 @@ impl Compiler {
         is_last: bool,
     ) -> Result<(), CompileError> {
         self.current_labels.push(label.to_string());
-        let is_loop = matches!(body,
-            Statement::While { .. } |
-            Statement::DoWhile { .. } |
-            Statement::For { .. } |
-            Statement::ForIn { .. } |
-            Statement::ForOf { .. } |
-            Statement::Labeled { .. }
+        let is_loop = matches!(
+            body,
+            Statement::While { .. }
+                | Statement::DoWhile { .. }
+                | Statement::For { .. }
+                | Statement::ForIn { .. }
+                | Statement::ForOf { .. }
+                | Statement::Labeled { .. }
         );
         if is_loop {
             self.compile_statement(body, is_last)?;
         } else {
             let labels = std::mem::take(&mut self.current_labels);
             let bd = self.break_targets.len();
-            self.break_targets.push(TargetScope { labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
+            self.break_targets.push(TargetScope {
+                labels,
+                jumps: Vec::new(),
+                scope_depth: self.block_scope_depth,
+                iter_slot: None,
+                is_async_iter: false,
+                break_depth: bd,
+                catch_depth: self.catch_depth,
+            });
             self.compile_statement(body, is_last)?;
             let exit_target = self.chunk.instructions.len() as i32;
             let breaks = self.break_targets.pop().unwrap();
@@ -182,28 +200,30 @@ impl Compiler {
         Ok(())
     }
 
-    pub(crate) fn compile_break(
-        &mut self,
-        opt_label: &Option<String>,
-    ) -> Result<(), CompileError> {
-        let (target_idx, target_scope, target_break_depth, target_catch_depth) = if let Some(label) = opt_label {
-            if let Some(idx) = self.break_targets.iter().rposition(|t| t.labels.iter().any(|l| l == label)) {
+    pub(crate) fn compile_break(&mut self, opt_label: &Option<String>) -> Result<(), CompileError> {
+        let (target_idx, target_scope, target_break_depth, target_catch_depth) =
+            if let Some(label) = opt_label {
+                if let Some(idx) =
+                    self.break_targets.iter().rposition(|t| t.labels.iter().any(|l| l == label))
+                {
+                    let t = &self.break_targets[idx];
+                    (idx, t.scope_depth, t.break_depth, t.catch_depth)
+                } else {
+                    return Err(CompileError::General(format!("Undefined label '{}'", label)));
+                }
+            } else if let Some(idx) = self.break_targets.len().checked_sub(1) {
                 let t = &self.break_targets[idx];
                 (idx, t.scope_depth, t.break_depth, t.catch_depth)
             } else {
-                return Err(CompileError::General(format!("Undefined label '{}'", label)));
-            }
-        } else if let Some(idx) = self.break_targets.len().checked_sub(1) {
-            let t = &self.break_targets[idx];
-            (idx, t.scope_depth, t.break_depth, t.catch_depth)
-        } else {
-            return Err(CompileError::General("Illegal break statement".into()));
-        };
+                return Err(CompileError::General("Illegal break statement".into()));
+            };
 
         let saved_catch_depth = self.catch_depth;
         let saved_scope_depth = self.block_scope_depth;
 
-        let fin_entries: Vec<crate::compiler::FinallyEntry> = self.finally_stack.iter()
+        let fin_entries: Vec<crate::compiler::FinallyEntry> = self
+            .finally_stack
+            .iter()
             .filter(|e| e.break_depth >= target_break_depth)
             .cloned()
             .collect();
@@ -248,24 +268,29 @@ impl Compiler {
         &mut self,
         opt_label: &Option<String>,
     ) -> Result<(), CompileError> {
-        let (target_idx, target_scope, target_break_depth, target_catch_depth) = if let Some(label) = opt_label {
-            if let Some(idx) = self.continue_targets.iter().rposition(|t| t.labels.iter().any(|l| l == label)) {
+        let (target_idx, target_scope, target_break_depth, target_catch_depth) =
+            if let Some(label) = opt_label {
+                if let Some(idx) =
+                    self.continue_targets.iter().rposition(|t| t.labels.iter().any(|l| l == label))
+                {
+                    let t = &self.continue_targets[idx];
+                    (idx, t.scope_depth, t.break_depth, t.catch_depth)
+                } else {
+                    return Err(CompileError::General(format!("Undefined label '{}'", label)));
+                }
+            } else if let Some(idx) = self.continue_targets.len().checked_sub(1) {
                 let t = &self.continue_targets[idx];
                 (idx, t.scope_depth, t.break_depth, t.catch_depth)
             } else {
-                return Err(CompileError::General(format!("Undefined label '{}'", label)));
-            }
-        } else if let Some(idx) = self.continue_targets.len().checked_sub(1) {
-            let t = &self.continue_targets[idx];
-            (idx, t.scope_depth, t.break_depth, t.catch_depth)
-        } else {
-            return Err(CompileError::General("Illegal continue statement".into()));
-        };
+                return Err(CompileError::General("Illegal continue statement".into()));
+            };
 
         let saved_catch_depth = self.catch_depth;
         let saved_scope_depth = self.block_scope_depth;
 
-        let fin_entries: Vec<crate::compiler::FinallyEntry> = self.finally_stack.iter()
+        let fin_entries: Vec<crate::compiler::FinallyEntry> = self
+            .finally_stack
+            .iter()
             .filter(|e| e.break_depth >= target_break_depth)
             .cloned()
             .collect();

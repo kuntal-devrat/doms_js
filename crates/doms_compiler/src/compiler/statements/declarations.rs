@@ -19,11 +19,7 @@ impl Compiler {
         for decl in declarations {
             let inferred_name = if let Some(stripped) = decl.name.strip_prefix("@name:") {
                 let parts: Vec<&str> = stripped.split(':').collect();
-                if !parts.is_empty() {
-                    Some(parts[0])
-                } else {
-                    None
-                }
+                if !parts.is_empty() { Some(parts[0]) } else { None }
             } else if !decl.name.starts_with('@') {
                 Some(decl.name.as_str())
             } else {
@@ -32,23 +28,39 @@ impl Compiler {
 
             if let Some(init_expr) = &decl.init {
                 match init_expr {
-                    Expression::Conditional { condition, then_expr, else_expr } if inferred_name.is_some() => {
-                        self.compile_conditional_with_name(condition, then_expr, else_expr, inferred_name)?;
+                    Expression::Conditional { condition, then_expr, else_expr }
+                        if inferred_name.is_some() =>
+                    {
+                        self.compile_conditional_with_name(
+                            condition,
+                            then_expr,
+                            else_expr,
+                            inferred_name,
+                        )?;
                     }
-                    Expression::ClassExpr(class_def) if inferred_name.is_some() && class_def.name.is_none() => {
-                        self.compile_class_definition_with_name(class_def, inferred_name.map(|s| s.to_string()))?;
+                    Expression::ClassExpr(class_def)
+                        if inferred_name.is_some() && class_def.name.is_none() =>
+                    {
+                        self.compile_class_definition_with_name(
+                            class_def,
+                            inferred_name.map(|s| s.to_string()),
+                        )?;
                     }
                     _ => {
                         self.compile_expression(init_expr)?;
                         if let Some(name) = inferred_name {
                             if Self::is_anonymous_function_definition(init_expr) {
-                                let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+                                let name_idx =
+                                    self.chunk.add_constant(Constant::String(name.to_string()));
                                 self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
                             }
                         }
                     }
                 }
-                if decl.name.starts_with("__destruct_") || decl.name.starts_with("@destruct_") || decl.name.starts_with("@dstr_") {
+                if decl.name.starts_with("__destruct_")
+                    || decl.name.starts_with("@destruct_")
+                    || decl.name.starts_with("@dstr_")
+                {
                     self.chunk.emit(OpCode::RequireObjectCoercible, 0);
                 }
 
@@ -77,7 +89,9 @@ impl Compiler {
                             self.symbols.define_local_at_depth(decl.name.clone(), 1)
                         }
                     } else {
-                        let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(&decl.name) {
+                        let slot = if let Some(local) =
+                            self.symbols.get_local_in_current_scope_mut(&decl.name)
+                        {
                             if local.is_declared {
                                 return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
                             }
@@ -90,8 +104,13 @@ impl Compiler {
                     };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
-                } else if !self.is_in_function && (*kind == VarKind::Let || *kind == VarKind::Const) && self.with_depth == 0 {
-                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(&decl.name) {
+                } else if !self.is_in_function
+                    && (*kind == VarKind::Let || *kind == VarKind::Const)
+                    && self.with_depth == 0
+                {
+                    let slot = if let Some(local) =
+                        self.symbols.get_local_in_current_scope_mut(&decl.name)
+                    {
                         if local.is_declared {
                             return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
                         }
@@ -134,7 +153,9 @@ impl Compiler {
             } else if *kind == VarKind::Let {
                 self.chunk.emit(OpCode::LoadUndefined, 0);
                 if self.is_in_function && self.symbols.scope_depth > 0 {
-                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(&decl.name) {
+                    let slot = if let Some(local) =
+                        self.symbols.get_local_in_current_scope_mut(&decl.name)
+                    {
                         if local.is_declared {
                             return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
                         }
@@ -146,7 +167,9 @@ impl Compiler {
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 } else if !self.is_in_function && self.with_depth == 0 {
-                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(&decl.name) {
+                    let slot = if let Some(local) =
+                        self.symbols.get_local_in_current_scope_mut(&decl.name)
+                    {
                         if local.is_declared {
                             return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
                         }
@@ -192,7 +215,10 @@ impl Compiler {
             match stmt {
                 Statement::VarDecl { kind, declarations } if *kind != VarKind::Var => {
                     for d in declarations {
-                        if !d.name.starts_with('@') && !d.name.starts_with("__") && !block_lex_names.contains(&d.name) {
+                        if !d.name.starts_with('@')
+                            && !d.name.starts_with("__")
+                            && !block_lex_names.contains(&d.name)
+                        {
                             block_lex_names.push(d.name.clone());
                         }
                     }

@@ -22,10 +22,8 @@ pub unsafe extern "C" fn doms_object_get(
     let target = unsafe { (*obj).inner };
     let val = isolate.vm.get_property(target, key_str);
     unsafe {
-        *result = Box::into_raw(Box::new(doms_value_t {
-            inner: val,
-            ref_count: AtomicUsize::new(1),
-        }));
+        *result =
+            Box::into_raw(Box::new(doms_value_t { inner: val, ref_count: AtomicUsize::new(1) }));
     }
     doms_status_t::Ok
 }

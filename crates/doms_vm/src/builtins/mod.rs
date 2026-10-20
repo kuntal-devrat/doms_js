@@ -1,38 +1,41 @@
 //! Built-in JavaScript objects and global functions.
 //!
-//! [`register_builtins`] runs once when a [`Vm`](crate::interpreter::Vm) is
+//! [`register_builtins`] runs once when a [`crate::interpreter::Vm`] is
 //! created and populates the global object. The implementation is split into
 //! one submodule per builtin area so contributors can extend a single builtin
 //! without scrolling through a monolith:
 //!
 //! | Module | Contents |
 //! |--------|----------|
-//! | [`console`] | `console.log` and friends |
-//! | [`math`] | The `Math` namespace |
-//! | [`json`] | `JSON.parse` / `JSON.stringify` |
-//! | [`symbol`] | `Symbol` and the well-known symbols |
-//! | [`object`] | `Object` statics and `Object.prototype` |
-//! | [`array`] | `Array` statics and `Array.prototype` |
-//! | [`function`] | `Function.prototype` (`call`/`apply`/`bind`) |
-//! | [`uri`] | `encodeURI`, `decodeURIComponent`, … |
-//! | [`globals`] | `parseInt`, `eval`, `String`, `Number`, `Boolean`, `Error*` and `Date` |
-//! | [`promise`] | `Promise` and its prototype |
-//! | [`typed_array`] | Typed array constructors |
-//! | [`parallel`] | `SharedArrayBuffer`, `ArrayBuffer`, `DataView`, `Atomics`, `Worker` |
-//! | [`collections`] | Keyed and weak collections (`Map`, `Set`, `WeakMap`, `WeakSet`, `WeakRef`, `FinalizationRegistry`) |
-//! | [`regexp`] | Regular expressions (`RegExp`) |
-//! | [`intl`] | Internationalization API (`Intl`) |
-//! | [`temporal`] | Date and time shims (`Temporal`) |
-//! | [`test262_harness`] | The `$262` Test262 harness object |
-//! | [`reflect`] | The `Reflect` namespace |
-//! | [`proxy`] | The `Proxy` constructor |
-//! | [`bigint`] | `BigInt` |
-//! | [`helpers`] | Helpers shared by several registrars |
+//! | `console` | `console.log` and friends |
+//! | `math` | The `Math` namespace |
+//! | `json` | `JSON.parse` / `JSON.stringify` |
+//! | `symbol` | `Symbol` and the well-known symbols |
+//! | `object` | `Object` statics and `Object.prototype` |
+//! | `array` | `Array` statics and `Array.prototype` |
+//! | `function` | `Function.prototype` (`call`/`apply`/`bind`) |
+//! | `uri` | `encodeURI`, `decodeURIComponent`, … |
+//! | `globals` | `parseInt`, `eval`, `String`, `Number`, `Boolean`, `Error*` and `Date` |
+//! | `promise` | `Promise` and its prototype |
+//! | `typed_array` | Typed array constructors |
+//! | `parallel` | `SharedArrayBuffer`, `ArrayBuffer`, `DataView`, `Atomics`, `Worker` |
+//! | `collections` | Keyed and weak collections (`Map`, `Set`, `WeakMap`, `WeakSet`, `WeakRef`, `FinalizationRegistry`) |
+//! | `regexp` | Regular expressions (`RegExp`) |
+//! | `intl` | Internationalization API (`Intl`) |
+//! | `temporal` | Date and time shims (`Temporal`) |
+//! | `test262_harness` | The `$262` Test262 harness object |
+//! | `reflect` | The `Reflect` namespace |
+//! | `proxy` | The `Proxy` constructor |
+//! | `bigint` | `BigInt` |
+//! | `helpers` | Helpers shared by several registrars |
 //!
 //! Each `register_*` function is called from [`register_builtins`] below.
 
 use crate::interpreter::{PropertyKeyVal, Vm, VmError};
-use crate::object::{Accessor, JsObject, JsTypedArray, MapIterationKind, NativeFn, ObjectKind, SetIterationKind, TypedArrayKind};
+use crate::object::{
+    Accessor, JsObject, JsTypedArray, MapIterationKind, NativeFn, ObjectKind, SetIterationKind,
+    TypedArrayKind,
+};
 use crate::shape::PropertyAttributes;
 use crate::value::JsValue;
 use num_bigint::BigInt;
@@ -181,4 +184,3 @@ pub fn register_builtins(vm: &mut Vm) {
         }
     }
 }
-

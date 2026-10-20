@@ -4,18 +4,29 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_import_statement(&mut self, is_top: bool) -> Result<Statement, ParseError> {
         let import_tok = self.advance()?; // import
         if !self.is_module || !is_top {
-            return Err(ParseError::UnexpectedToken(TokenKind::Import, import_tok.line, import_tok.col));
+            return Err(ParseError::UnexpectedToken(
+                TokenKind::Import,
+                import_tok.line,
+                import_tok.col,
+            ));
         }
 
         // Bare import: import "module-name";
         if let TokenKind::StringLit { value, has_unpaired_surrogate, .. } = &self.current.kind {
             if *has_unpaired_surrogate {
-                return Err(ParseError::General("Import name contains unpaired surrogate".to_string()));
+                return Err(ParseError::General(
+                    "Import name contains unpaired surrogate".to_string(),
+                ));
             }
             let source = value.clone();
             self.advance()?;
             self.consume_semicolon()?;
-            return Ok(Statement::Import { specifiers: Vec::new(), source, is_default: false, is_all: false });
+            return Ok(Statement::Import {
+                specifiers: Vec::new(),
+                source,
+                is_default: false,
+                is_all: false,
+            });
         }
 
         let mut specifiers = Vec::new();
@@ -45,10 +56,16 @@ impl<'a> Parser<'a> {
                     Some(self.expect_identifier()?)
                 } else {
                     if is_string_name {
-                        return Err(ParseError::General("String literal import must have an 'as' clause".to_string()));
+                        return Err(ParseError::General(
+                            "String literal import must have an 'as' clause".to_string(),
+                        ));
                     }
                     if is_strict_reserved_word(&name) {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Ident(name), self.current.line, self.current.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Ident(name),
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                     None
                 };
@@ -72,7 +89,11 @@ impl<'a> Parser<'a> {
         for (name, alias) in &specifiers {
             let bound = alias.as_ref().unwrap_or(name);
             if bound == "eval" || bound == "arguments" {
-                return Err(ParseError::UnexpectedToken(TokenKind::Ident(bound.clone()), self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Ident(bound.clone()),
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             if !bound_names.insert(bound.clone()) {
                 return Err(ParseError::General(format!("Duplicate import binding '{}'", bound)));

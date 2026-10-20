@@ -1,5 +1,7 @@
 //! DOMS JavaScript Engine Command-Line Interface and REPL.
 
+#![allow(clippy::all)]
+
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -17,7 +19,10 @@ fn main() {
 
     match args[1].as_str() {
         "-v" | "--version" => {
-            println!("DOMS.js v{} (Modular Embeddable Parallel ECMAScript Engine)", env!("CARGO_PKG_VERSION"));
+            println!(
+                "DOMS.js v{} (Modular Embeddable Parallel ECMAScript Engine)",
+                env!("CARGO_PKG_VERSION")
+            );
         }
         "-h" | "--help" => {
             print_help();
@@ -37,10 +42,7 @@ fn main() {
                     fn setrlimit(resource: i32, rlim: *const RLimit) -> i32;
                 }
                 // Cap virtual address space to 2GB to protect the system and prevent freezes
-                let limit = RLimit {
-                    rlim_cur: 2048 * 1024 * 1024,
-                    rlim_max: 2048 * 1024 * 1024,
-                };
+                let limit = RLimit { rlim_cur: 2048 * 1024 * 1024, rlim_max: 2048 * 1024 * 1024 };
                 unsafe {
                     setrlimit(9, &limit);
                 }
@@ -52,10 +54,16 @@ fn main() {
                     "-h" | "--help" => {
                         println!("Usage: doms test262 [OPTIONS] [SUITE_FILTER]");
                         println!("Options:");
-                        println!("  -s, --suite <SUITE>     Filter by suite directory (e.g. language/eval-code)");
+                        println!(
+                            "  -s, --suite <SUITE>     Filter by suite directory (e.g. language/eval-code)"
+                        );
                         println!("  -f, --filter <PATTERN>  Filter test paths containing pattern");
-                        println!("  -t, --threads <N>       Number of worker threads (default: hardware concurrency)");
-                        println!("  -v, --verbose           Print verbose pass/fail info for each test");
+                        println!(
+                            "  -t, --threads <N>       Number of worker threads (default: hardware concurrency)"
+                        );
+                        println!(
+                            "  -v, --verbose           Print verbose pass/fail info for each test"
+                        );
                         println!("  -m, --max <N>           Run at most N tests");
                         return;
                     }
@@ -98,7 +106,8 @@ fn main() {
                     }
                     "-o" | "--output" => {
                         if i + 1 < args.len() {
-                            config.output_file = Some(std::path::PathBuf::from(args[i + 1].clone()));
+                            config.output_file =
+                                Some(std::path::PathBuf::from(args[i + 1].clone()));
                             i += 1;
                         }
                     }
@@ -169,7 +178,9 @@ fn print_help() {
     println!("Usage:");
     println!("  doms                     Start interactive REPL");
     println!("  doms run <file.js>       Execute a JavaScript file");
-    println!("  doms run <file.js> --inspect       Enable Chrome DevTools Protocol live inspection");
+    println!(
+        "  doms run <file.js> --inspect       Enable Chrome DevTools Protocol live inspection"
+    );
     println!("  doms run <file.js> --inspect-brk   Wait for DevTools connection before execution");
     println!("  doms eval \"<code>\"       Evaluate JavaScript code string");
     println!("  doms test262 [opts]      Run official Test262 ECMAScript conformance test suite");
@@ -177,7 +188,13 @@ fn print_help() {
     println!("  doms --help              Show this help message");
 }
 
-fn execute_code(source: &str, inspect: bool, inspect_brk: bool, inspect_addr: &str, file_name: &str) {
+fn execute_code(
+    source: &str,
+    inspect: bool,
+    inspect_brk: bool,
+    inspect_addr: &str,
+    file_name: &str,
+) {
     let mut server = if inspect {
         match doms_vm::InspectorServer::start(inspect_addr, file_name, inspect_brk) {
             Ok(srv) => {

@@ -85,7 +85,10 @@ fn js_strings_equal(a: JsValue, b: JsValue) -> Option<bool> {
         let obj_b = unsafe { &*(ptr_b as *const JsObject) };
         match (&obj_a.kind, &obj_b.kind) {
             (ObjectKind::String(sa), ObjectKind::String(sb)) => return Some(sa == sb),
-            (ObjectKind::ConsString { length: la, .. }, ObjectKind::ConsString { length: lb, .. }) => {
+            (
+                ObjectKind::ConsString { length: la, .. },
+                ObjectKind::ConsString { length: lb, .. },
+            ) => {
                 if la != lb {
                     return Some(false);
                 }
@@ -93,8 +96,8 @@ fn js_strings_equal(a: JsValue, b: JsValue) -> Option<bool> {
                 let sb = get_string_content_if_string(b)?;
                 return Some(sa == sb);
             }
-            (ObjectKind::String(sa), ObjectKind::ConsString { length, .. }) |
-            (ObjectKind::ConsString { length, .. }, ObjectKind::String(sa)) => {
+            (ObjectKind::String(sa), ObjectKind::ConsString { length, .. })
+            | (ObjectKind::ConsString { length, .. }, ObjectKind::String(sa)) => {
                 if sa.encode_utf16().count() != *length {
                     return Some(false);
                 }
@@ -165,4 +168,3 @@ pub fn js_strict_equal(a: JsValue, b: JsValue) -> bool {
     }
     false
 }
-

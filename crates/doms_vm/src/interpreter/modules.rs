@@ -6,34 +6,51 @@ impl Vm {
     // Dynamic eval and module instantiation
 
     pub fn eval(&mut self, source: &str) -> Result<JsValue, VmError> {
-        let program = doms_parser::parse(source)
-            .map_err(|e| VmError::SyntaxError(e.to_string()))?;
-        let chunk = doms_compiler::compile(&program)
-            .map_err(|e| VmError::TypeError(e.to_string()))?;
+        let program =
+            doms_parser::parse(source).map_err(|e| VmError::SyntaxError(e.to_string()))?;
+        let chunk =
+            doms_compiler::compile(&program).map_err(|e| VmError::TypeError(e.to_string()))?;
         self.run(&chunk)
     }
 
-    pub fn instantiate_global_declarations(&mut self, chunk: &BytecodeChunk) -> Result<(), VmError> {
+    pub fn instantiate_global_declarations(
+        &mut self,
+        chunk: &BytecodeChunk,
+    ) -> Result<(), VmError> {
         if !self.is_module {
             // Check lexical identifier collisions against existing bindings
             for name in &chunk.top_lex_names {
                 if self.global_lexicals.contains_key(name) {
-                    return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
+                    return Err(VmError::SyntaxError(format!(
+                        "Identifier '{}' has already been declared",
+                        name
+                    )));
                 }
                 if self.script_var_names.contains(name) {
-                    return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
+                    return Err(VmError::SyntaxError(format!(
+                        "Identifier '{}' has already been declared",
+                        name
+                    )));
                 }
                 if !self.is_own_property_configurable(self.global_object, name)
-                    || name == "undefined" || name == "NaN" || name == "Infinity"
+                    || name == "undefined"
+                    || name == "NaN"
+                    || name == "Infinity"
                 {
-                    return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
+                    return Err(VmError::SyntaxError(format!(
+                        "Identifier '{}' has already been declared",
+                        name
+                    )));
                 }
             }
 
             // Verify var names against lexical scope and global extensibility
             for name in &chunk.top_var_names {
                 if self.global_lexicals.contains_key(name) {
-                    return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
+                    return Err(VmError::SyntaxError(format!(
+                        "Identifier '{}' has already been declared",
+                        name
+                    )));
                 }
                 if !self.is_extensible_object(self.global_object) {
                     let has = if let Some(ptr) = self.global_object.as_object_ptr() {
@@ -43,7 +60,10 @@ impl Vm {
                         false
                     };
                     if !has {
-                        return Err(VmError::TypeError(format!("Cannot define property '{}' on non-extensible global object", name)));
+                        return Err(VmError::TypeError(format!(
+                            "Cannot define property '{}' on non-extensible global object",
+                            name
+                        )));
                     }
                 }
             }
@@ -51,7 +71,10 @@ impl Vm {
             // Ensure hoisted function declarations don't conflict with lexical bindings or non-configurable properties
             for name in &chunk.top_func_names {
                 if self.global_lexicals.contains_key(name) {
-                    return Err(VmError::SyntaxError(format!("Identifier '{}' has already been declared", name)));
+                    return Err(VmError::SyntaxError(format!(
+                        "Identifier '{}' has already been declared",
+                        name
+                    )));
                 }
                 if !self.is_own_property_configurable(self.global_object, name) {
                     let is_writable = self.is_own_property_writable(self.global_object, name);
@@ -63,7 +86,10 @@ impl Vm {
                         false
                     };
                     if has_accessor || !is_writable || !is_enum {
-                        return Err(VmError::TypeError(format!("Cannot declare global function '{}': existing property is non-configurable", name)));
+                        return Err(VmError::TypeError(format!(
+                            "Cannot declare global function '{}': existing property is non-configurable",
+                            name
+                        )));
                     }
                 }
                 if !self.is_extensible_object(self.global_object) {
@@ -74,7 +100,10 @@ impl Vm {
                         false
                     };
                     if !has {
-                        return Err(VmError::TypeError(format!("Cannot define function '{}' on non-extensible global object", name)));
+                        return Err(VmError::TypeError(format!(
+                            "Cannot define function '{}' on non-extensible global object",
+                            name
+                        )));
                     }
                 }
             }
@@ -101,11 +130,16 @@ impl Vm {
                 self.globals.insert(name.clone(), JsValue::undefined());
                 if !self.is_module && self.global_object.is_object() {
                     if !in_eval {
-                        self.define_builtin_property(self.global_object, name, JsValue::undefined(), crate::shape::PropertyAttributes {
-                            writable: true,
-                            enumerable: true,
-                            configurable: false,
-                        });
+                        self.define_builtin_property(
+                            self.global_object,
+                            name,
+                            JsValue::undefined(),
+                            crate::shape::PropertyAttributes {
+                                writable: true,
+                                enumerable: true,
+                                configurable: false,
+                            },
+                        );
                     } else {
                         self.set_property(self.global_object, name, JsValue::undefined());
                     }
@@ -135,8 +169,14 @@ impl Vm {
         if self.is_module {
             if let Some(mod_obj) = self.current_module_obj {
                 for name in &chunk.export_names {
-                    let local_name = chunk.export_aliases.iter()
-                        .find_map(|(local, aliases)| if aliases.contains(name) { Some(local) } else { None })
+                    let local_name = chunk
+                        .export_aliases
+                        .iter()
+                        .find_map(
+                            |(local, aliases)| {
+                                if aliases.contains(name) { Some(local) } else { None }
+                            },
+                        )
                         .unwrap_or(name);
                     let val = if chunk.top_func_names.contains(local_name) {
                         self.globals.get(local_name).copied().unwrap_or_else(JsValue::undefined)

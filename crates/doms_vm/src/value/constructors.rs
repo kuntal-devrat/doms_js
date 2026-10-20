@@ -9,11 +9,7 @@ impl JsValue {
     #[inline]
     pub fn from_double(value: f64) -> Self {
         let bits = value.to_bits();
-        if bits >= DOUBLE_LIMIT {
-            Self(f64::NAN.to_bits())
-        } else {
-            Self(bits)
-        }
+        if bits >= DOUBLE_LIMIT { Self(f64::NAN.to_bits()) } else { Self(bits) }
     }
 
     /// Create a `JsValue` from an `i32` integer.

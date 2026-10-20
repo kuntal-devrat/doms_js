@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 #[test]
 fn test_eval_simple_bytecode() {
     let mut chunk = BytecodeChunk::new();
@@ -112,7 +111,9 @@ fn test_jit_hot_loop_tiering() {
     // Call 15 times to exceed JIT_HOT_THRESHOLD (10)
     let mut total = 0.0;
     for i in 0..15 {
-        let res = vm.call(fn_val, JsValue::undefined(), &[JsValue::from_int32(i), JsValue::from_int32(1)]).unwrap();
+        let res = vm
+            .call(fn_val, JsValue::undefined(), &[JsValue::from_int32(i), JsValue::from_int32(1)])
+            .unwrap();
         total += res.as_number().unwrap();
     }
     assert_eq!(total, 120.0);
@@ -120,7 +121,10 @@ fn test_jit_hot_loop_tiering() {
     let obj = unsafe { &*(fn_val.as_object_ptr().unwrap() as *mut JsObject) };
     if let ObjectKind::Function(f) = &obj.kind {
         assert!(f.jit_entry.is_some(), "Function should have been JIT compiled");
-        assert!(f.jit_entry.as_ref().unwrap().is_native(), "JIT code should be native Cranelift machine code");
+        assert!(
+            f.jit_entry.as_ref().unwrap().is_native(),
+            "JIT code should be native Cranelift machine code"
+        );
     } else {
         panic!("Expected Function ObjectKind");
     }
@@ -131,15 +135,19 @@ fn test_promises_and_weak_references() {
     let mut vm = Vm::new();
 
     // 1. WeakMap test
-    let wm_res = vm.eval("let wm = new WeakMap(); let k = {}; wm.set(k, 'value'); wm.has(k);").unwrap();
+    let wm_res =
+        vm.eval("let wm = new WeakMap(); let k = {}; wm.set(k, 'value'); wm.has(k);").unwrap();
     assert_eq!(wm_res.as_boolean(), Some(true));
 
     // 2. WeakSet test
-    let ws_res = vm.eval("let ws = new WeakSet(); let item = {}; ws.add(item); ws.has(item);").unwrap();
+    let ws_res =
+        vm.eval("let ws = new WeakSet(); let item = {}; ws.add(item); ws.has(item);").unwrap();
     assert_eq!(ws_res.as_boolean(), Some(true));
 
     // 3. Promise.allSettled test
-    let p_res = vm.eval("let p = Promise.allSettled([Promise.resolve(10), Promise.reject('err')]); p;").unwrap();
+    let p_res = vm
+        .eval("let p = Promise.allSettled([Promise.resolve(10), Promise.reject('err')]); p;")
+        .unwrap();
     assert!(p_res.is_object());
 
     // 4. Promise.any test
@@ -163,7 +171,9 @@ fn test_symbols_and_global_registry() {
     assert_eq!(res3.as_boolean(), Some(true));
 
     // Well-known symbols
-    let res4 = vm.eval("typeof Symbol.iterator === 'symbol' && typeof Symbol.toStringTag === 'symbol'").unwrap();
+    let res4 = vm
+        .eval("typeof Symbol.iterator === 'symbol' && typeof Symbol.toStringTag === 'symbol'")
+        .unwrap();
     assert_eq!(res4.as_boolean(), Some(true));
 
     // Symbol-keyed properties
@@ -192,18 +202,24 @@ fn test_typed_arrays_and_dataview() {
     assert_eq!(res_ta.as_boolean(), Some(true));
 
     // Uint8ClampedArray clamping and round-half-to-even
-    let res_clamp = vm.eval(r#"
+    let res_clamp = vm
+        .eval(
+            r#"
         let ca = new Uint8ClampedArray(4);
         ca[0] = 300;
         ca[1] = -10;
         ca[2] = 2.5;
         ca[3] = 3.5;
         ca[0] === 255 && ca[1] === 0 && ca[2] === 2 && ca[3] === 4
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_clamp.as_boolean(), Some(true));
 
     // DataView endianness and various getters/setters
-    let res_dv = vm.eval(r#"
+    let res_dv = vm
+        .eval(
+            r#"
         let buf = new ArrayBuffer(16);
         let dv = new DataView(buf);
         dv.setInt32(0, 12345678, true);
@@ -211,7 +227,9 @@ fn test_typed_arrays_and_dataview() {
         dv.setFloat32(4, 1.5, true);
         let readF32 = dv.getFloat32(4, true);
         read32 === 12345678 && readF32 === 1.5
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_dv.as_boolean(), Some(true));
 }
 
@@ -220,7 +238,9 @@ fn test_iterator_protocols() {
     let mut vm = Vm::new();
 
     // Array.prototype[Symbol.iterator]
-    let res_arr_iter = vm.eval(r#"
+    let res_arr_iter = vm
+        .eval(
+            r#"
         let arr = [10, 20];
         let it = arr[Symbol.iterator]();
         let step1 = it.next();
@@ -229,41 +249,59 @@ fn test_iterator_protocols() {
         step1.value === 10 && step1.done === false &&
         step2.value === 20 && step2.done === false &&
         step3.done === true
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_arr_iter.as_boolean(), Some(true));
 
     // Array.from with mapping
-    let res_from = vm.eval(r#"
+    let res_from = vm
+        .eval(
+            r#"
         let mapped = Array.from([1, 2, 3], x => x * 3);
         mapped.length === 3 && mapped[0] === 3 && mapped[1] === 6 && mapped[2] === 9
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_from.as_boolean(), Some(true));
 
     // Array.of
-    let res_of = vm.eval(r#"
+    let res_of = vm
+        .eval(
+            r#"
         let ofArr = Array.of(7, 8, 9);
         ofArr.length === 3 && ofArr[0] === 7 && ofArr[1] === 8 && ofArr[2] === 9
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_of.as_boolean(), Some(true));
 
     // String.prototype[Symbol.iterator]
-    let res_str_iter = vm.eval(r#"
+    let res_str_iter = vm
+        .eval(
+            r#"
         let strIt = "ab"[Symbol.iterator]();
         let s1 = strIt.next();
         let s2 = strIt.next();
         let s3 = strIt.next();
         s1.value === 'a' && s2.value === 'b' && s3.done === true
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_str_iter.as_boolean(), Some(true));
 
     // Map and Set iteration via Symbol.iterator
-    let res_map_iter = vm.eval(r#"
+    let res_map_iter = vm
+        .eval(
+            r#"
         let m = new Map();
         m.set('k', 'v');
         let mIt = m[Symbol.iterator]();
         let mEntry = mIt.next().value;
         mEntry[0] === 'k' && mEntry[1] === 'v'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_map_iter.as_boolean(), Some(true));
 }
 
@@ -271,7 +309,9 @@ fn test_iterator_protocols() {
 fn test_atomics_operations() {
     let mut vm = Vm::new();
 
-    let res = vm.eval(r#"
+    let res = vm
+        .eval(
+            r#"
         let sab = new SharedArrayBuffer(16);
         let ta = new Int32Array(sab);
         let isLf = Atomics.isLockFree(4);
@@ -287,25 +327,33 @@ fn test_atomics_operations() {
 
         isLf === true && loaded === 42 && oldAdd === 42 && cx === 50 &&
         Atomics.load(ta, 0) === 100 && waitRes === 'not-equal' && notifyRes === 0
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res.as_boolean(), Some(true));
 }
 
 #[test]
 fn test_default_parameters() {
     let mut vm = Vm::new();
-    let res = vm.eval(r#"
+    let res = vm
+        .eval(
+            r#"
         function add(a, b = 10) { return a + b; }
         const mul = (x = 4, y = 5) => x * y;
         add(5) === 15 && add(5, 2) === 7 && mul() === 20 && mul(3) === 15
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res.as_boolean(), Some(true));
 }
 
 #[test]
 fn test_polymorphic_inline_cache_execution() {
     let mut vm = Vm::new();
-    let res = vm.eval(r#"
+    let res = vm
+        .eval(
+            r#"
         function getX(obj) { return obj.x; }
         let p1 = { x: 10 };
         let p2 = { a: 1, x: 20 };
@@ -320,14 +368,18 @@ fn test_polymorphic_inline_cache_execution() {
             sum += getX(p4);
         }
         sum === 10000
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res.as_boolean(), Some(true));
 }
 
 #[test]
 fn test_generational_gc_nursery_scavenge() {
     let mut vm = Vm::new();
-    let res = vm.eval(r#"
+    let res = vm
+        .eval(
+            r#"
         let root = {
             a: 42,
             b: "hello GC",
@@ -335,7 +387,9 @@ fn test_generational_gc_nursery_scavenge() {
             fn: function(x) { return x * 2; }
         };
         root
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     let root_ptr = res.as_object_ptr().expect("Expected object pointer");
     assert!(vm.heap.nursery.contains(root_ptr));
@@ -354,7 +408,9 @@ fn test_generational_gc_nursery_scavenge() {
 fn test_generational_gc_auto_scavenge_under_allocation_pressure() {
     let mut vm = Vm::new();
     // Allocate 30,000 objects to exceed the 4MB nursery and trigger automatic minor GC
-    let res = vm.eval(r#"
+    let res = vm
+        .eval(
+            r#"
         let live_list = [];
         for (let i = 0; i < 30000; i++) {
             let temp = { id: i, payload: "temp_" + i };
@@ -363,10 +419,16 @@ fn test_generational_gc_auto_scavenge_under_allocation_pressure() {
             }
         }
         live_list.length === 30 && live_list[0].id === 0 && live_list[29].id === 29000
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     assert_eq!(res.as_boolean(), Some(true));
-    assert!(vm.heap.nursery.scavenge_count >= 1, "Expected at least 1 automatic nursery scavenge, got {}", vm.heap.nursery.scavenge_count);
+    assert!(
+        vm.heap.nursery.scavenge_count >= 1,
+        "Expected at least 1 automatic nursery scavenge, got {}",
+        vm.heap.nursery.scavenge_count
+    );
 }
 
 #[test]
@@ -374,14 +436,20 @@ fn test_regexp_features() {
     let mut vm = Vm::new();
 
     // 1. Unicode sets /v flag
-    let res_v = vm.eval(r#"
+    let res_v = vm
+        .eval(
+            r#"
         let re = new RegExp('abc', 'v');
         re.unicodeSets === true && re.unicode === false && re.flags === 'v'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_v.as_boolean(), Some(true));
 
     // 2. /u and /v mutual exclusivity
-    let res_uv = vm.eval(r#"
+    let res_uv = vm
+        .eval(
+            r#"
         let caught = false;
         try {
             new RegExp('abc', 'uv');
@@ -389,7 +457,9 @@ fn test_regexp_features() {
             caught = e instanceof SyntaxError;
         }
         caught
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_uv.as_boolean(), Some(true));
 
     // 3. Match indices /d flag
@@ -407,11 +477,15 @@ fn test_regexp_features() {
     assert_eq!(res_d.as_boolean(), Some(true));
 
     // 4. Generic RegExp.prototype.flags getter
-    let res_generic_flags = vm.eval(r#"
+    let res_generic_flags = vm
+        .eval(
+            r#"
         let fake = { hasIndices: true, multiline: true, dotAll: true };
         let desc = Object.getOwnPropertyDescriptor(RegExp.prototype, 'flags');
         desc.get.call(fake) === 'dms'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_generic_flags.as_boolean(), Some(true));
 
     // 5. Annex B RegExp.prototype.compile
@@ -423,14 +497,18 @@ fn test_regexp_features() {
     assert_eq!(res_compile.as_boolean(), Some(true));
 
     // 6. Annex B RegExp legacy constructor properties
-    let res_legacy = vm.eval(r#"
+    let res_legacy = vm
+        .eval(
+            r#"
         let r = new RegExp('hello (\\w+)');
         r.exec('say hello world today');
         RegExp.lastMatch === 'hello world' &&
         RegExp.$1 === 'world' &&
         RegExp.leftContext === 'say ' &&
         RegExp.rightContext === ' today'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_legacy.as_boolean(), Some(true));
 }
 
@@ -439,14 +517,20 @@ fn test_intl_formatters() {
     let mut vm = Vm::new();
 
     // 1. Intl.getCanonicalLocales
-    let res_canon = vm.eval(r#"
+    let res_canon = vm
+        .eval(
+            r#"
         let list = Intl.getCanonicalLocales(['EN-us', 'ZH-hans-CN', 'en-US']);
         list.length === 2 && list[0] === 'en-US' && list[1] === 'zh-Hans-CN'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_canon.as_boolean(), Some(true));
 
     // Invalid tag throws RangeError
-    let res_invalid = vm.eval(r#"
+    let res_invalid = vm
+        .eval(
+            r#"
         let threw = false;
         try {
             Intl.getCanonicalLocales('invalid_tag');
@@ -454,61 +538,121 @@ fn test_intl_formatters() {
             threw = e instanceof RangeError;
         }
         threw
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_invalid.as_boolean(), Some(true));
 
     // 2. Intl.Locale
-    vm.eval(r#"
+    vm.eval(
+        r#"
         let loc = new Intl.Locale('zh-Hans-CN', { calendar: 'gregory', numeric: true });
-    "#).unwrap();
-    assert_eq!(vm.eval("loc.baseName === 'zh-Hans-CN'").unwrap().as_boolean(), Some(true), "baseName failed: {:?}", vm.eval("loc.baseName"));
-    assert_eq!(vm.eval("loc.language === 'zh'").unwrap().as_boolean(), Some(true), "language failed: {:?}", vm.eval("loc.language"));
-    assert_eq!(vm.eval("loc.script === 'Hans'").unwrap().as_boolean(), Some(true), "script failed: {:?}", vm.eval("loc.script"));
-    assert_eq!(vm.eval("loc.region === 'CN'").unwrap().as_boolean(), Some(true), "region failed: {:?}", vm.eval("loc.region"));
-    assert_eq!(vm.eval("loc.calendar === 'gregory'").unwrap().as_boolean(), Some(true), "calendar failed: {:?}", vm.eval("loc.calendar"));
-    assert_eq!(vm.eval("loc.numeric === true").unwrap().as_boolean(), Some(true), "numeric failed: {:?}", vm.eval("loc.numeric"));
-    assert_eq!(vm.eval("loc.toString() === 'zh-Hans-CN-u-ca-gregory-kn'").unwrap().as_boolean(), Some(true), "toString failed: {:?}", vm.eval("loc.toString()"));
+    "#,
+    )
+    .unwrap();
+    assert_eq!(
+        vm.eval("loc.baseName === 'zh-Hans-CN'").unwrap().as_boolean(),
+        Some(true),
+        "baseName failed: {:?}",
+        vm.eval("loc.baseName")
+    );
+    assert_eq!(
+        vm.eval("loc.language === 'zh'").unwrap().as_boolean(),
+        Some(true),
+        "language failed: {:?}",
+        vm.eval("loc.language")
+    );
+    assert_eq!(
+        vm.eval("loc.script === 'Hans'").unwrap().as_boolean(),
+        Some(true),
+        "script failed: {:?}",
+        vm.eval("loc.script")
+    );
+    assert_eq!(
+        vm.eval("loc.region === 'CN'").unwrap().as_boolean(),
+        Some(true),
+        "region failed: {:?}",
+        vm.eval("loc.region")
+    );
+    assert_eq!(
+        vm.eval("loc.calendar === 'gregory'").unwrap().as_boolean(),
+        Some(true),
+        "calendar failed: {:?}",
+        vm.eval("loc.calendar")
+    );
+    assert_eq!(
+        vm.eval("loc.numeric === true").unwrap().as_boolean(),
+        Some(true),
+        "numeric failed: {:?}",
+        vm.eval("loc.numeric")
+    );
+    assert_eq!(
+        vm.eval("loc.toString() === 'zh-Hans-CN-u-ca-gregory-kn'").unwrap().as_boolean(),
+        Some(true),
+        "toString failed: {:?}",
+        vm.eval("loc.toString()")
+    );
 
     // 3. Intl.PluralRules
-    let res_pr = vm.eval(r#"
+    let res_pr = vm
+        .eval(
+            r#"
         let pr = new Intl.PluralRules('en-US');
         pr instanceof Intl.PluralRules && pr.select(1) === 'one' && pr.select(2) === 'other'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_pr.as_boolean(), Some(true));
 
     // 4. Intl.ListFormat
-    let res_lf = vm.eval(r#"
+    let res_lf = vm
+        .eval(
+            r#"
         let lf = new Intl.ListFormat('en-US');
         let formatted = lf.format(['Apple', 'Banana', 'Orange']);
         formatted === 'Apple, Banana, and Orange'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_lf.as_boolean(), Some(true));
 
     // 5. Intl.DisplayNames
-    let res_dn = vm.eval(r#"
+    let res_dn = vm
+        .eval(
+            r#"
         let dn = new Intl.DisplayNames('en-US', { type: 'region' });
         dn.of('US') === 'United States' && dn.of('JP') === 'Japan'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_dn.as_boolean(), Some(true));
 
     // 6. Intl.Segmenter
-    let res_seg = vm.eval(r#"
+    let res_seg = vm
+        .eval(
+            r#"
         let seg = new Intl.Segmenter('en-US', { granularity: 'word' });
         let segments = seg.segment('Hello world');
         let item = segments.containing(0);
         item.segment === 'H' && item.index === 0
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res_seg.as_boolean(), Some(true));
 }
 
 #[test]
 fn test_annex_b_escape_unescape() {
     let mut vm = Vm::new();
-    let res = vm.eval(r#"
+    let res = vm
+        .eval(
+            r#"
         let enc = escape('Hello World!');
         let dec = unescape(enc);
         enc === 'Hello%20World%21' && dec === 'Hello World!'
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res.as_boolean(), Some(true));
 }
 
@@ -582,7 +726,9 @@ fn test_array_element_attributes_semantics() {
 #[test]
 fn test_weak_pruning_and_liveness_after_gc() {
     let mut vm = Vm::new();
-    let res = vm.eval(r#"
+    let res = vm
+        .eval(
+            r#"
         var failures = [];
         function check(name, cond) { if (!cond) failures.push(name); }
 
@@ -613,7 +759,9 @@ fn test_weak_pruning_and_liveness_after_gc() {
         check("weakmap live", wm2.get(liveKey) === 42);
 
         failures.length;
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
     assert_eq!(res.as_number(), Some(0.0), "weak reference semantics failed");
 }
 
@@ -642,11 +790,7 @@ fn test_gc_reclaims_dead_large_objects() {
     // sweep that space, otherwise every object that ever overflowed the
     // nursery/old generation leaks until the process exits.
     let mut vm = Vm::new();
-    let p = vm
-        .heap
-        .large_objects
-        .allocate(16 * 1024, doms_gc::header::TypeTag::Object)
-        .unwrap();
+    let p = vm.heap.large_objects.allocate(16 * 1024, doms_gc::header::TypeTag::Object).unwrap();
     assert_eq!(vm.heap.large_objects.object_count(), 1);
     vm.gc_collect();
     assert_eq!(

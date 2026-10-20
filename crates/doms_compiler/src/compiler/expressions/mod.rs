@@ -67,7 +67,8 @@ impl Compiler {
             }
             Expression::Member { object, property } => {
                 self.compile_expression(object)?;
-                let prop_idx = self.chunk.add_constant(crate::bytecode::Constant::String(property.clone()));
+                let prop_idx =
+                    self.chunk.add_constant(crate::bytecode::Constant::String(property.clone()));
                 self.chunk.emit(OpCode::GetProp(prop_idx), 0);
             }
             Expression::FunctionExpr { name, params, body } => {
@@ -112,7 +113,9 @@ impl Compiler {
             Expression::YieldStar(expr) => {
                 self.compile_expression(expr)?;
                 self.chunk.emit(OpCode::GetIterator, 0);
-                let iter_slot = self.symbols.define_local(format!("@iter_ys_{}", self.chunk.instructions.len()));
+                let iter_slot = self
+                    .symbols
+                    .define_local(format!("@iter_ys_{}", self.chunk.instructions.len()));
                 self.chunk.emit(OpCode::SetLocal(iter_slot), 0);
                 self.chunk.emit(OpCode::Pop, 0);
 

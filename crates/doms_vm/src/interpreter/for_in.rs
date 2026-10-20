@@ -18,20 +18,26 @@ impl Vm {
 
         while let Some(obj_val) = current_val {
             if let Some(ptr) = obj_val.as_object_ptr() {
-                let is_proxy = matches!(unsafe { &*(ptr as *mut JsObject) }.kind, ObjectKind::Proxy { .. });
+                let is_proxy =
+                    matches!(unsafe { &*(ptr as *mut JsObject) }.kind, ObjectKind::Proxy { .. });
                 if is_proxy {
                     let keys = self.proxy_own_property_keys(obj_val)?;
                     for k in keys {
                         if let PropertyKeyVal::String(s) = k {
                             let desc = crate::builtins::object::descriptor::get_own_property_descriptor_internal(self, obj_val, &PropertyKeyVal::String(s.clone()))?;
-                            if !desc.is_undefined() && self.get_property(desc, "enumerable").is_truthy() {
+                            if !desc.is_undefined()
+                                && self.get_property(desc, "enumerable").is_truthy()
+                            {
                                 if !visited.contains(&s) {
                                     visited.push(s);
                                 }
                             }
                         }
                     }
-                    current_val = self.get_prototype_of_val(obj_val).ok().and_then(|p| if p.is_null() || !p.is_object() { None } else { Some(p) });
+                    current_val = self
+                        .get_prototype_of_val(obj_val)
+                        .ok()
+                        .and_then(|p| if p.is_null() || !p.is_object() { None } else { Some(p) });
                     continue;
                 }
 
@@ -55,7 +61,8 @@ impl Vm {
                             int_keys.push((i, k));
                         }
                     }
-                } else if let ObjectKind::String(ref s) | ObjectKind::StringObject(ref s) = obj.kind {
+                } else if let ObjectKind::String(ref s) | ObjectKind::StringObject(ref s) = obj.kind
+                {
                     for (i, _) in s.chars().enumerate() {
                         let k = i.to_string();
                         if !visited.contains(&k) {
@@ -108,7 +115,10 @@ impl Vm {
                     visited.push(k);
                 }
 
-                current_val = self.get_prototype_of_val(obj_val).ok().and_then(|p| if p.is_null() || !p.is_object() { None } else { Some(p) });
+                current_val = self
+                    .get_prototype_of_val(obj_val)
+                    .ok()
+                    .and_then(|p| if p.is_null() || !p.is_object() { None } else { Some(p) });
             } else {
                 break;
             }

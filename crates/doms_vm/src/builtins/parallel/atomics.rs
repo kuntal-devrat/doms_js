@@ -51,7 +51,9 @@ fn validate_integer_typed_array(
     // 2. Validate typeName
     if only_int32 {
         if ta.kind != TypedArrayKind::Int32 && ta.kind != TypedArrayKind::BigInt64 {
-            return Err(VmError::TypeError("Atomics wait/notify requires an Int32Array or BigInt64Array".into()));
+            return Err(VmError::TypeError(
+                "Atomics wait/notify requires an Int32Array or BigInt64Array".into(),
+            ));
         }
     } else {
         match ta.kind {
@@ -64,7 +66,9 @@ fn validate_integer_typed_array(
             | TypedArrayKind::BigInt64
             | TypedArrayKind::BigUint64 => {}
             _ => {
-                return Err(VmError::TypeError("Atomics operation requires an integer TypedArray".into()));
+                return Err(VmError::TypeError(
+                    "Atomics operation requires an integer TypedArray".into(),
+                ));
             }
         }
     }
@@ -119,25 +123,33 @@ pub(super) fn register_atomics(vm: &mut Vm) {
             }
             TypedArrayKind::Int32 => {
                 let mut b = [0u8; 4];
-                for i in 0..4 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+                for i in 0..4 {
+                    b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                }
                 let v = i32::from_ne_bytes(b);
                 Ok(JsValue::from_int32(v))
             }
             TypedArrayKind::Uint32 => {
                 let mut b = [0u8; 4];
-                for i in 0..4 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+                for i in 0..4 {
+                    b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                }
                 let v = u32::from_ne_bytes(b);
                 Ok(JsValue::from_double(v as f64))
             }
             TypedArrayKind::BigInt64 => {
                 let mut b = [0u8; 8];
-                for i in 0..8 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+                for i in 0..8 {
+                    b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                }
                 let v = i64::from_ne_bytes(b);
                 Ok(vm.alloc_bigint(BigInt::from(v)))
             }
             TypedArrayKind::BigUint64 => {
                 let mut b = [0u8; 8];
-                for i in 0..8 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+                for i in 0..8 {
+                    b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                }
                 let v = u64::from_ne_bytes(b);
                 Ok(vm.alloc_bigint(BigInt::from(v)))
             }
@@ -189,12 +201,16 @@ pub(super) fn register_atomics(vm: &mut Vm) {
                 }
                 TypedArrayKind::Int32 => {
                     let bytes = (num as i32).to_ne_bytes();
-                    for (i, &b) in bytes.iter().enumerate() { ta.buffer.set(byte_pos + i, b); }
+                    for (i, &b) in bytes.iter().enumerate() {
+                        ta.buffer.set(byte_pos + i, b);
+                    }
                     Ok(JsValue::from_int32(num as i32))
                 }
                 TypedArrayKind::Uint32 => {
                     let bytes = (num as u32).to_ne_bytes();
-                    for (i, &b) in bytes.iter().enumerate() { ta.buffer.set(byte_pos + i, b); }
+                    for (i, &b) in bytes.iter().enumerate() {
+                        ta.buffer.set(byte_pos + i, b);
+                    }
                     Ok(JsValue::from_double(num as u32 as f64))
                 }
                 _ => Err(VmError::TypeError("Atomics.store requires an integer TypedArray".into())),
@@ -202,93 +218,126 @@ pub(super) fn register_atomics(vm: &mut Vm) {
         }
     });
 
-    let make_rmw_op = |name: &'static str, op_int: fn(i32, i32) -> i32, op_bi: fn(i64, i64) -> i64| {
-        move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| {
-            let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
-            let idx_val = args.get(1).copied().unwrap_or(JsValue::undefined());
-            let val_arg = args.get(2).copied().unwrap_or(JsValue::undefined());
-            let (ta, idx) = validate_integer_typed_array(vm, ta_val, idx_val, false)?;
+    let make_rmw_op =
+        |name: &'static str, op_int: fn(i32, i32) -> i32, op_bi: fn(i64, i64) -> i64| {
+            move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| {
+                let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
+                let idx_val = args.get(1).copied().unwrap_or(JsValue::undefined());
+                let val_arg = args.get(2).copied().unwrap_or(JsValue::undefined());
+                let (ta, idx) = validate_integer_typed_array(vm, ta_val, idx_val, false)?;
 
-            let bpe = ta.kind.bytes_per_element();
-            let byte_pos = ta.byte_offset + idx * bpe;
+                let bpe = ta.kind.bytes_per_element();
+                let byte_pos = ta.byte_offset + idx * bpe;
 
-            if ta.kind == TypedArrayKind::BigInt64 || ta.kind == TypedArrayKind::BigUint64 {
-                let bi = vm.to_bigint_op(val_arg)?;
-                let val_u64 = bigint_to_u64(&bi);
-                let mut b = [0u8; 8];
-                for i in 0..8 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
-                let old = i64::from_ne_bytes(b);
-                let new_val = op_bi(old, val_u64 as i64);
-                let bytes = new_val.to_ne_bytes();
-                for (i, &byte) in bytes.iter().enumerate() {
-                    ta.buffer.set(byte_pos + i, byte);
-                }
-                if ta.kind == TypedArrayKind::BigInt64 {
-                    Ok(vm.alloc_bigint(BigInt::from(old)))
+                if ta.kind == TypedArrayKind::BigInt64 || ta.kind == TypedArrayKind::BigUint64 {
+                    let bi = vm.to_bigint_op(val_arg)?;
+                    let val_u64 = bigint_to_u64(&bi);
+                    let mut b = [0u8; 8];
+                    for i in 0..8 {
+                        b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                    }
+                    let old = i64::from_ne_bytes(b);
+                    let new_val = op_bi(old, val_u64 as i64);
+                    let bytes = new_val.to_ne_bytes();
+                    for (i, &byte) in bytes.iter().enumerate() {
+                        ta.buffer.set(byte_pos + i, byte);
+                    }
+                    if ta.kind == TypedArrayKind::BigInt64 {
+                        Ok(vm.alloc_bigint(BigInt::from(old)))
+                    } else {
+                        Ok(vm.alloc_bigint(BigInt::from(old as u64)))
+                    }
                 } else {
-                    Ok(vm.alloc_bigint(BigInt::from(old as u64)))
-                }
-            } else {
-                let num = vm.to_number_value(val_arg)?;
-                let rhs = num as i32;
-                match ta.kind {
-                    TypedArrayKind::Int8 => {
-                        let old = ta.buffer.get(byte_pos).unwrap_or(0) as i8 as i32;
-                        let new_val = op_int(old, rhs) as i8 as u8;
-                        ta.buffer.set(byte_pos, new_val);
-                        Ok(JsValue::from_int32(old))
+                    let num = vm.to_number_value(val_arg)?;
+                    let rhs = num as i32;
+                    match ta.kind {
+                        TypedArrayKind::Int8 => {
+                            let old = ta.buffer.get(byte_pos).unwrap_or(0) as i8 as i32;
+                            let new_val = op_int(old, rhs) as i8 as u8;
+                            ta.buffer.set(byte_pos, new_val);
+                            Ok(JsValue::from_int32(old))
+                        }
+                        TypedArrayKind::Uint8 => {
+                            let old = ta.buffer.get(byte_pos).unwrap_or(0) as i32;
+                            let new_val = op_int(old, rhs) as u8;
+                            ta.buffer.set(byte_pos, new_val);
+                            Ok(JsValue::from_int32(old))
+                        }
+                        TypedArrayKind::Int16 => {
+                            let b0 = ta.buffer.get(byte_pos).unwrap_or(0);
+                            let b1 = ta.buffer.get(byte_pos + 1).unwrap_or(0);
+                            let old = i16::from_ne_bytes([b0, b1]) as i32;
+                            let new_val = (op_int(old, rhs) as i16).to_ne_bytes();
+                            ta.buffer.set(byte_pos, new_val[0]);
+                            ta.buffer.set(byte_pos + 1, new_val[1]);
+                            Ok(JsValue::from_int32(old))
+                        }
+                        TypedArrayKind::Uint16 => {
+                            let b0 = ta.buffer.get(byte_pos).unwrap_or(0);
+                            let b1 = ta.buffer.get(byte_pos + 1).unwrap_or(0);
+                            let old = u16::from_ne_bytes([b0, b1]) as i32;
+                            let new_val = (op_int(old, rhs) as u16).to_ne_bytes();
+                            ta.buffer.set(byte_pos, new_val[0]);
+                            ta.buffer.set(byte_pos + 1, new_val[1]);
+                            Ok(JsValue::from_int32(old))
+                        }
+                        TypedArrayKind::Int32 => {
+                            let mut b = [0u8; 4];
+                            for i in 0..4 {
+                                b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                            }
+                            let old = i32::from_ne_bytes(b);
+                            let new_val = op_int(old, rhs).to_ne_bytes();
+                            for (i, &byte) in new_val.iter().enumerate() {
+                                ta.buffer.set(byte_pos + i, byte);
+                            }
+                            Ok(JsValue::from_int32(old))
+                        }
+                        TypedArrayKind::Uint32 => {
+                            let mut b = [0u8; 4];
+                            for i in 0..4 {
+                                b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                            }
+                            let old = u32::from_ne_bytes(b);
+                            let new_val = (op_int(old as i32, rhs) as u32).to_ne_bytes();
+                            for (i, &byte) in new_val.iter().enumerate() {
+                                ta.buffer.set(byte_pos + i, byte);
+                            }
+                            Ok(JsValue::from_double(old as f64))
+                        }
+                        _ => Err(VmError::TypeError(
+                            format!("Atomics.{} requires an integer TypedArray", name).into(),
+                        )),
                     }
-                    TypedArrayKind::Uint8 => {
-                        let old = ta.buffer.get(byte_pos).unwrap_or(0) as i32;
-                        let new_val = op_int(old, rhs) as u8;
-                        ta.buffer.set(byte_pos, new_val);
-                        Ok(JsValue::from_int32(old))
-                    }
-                    TypedArrayKind::Int16 => {
-                        let b0 = ta.buffer.get(byte_pos).unwrap_or(0);
-                        let b1 = ta.buffer.get(byte_pos + 1).unwrap_or(0);
-                        let old = i16::from_ne_bytes([b0, b1]) as i32;
-                        let new_val = (op_int(old, rhs) as i16).to_ne_bytes();
-                        ta.buffer.set(byte_pos, new_val[0]);
-                        ta.buffer.set(byte_pos + 1, new_val[1]);
-                        Ok(JsValue::from_int32(old))
-                    }
-                    TypedArrayKind::Uint16 => {
-                        let b0 = ta.buffer.get(byte_pos).unwrap_or(0);
-                        let b1 = ta.buffer.get(byte_pos + 1).unwrap_or(0);
-                        let old = u16::from_ne_bytes([b0, b1]) as i32;
-                        let new_val = (op_int(old, rhs) as u16).to_ne_bytes();
-                        ta.buffer.set(byte_pos, new_val[0]);
-                        ta.buffer.set(byte_pos + 1, new_val[1]);
-                        Ok(JsValue::from_int32(old))
-                    }
-                    TypedArrayKind::Int32 => {
-                        let mut b = [0u8; 4];
-                        for i in 0..4 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
-                        let old = i32::from_ne_bytes(b);
-                        let new_val = op_int(old, rhs).to_ne_bytes();
-                        for (i, &byte) in new_val.iter().enumerate() { ta.buffer.set(byte_pos + i, byte); }
-                        Ok(JsValue::from_int32(old))
-                    }
-                    TypedArrayKind::Uint32 => {
-                        let mut b = [0u8; 4];
-                        for i in 0..4 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
-                        let old = u32::from_ne_bytes(b);
-                        let new_val = (op_int(old as i32, rhs) as u32).to_ne_bytes();
-                        for (i, &byte) in new_val.iter().enumerate() { ta.buffer.set(byte_pos + i, byte); }
-                        Ok(JsValue::from_double(old as f64))
-                    }
-                    _ => Err(VmError::TypeError(format!("Atomics.{} requires an integer TypedArray", name).into())),
                 }
             }
-        }
-    };
+        };
 
-    let atomics_add = vm.alloc_closure_native_function("add", 3, Arc::new(make_rmw_op("add", |a, b| a.wrapping_add(b), |a, b| a.wrapping_add(b))));
-    let atomics_sub = vm.alloc_closure_native_function("sub", 3, Arc::new(make_rmw_op("sub", |a, b| a.wrapping_sub(b), |a, b| a.wrapping_sub(b))));
-    let atomics_and = vm.alloc_closure_native_function("and", 3, Arc::new(make_rmw_op("and", |a, b| a & b, |a, b| a & b)));
-    let atomics_or = vm.alloc_closure_native_function("or", 3, Arc::new(make_rmw_op("or", |a, b| a | b, |a, b| a | b)));
-    let atomics_xor = vm.alloc_closure_native_function("xor", 3, Arc::new(make_rmw_op("xor", |a, b| a ^ b, |a, b| a ^ b)));
+    let atomics_add = vm.alloc_closure_native_function(
+        "add",
+        3,
+        Arc::new(make_rmw_op("add", |a, b| a.wrapping_add(b), |a, b| a.wrapping_add(b))),
+    );
+    let atomics_sub = vm.alloc_closure_native_function(
+        "sub",
+        3,
+        Arc::new(make_rmw_op("sub", |a, b| a.wrapping_sub(b), |a, b| a.wrapping_sub(b))),
+    );
+    let atomics_and = vm.alloc_closure_native_function(
+        "and",
+        3,
+        Arc::new(make_rmw_op("and", |a, b| a & b, |a, b| a & b)),
+    );
+    let atomics_or = vm.alloc_closure_native_function(
+        "or",
+        3,
+        Arc::new(make_rmw_op("or", |a, b| a | b, |a, b| a | b)),
+    );
+    let atomics_xor = vm.alloc_closure_native_function(
+        "xor",
+        3,
+        Arc::new(make_rmw_op("xor", |a, b| a ^ b, |a, b| a ^ b)),
+    );
 
     let atomics_exchange = vm.alloc_native_function("exchange", 3, |vm, _this, args| {
         let ta_val = args.first().copied().unwrap_or(JsValue::undefined());
@@ -303,10 +352,14 @@ pub(super) fn register_atomics(vm: &mut Vm) {
             let bi = vm.to_bigint_op(val_arg)?;
             let val_u64 = bigint_to_u64(&bi);
             let mut b = [0u8; 8];
-            for i in 0..8 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+            for i in 0..8 {
+                b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+            }
             let old = i64::from_ne_bytes(b);
             let bytes = val_u64.to_ne_bytes();
-            for (i, &byte) in bytes.iter().enumerate() { ta.buffer.set(byte_pos + i, byte); }
+            for (i, &byte) in bytes.iter().enumerate() {
+                ta.buffer.set(byte_pos + i, byte);
+            }
             if ta.kind == TypedArrayKind::BigInt64 {
                 Ok(vm.alloc_bigint(BigInt::from(old)))
             } else {
@@ -345,21 +398,31 @@ pub(super) fn register_atomics(vm: &mut Vm) {
                 }
                 TypedArrayKind::Int32 => {
                     let mut b = [0u8; 4];
-                    for i in 0..4 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+                    for i in 0..4 {
+                        b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                    }
                     let old = i32::from_ne_bytes(b);
                     let bytes = (num as i32).to_ne_bytes();
-                    for (i, &byte) in bytes.iter().enumerate() { ta.buffer.set(byte_pos + i, byte); }
+                    for (i, &byte) in bytes.iter().enumerate() {
+                        ta.buffer.set(byte_pos + i, byte);
+                    }
                     Ok(JsValue::from_int32(old))
                 }
                 TypedArrayKind::Uint32 => {
                     let mut b = [0u8; 4];
-                    for i in 0..4 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+                    for i in 0..4 {
+                        b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                    }
                     let old = u32::from_ne_bytes(b);
                     let bytes = (num as u32).to_ne_bytes();
-                    for (i, &byte) in bytes.iter().enumerate() { ta.buffer.set(byte_pos + i, byte); }
+                    for (i, &byte) in bytes.iter().enumerate() {
+                        ta.buffer.set(byte_pos + i, byte);
+                    }
                     Ok(JsValue::from_double(old as f64))
                 }
-                _ => Err(VmError::TypeError("Atomics.exchange requires an integer TypedArray".into())),
+                _ => Err(VmError::TypeError(
+                    "Atomics.exchange requires an integer TypedArray".into(),
+                )),
             }
         }
     });
@@ -380,11 +443,15 @@ pub(super) fn register_atomics(vm: &mut Vm) {
             let exp_u64 = bigint_to_u64(&exp_bi);
             let rep_u64 = bigint_to_u64(&rep_bi);
             let mut b = [0u8; 8];
-            for i in 0..8 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+            for i in 0..8 {
+                b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+            }
             let old = u64::from_ne_bytes(b);
             if old == exp_u64 {
                 let bytes = rep_u64.to_ne_bytes();
-                for (i, &byte) in bytes.iter().enumerate() { ta.buffer.set(byte_pos + i, byte); }
+                for (i, &byte) in bytes.iter().enumerate() {
+                    ta.buffer.set(byte_pos + i, byte);
+                }
             }
             if ta.kind == TypedArrayKind::BigInt64 {
                 Ok(vm.alloc_bigint(BigInt::from(old as i64)))
@@ -433,25 +500,35 @@ pub(super) fn register_atomics(vm: &mut Vm) {
                 }
                 TypedArrayKind::Int32 => {
                     let mut b = [0u8; 4];
-                    for i in 0..4 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+                    for i in 0..4 {
+                        b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                    }
                     let old = i32::from_ne_bytes(b);
                     if old == exp_num as i32 {
                         let bytes = (rep_num as i32).to_ne_bytes();
-                        for (i, &byte) in bytes.iter().enumerate() { ta.buffer.set(byte_pos + i, byte); }
+                        for (i, &byte) in bytes.iter().enumerate() {
+                            ta.buffer.set(byte_pos + i, byte);
+                        }
                     }
                     Ok(JsValue::from_int32(old))
                 }
                 TypedArrayKind::Uint32 => {
                     let mut b = [0u8; 4];
-                    for i in 0..4 { b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0); }
+                    for i in 0..4 {
+                        b[i] = ta.buffer.get(byte_pos + i).unwrap_or(0);
+                    }
                     let old = u32::from_ne_bytes(b);
                     if old == exp_num as u32 {
                         let bytes = (rep_num as u32).to_ne_bytes();
-                        for (i, &byte) in bytes.iter().enumerate() { ta.buffer.set(byte_pos + i, byte); }
+                        for (i, &byte) in bytes.iter().enumerate() {
+                            ta.buffer.set(byte_pos + i, byte);
+                        }
                     }
                     Ok(JsValue::from_double(old as f64))
                 }
-                _ => Err(VmError::TypeError("Atomics.compareExchange requires an integer TypedArray".into())),
+                _ => Err(VmError::TypeError(
+                    "Atomics.compareExchange requires an integer TypedArray".into(),
+                )),
             }
         }
     });

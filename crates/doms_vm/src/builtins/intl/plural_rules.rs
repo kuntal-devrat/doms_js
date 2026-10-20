@@ -1,8 +1,8 @@
 //! `Intl.PluralRules` implementation.
 
-use super::*;
-use super::setup_prototype_and_constructor;
 use super::locale::canonicalize_locale_list;
+use super::setup_prototype_and_constructor;
+use super::*;
 
 pub(super) fn register_plural_rules(vm: &mut Vm, intl_obj: JsValue) {
     let pr_proto = vm.alloc_object();
@@ -44,7 +44,8 @@ pub(super) fn register_plural_rules(vm: &mut Vm, intl_obj: JsValue) {
         vm.set_property(opts, "locale", loc_val);
 
         let pr_type = vm.get_property(this, "_type");
-        let pr_type_val = if pr_type.is_js_string() { pr_type } else { vm.alloc_string("cardinal".to_string()) };
+        let pr_type_val =
+            if pr_type.is_js_string() { pr_type } else { vm.alloc_string("cardinal".to_string()) };
         vm.set_property(opts, "type", pr_type_val);
 
         let one_str = vm.alloc_string("one".to_string());
@@ -59,15 +60,22 @@ pub(super) fn register_plural_rules(vm: &mut Vm, intl_obj: JsValue) {
     vm.set_property(pr_proto, "resolvedOptions", pr_resolved_opts);
     vm.set_property_non_enumerable(pr_proto, "resolvedOptions".to_string());
 
-    let supported_locales_fn4 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
-        let loc = args.first().copied().unwrap_or(JsValue::undefined());
-        let canons = canonicalize_locale_list(vm, loc)?;
-        let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
-        Ok(vm.alloc_array(items))
-    });
+    let supported_locales_fn4 =
+        vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
+            let loc = args.first().copied().unwrap_or(JsValue::undefined());
+            let canons = canonicalize_locale_list(vm, loc)?;
+            let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
+            Ok(vm.alloc_array(items))
+        });
     vm.set_property(pr_ctor, "supportedLocalesOf", supported_locales_fn4);
     vm.set_property_non_enumerable(pr_ctor, "supportedLocalesOf".to_string());
 
-    setup_prototype_and_constructor(vm, pr_ctor, pr_proto, "Intl.PluralRules", "PluralRules", intl_obj);
-
+    setup_prototype_and_constructor(
+        vm,
+        pr_ctor,
+        pr_proto,
+        "Intl.PluralRules",
+        "PluralRules",
+        intl_obj,
+    );
 }

@@ -43,11 +43,8 @@ pub(super) fn register_events(vm: &mut Vm) {
         let options = args.get(1).copied().unwrap_or(JsValue::undefined());
 
         let event_obj = vm.call(event_ctor, JsValue::undefined(), &[type_arg, options])?;
-        let detail = if options.is_object() {
-            vm.get_property(options, "detail")
-        } else {
-            JsValue::null()
-        };
+        let detail =
+            if options.is_object() { vm.get_property(options, "detail") } else { JsValue::null() };
         vm.set_property(event_obj, "detail", detail);
         Ok(event_obj)
     });

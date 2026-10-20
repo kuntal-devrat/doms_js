@@ -115,15 +115,28 @@ mod tests {
         chunk.emit(OpCode::StrictEq, 1);
         chunk.emit(OpCode::Return, 1);
 
-        let jit_fn = JitCompiler::compile_native(&chunk).expect("Expected native strict eq compilation");
+        let jit_fn =
+            JitCompiler::compile_native(&chunk).expect("Expected native strict eq compilation");
         assert!(jit_fn.is_native());
 
         let mut vm = Vm::new();
         // Numbers
-        let r1 = jit_fn.call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(42), JsValue::from_int32(42)]).unwrap();
+        let r1 = jit_fn
+            .call(
+                &mut vm,
+                JsValue::undefined(),
+                &[JsValue::from_int32(42), JsValue::from_int32(42)],
+            )
+            .unwrap();
         assert_eq!(r1.as_boolean(), Some(true));
 
-        let r2 = jit_fn.call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(42), JsValue::from_int32(43)]).unwrap();
+        let r2 = jit_fn
+            .call(
+                &mut vm,
+                JsValue::undefined(),
+                &[JsValue::from_int32(42), JsValue::from_int32(43)],
+            )
+            .unwrap();
         assert_eq!(r2.as_boolean(), Some(false));
 
         // SSO strings: identical representation
@@ -171,7 +184,8 @@ mod tests {
         // Record monomorphic feedback at GetProp instruction (ip = 1)
         chunk.record_feedback_shape(1, shape1, offset1);
 
-        let jit_fn = JitCompiler::compile_native(&chunk).expect("Expected native compile with shape guard");
+        let jit_fn =
+            JitCompiler::compile_native(&chunk).expect("Expected native compile with shape guard");
         assert!(jit_fn.is_native());
 
         // Call with matching shape -> runs native fast-path
@@ -191,7 +205,11 @@ mod tests {
     #[test]
     fn test_jit_dense_array_access() {
         let mut vm = Vm::new();
-        let arr = vm.alloc_array(vec![JsValue::from_int32(10), JsValue::from_int32(20), JsValue::from_int32(30)]);
+        let arr = vm.alloc_array(vec![
+            JsValue::from_int32(10),
+            JsValue::from_int32(20),
+            JsValue::from_int32(30),
+        ]);
 
         // function(a, i, v) { a[i] = v; return a[i]; }
         let mut chunk = BytecodeChunk::new();
@@ -205,10 +223,17 @@ mod tests {
         chunk.emit(OpCode::GetElem, 1);
         chunk.emit(OpCode::Return, 1);
 
-        let jit_fn = JitCompiler::compile_native(&chunk).expect("Expected native array get/set compile");
+        let jit_fn =
+            JitCompiler::compile_native(&chunk).expect("Expected native array get/set compile");
         assert!(jit_fn.is_native());
 
-        let res = jit_fn.call(&mut vm, JsValue::undefined(), &[arr, JsValue::from_int32(1), JsValue::from_int32(99)]).unwrap();
+        let res = jit_fn
+            .call(
+                &mut vm,
+                JsValue::undefined(),
+                &[arr, JsValue::from_int32(1), JsValue::from_int32(99)],
+            )
+            .unwrap();
         assert_eq!(res.as_number(), Some(99.0));
 
         // Verify array was actually mutated in memory
@@ -274,7 +299,8 @@ mod tests {
     #[test]
     fn test_benchmark_array_manipulation_osr() {
         let code = std::fs::read_to_string("../../tests/benchmarks/array-manipulation.js")
-            .or_else(|_| std::fs::read_to_string("tests/benchmarks/array-manipulation.js")).unwrap();
+            .or_else(|_| std::fs::read_to_string("tests/benchmarks/array-manipulation.js"))
+            .unwrap();
         let program = doms_parser::parse(&code).unwrap();
         let chunk = doms_compiler::compile(&program).unwrap();
         let mut vm = Vm::new();
@@ -293,13 +319,18 @@ mod tests {
         mod_chunk.emit(OpCode::Mod, 1);
         mod_chunk.emit(OpCode::Return, 1);
 
-        let jit_mod = JitCompiler::compile_native(&mod_chunk).expect("Expected native compile for mod");
+        let jit_mod =
+            JitCompiler::compile_native(&mod_chunk).expect("Expected native compile for mod");
         assert!(jit_mod.is_native());
 
-        let res = jit_mod.call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(10), JsValue::from_int32(3)]).unwrap();
+        let res = jit_mod
+            .call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(10), JsValue::from_int32(3)])
+            .unwrap();
         assert_eq!(res.as_int32(), Some(1));
 
-        let res2 = jit_mod.call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(14), JsValue::from_int32(5)]).unwrap();
+        let res2 = jit_mod
+            .call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(14), JsValue::from_int32(5)])
+            .unwrap();
         assert_eq!(res2.as_int32(), Some(4));
 
         // 2. Test native call trampoline: function(f, x, y) { return f(x, y); }
@@ -310,7 +341,8 @@ mod tests {
         call_chunk.emit(OpCode::Call(2), 1);
         call_chunk.emit(OpCode::Return, 1);
 
-        let jit_caller = JitCompiler::compile_native(&call_chunk).expect("Expected native compile for call");
+        let jit_caller =
+            JitCompiler::compile_native(&call_chunk).expect("Expected native compile for call");
         assert!(jit_caller.is_native());
 
         // Create JS function for mod_chunk
@@ -336,14 +368,22 @@ mod tests {
             initial_shape: None,
         });
 
-        let call_res = jit_caller.call(&mut vm, JsValue::undefined(), &[callee_fn, JsValue::from_int32(23), JsValue::from_int32(7)]).unwrap();
+        let call_res = jit_caller
+            .call(
+                &mut vm,
+                JsValue::undefined(),
+                &[callee_fn, JsValue::from_int32(23), JsValue::from_int32(7)],
+            )
+            .unwrap();
         assert_eq!(call_res.as_int32(), Some(2));
     }
 
     #[test]
     fn test_cranelift_native_construct_and_object_access() {
         let mut vm = Vm::new();
-        let res = vm.eval(r#"
+        let res = vm
+            .eval(
+                r#"
             function Point(x, y) {
                 this.x = x;
                 this.y = y;
@@ -356,20 +396,26 @@ mod tests {
                 i = i + 1;
             }
             sum
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         assert_eq!(res.as_number(), Some(14850.0));
     }
 
     #[test]
     fn test_cranelift_native_direct_self_recursion() {
         let mut vm = Vm::new();
-        let res = vm.eval(r#"
+        let res = vm
+            .eval(
+                r#"
             function fib(n) {
                 if (n <= 1) return n;
                 return fib(n - 1) + fib(n - 2);
             }
             fib(20)
-        "#).unwrap();
+        "#,
+            )
+            .unwrap();
         assert_eq!(res.as_int32().or(res.as_number().map(|n| n as i32)), Some(6765));
     }
 }

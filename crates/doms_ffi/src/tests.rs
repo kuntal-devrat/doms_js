@@ -13,14 +13,7 @@ fn test_ffi_lifecycle_and_eval() {
 
     let code = b"21 * 2";
     let mut result: *mut doms_value_t = ptr::null_mut();
-    let status = unsafe {
-        doms_eval(
-            ctx,
-            code.as_ptr() as *const c_char,
-            code.len(),
-            &mut result,
-        )
-    };
+    let status = unsafe { doms_eval(ctx, code.as_ptr() as *const c_char, code.len(), &mut result) };
     assert!(matches!(status, doms_status_t::Ok));
     assert!(!result.is_null());
 
@@ -45,28 +38,13 @@ fn test_ffi_object_operations() {
 
     let code = b"var o = { a: 10, b: 'doms' }; o;";
     let mut obj: *mut doms_value_t = ptr::null_mut();
-    let status = unsafe {
-        doms_eval(
-            ctx,
-            code.as_ptr() as *const c_char,
-            code.len(),
-            &mut obj,
-        )
-    };
+    let status = unsafe { doms_eval(ctx, code.as_ptr() as *const c_char, code.len(), &mut obj) };
     assert!(matches!(status, doms_status_t::Ok));
     assert_eq!(unsafe { doms_value_is_object(obj) }, 1);
 
     // Get property 'a'
     let mut a_val: *mut doms_value_t = ptr::null_mut();
-    let s_get = unsafe {
-        doms_object_get(
-            ctx,
-            obj,
-            c"a".as_ptr(),
-            1,
-            &mut a_val,
-        )
-    };
+    let s_get = unsafe { doms_object_get(ctx, obj, c"a".as_ptr(), 1, &mut a_val) };
     assert!(matches!(s_get, doms_status_t::Ok));
     let mut num = 0.0;
     unsafe { doms_value_to_number(ctx, a_val, &mut num) };
@@ -74,27 +52,13 @@ fn test_ffi_object_operations() {
 
     // Set property 'c' = 99
     let c_val = doms_value_new_number(99.0);
-    let s_set = unsafe {
-        doms_object_set(
-            ctx,
-            obj,
-            c"c".as_ptr(),
-            1,
-            c_val,
-        )
-    };
+    let s_set = unsafe { doms_object_set(ctx, obj, c"c".as_ptr(), 1, c_val) };
     assert!(matches!(s_set, doms_status_t::Ok));
 
     // Get property 'c'
     let mut retrieved_c: *mut doms_value_t = ptr::null_mut();
     unsafe {
-        doms_object_get(
-            ctx,
-            obj,
-            c"c".as_ptr(),
-            1,
-            &mut retrieved_c,
-        );
+        doms_object_get(ctx, obj, c"c".as_ptr(), 1, &mut retrieved_c);
     }
     let mut num_c = 0.0;
     unsafe { doms_value_to_number(ctx, retrieved_c, &mut num_c) };
@@ -120,12 +84,7 @@ fn test_ffi_function_call() {
     let code = b"function add(x, y) { return x + y; } add;";
     let mut func: *mut doms_value_t = ptr::null_mut();
     unsafe {
-        doms_eval(
-            ctx,
-            code.as_ptr() as *const c_char,
-            code.len(),
-            &mut func,
-        );
+        doms_eval(ctx, code.as_ptr() as *const c_char, code.len(), &mut func);
     }
     assert_eq!(unsafe { doms_value_is_function(func) }, 1);
 
@@ -134,16 +93,7 @@ fn test_ffi_function_call() {
     let mut args = [arg1, arg2];
 
     let mut res: *mut doms_value_t = ptr::null_mut();
-    let status = unsafe {
-        doms_call(
-            ctx,
-            func,
-            ptr::null_mut(),
-            2,
-            args.as_mut_ptr(),
-            &mut res,
-        )
-    };
+    let status = unsafe { doms_call(ctx, func, ptr::null_mut(), 2, args.as_mut_ptr(), &mut res) };
     assert!(matches!(status, doms_status_t::Ok));
 
     let mut sum = 0.0;

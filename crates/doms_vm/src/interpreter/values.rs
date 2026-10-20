@@ -35,11 +35,7 @@ impl Vm {
         if val.is_symbol() {
             let desc = if let Some(ptr) = val.as_symbol_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Symbol(d) = &obj.kind {
-                    d.clone()
-                } else {
-                    None
-                }
+                if let ObjectKind::Symbol(d) = &obj.kind { d.clone() } else { None }
             } else {
                 None
             };
@@ -144,14 +140,22 @@ impl Vm {
                     obj.kind = ObjectKind::String(result.clone());
                     return result;
                 }
-                ObjectKind::NumberObject(n) => return self.to_string_value(JsValue::from_double(*n)),
-                ObjectKind::BooleanObject(b) => return self.to_string_value(JsValue::from_boolean(*b)),
+                ObjectKind::NumberObject(n) => {
+                    return self.to_string_value(JsValue::from_double(*n));
+                }
+                ObjectKind::BooleanObject(b) => {
+                    return self.to_string_value(JsValue::from_boolean(*b));
+                }
                 ObjectKind::Array(elements) => {
-                    let parts: Vec<String> = elements.iter().map(|e| self.to_string_value(*e)).collect();
+                    let parts: Vec<String> =
+                        elements.iter().map(|e| self.to_string_value(*e)).collect();
                     parts.join(",")
                 }
                 ObjectKind::Function(f) => {
-                    format!("function {}() {{ [native code] }}", f.name.as_deref().unwrap_or("anonymous"))
+                    format!(
+                        "function {}() {{ [native code] }}",
+                        f.name.as_deref().unwrap_or("anonymous")
+                    )
                 }
                 ObjectKind::NativeFunction(n) => {
                     format!("function {}() {{ [native code] }}", n.name)
@@ -165,10 +169,20 @@ impl Vm {
                 ObjectKind::RegExp { pattern, flags } => format!("/{}/{}", pattern, flags),
                 _ => {
                     let has_name_or_msg = {
-                        let name = self.shapes.lookup_offset(obj.shape_id, "name").and_then(|offset| obj.get_slot(offset));
-                        let msg = self.shapes.lookup_offset(obj.shape_id, "message").and_then(|offset| obj.get_slot(offset));
+                        let name = self
+                            .shapes
+                            .lookup_offset(obj.shape_id, "name")
+                            .and_then(|offset| obj.get_slot(offset));
+                        let msg = self
+                            .shapes
+                            .lookup_offset(obj.shape_id, "message")
+                            .and_then(|offset| obj.get_slot(offset));
                         if let Some(msg_val) = msg {
-                            let name_str = if let Some(n_val) = name { self.to_string_value(n_val) } else { "Error".to_string() };
+                            let name_str = if let Some(n_val) = name {
+                                self.to_string_value(n_val)
+                            } else {
+                                "Error".to_string()
+                            };
                             let msg_str = self.to_string_value(msg_val);
                             Some(format!("{}: {}", name_str, msg_str))
                         } else {
@@ -188,18 +202,18 @@ impl Vm {
         self.to_json_string_safe(val, &mut visited)
     }
 
-    fn to_json_string_safe(&self, val: JsValue, visited: &mut std::collections::HashSet<*const u8>) -> String {
+    fn to_json_string_safe(
+        &self,
+        val: JsValue,
+        visited: &mut std::collections::HashSet<*const u8>,
+    ) -> String {
         if val.is_null() {
             "null".to_string()
         } else if val.is_boolean() {
             if val.as_boolean().unwrap() { "true".to_string() } else { "false".to_string() }
         } else if val.is_number() {
             let n = self.to_string_value(val);
-            if n == "NaN" || n == "Infinity" || n == "-Infinity" {
-                "null".to_string()
-            } else {
-                n
-            }
+            if n == "NaN" || n == "Infinity" || n == "-Infinity" { "null".to_string() } else { n }
         } else if let Some(ptr) = val.as_object_ptr() {
             if !visited.insert(ptr as *const u8) {
                 return "null".to_string();
@@ -225,7 +239,8 @@ impl Vm {
                     escaped
                 }
                 ObjectKind::Array(elements) => {
-                    let items: Vec<String> = elements.iter().map(|e| self.to_json_string_safe(*e, visited)).collect();
+                    let items: Vec<String> =
+                        elements.iter().map(|e| self.to_json_string_safe(*e, visited)).collect();
                     format!("[{}]", items.join(","))
                 }
                 ObjectKind::Ordinary => {
@@ -233,7 +248,11 @@ impl Vm {
                     for (k, offset) in self.shapes.all_property_entries(obj.shape_id) {
                         if let Some(v) = obj.get_slot(offset) {
                             if !v.is_undefined() && !v.is_symbol() {
-                                pairs.push(format!("\"{}\":{}", k, self.to_json_string_safe(v, visited)));
+                                pairs.push(format!(
+                                    "\"{}\":{}",
+                                    k,
+                                    self.to_json_string_safe(v, visited)
+                                ));
                             }
                         }
                     }
@@ -256,7 +275,9 @@ impl Vm {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
                 ObjectKind::ConsString { length, .. } => return *length,
-                ObjectKind::String(s) | ObjectKind::StringObject(s) => return s.encode_utf16().count(),
+                ObjectKind::String(s) | ObjectKind::StringObject(s) => {
+                    return s.encode_utf16().count();
+                }
                 _ => {}
             }
         }

@@ -52,7 +52,13 @@ impl SymbolTable {
         let is_lexical = self.scope_depth > 1;
         let slot = self.all_local_names.len() as u16;
         self.all_local_names.push(name.clone());
-        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical, is_declared: true });
+        self.locals.push(Local {
+            name,
+            depth: self.scope_depth,
+            slot,
+            is_lexical,
+            is_declared: true,
+        });
         slot
     }
 
@@ -60,14 +66,26 @@ impl SymbolTable {
         let is_lexical = self.scope_depth > 1;
         let slot = self.all_local_names.len() as u16;
         self.all_local_names.push(name.clone());
-        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical, is_declared: false });
+        self.locals.push(Local {
+            name,
+            depth: self.scope_depth,
+            slot,
+            is_lexical,
+            is_declared: false,
+        });
         slot
     }
 
     pub fn define_local_lexical(&mut self, name: String) -> u16 {
         let slot = self.all_local_names.len() as u16;
         self.all_local_names.push(name.clone());
-        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical: true, is_declared: true });
+        self.locals.push(Local {
+            name,
+            depth: self.scope_depth,
+            slot,
+            is_lexical: true,
+            is_declared: true,
+        });
         slot
     }
 
@@ -119,11 +137,7 @@ impl SymbolTable {
             }
         }
         let slot = self.upvalues.len() as u16;
-        self.upvalues.push(UpvalueInfo {
-            index,
-            is_local,
-            name: name.to_string(),
-        });
+        self.upvalues.push(UpvalueInfo { index, is_local, name: name.to_string() });
         slot
     }
 
@@ -146,4 +160,3 @@ impl SymbolTable {
         None
     }
 }
-

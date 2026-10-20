@@ -191,7 +191,9 @@ impl Trace for JsObject {
                         tracer.trace_ref(r);
                     }
                     match req.kind {
-                        AsyncGenRequestKind::Next(v) | AsyncGenRequestKind::Return(v) | AsyncGenRequestKind::Throw(v) => {
+                        AsyncGenRequestKind::Next(v)
+                        | AsyncGenRequestKind::Return(v)
+                        | AsyncGenRequestKind::Throw(v) => {
                             if let Some(r) = v.as_heap_ptr() {
                                 tracer.trace_ref(r);
                             }
@@ -318,24 +320,67 @@ impl Trace for JsObject {
                 }
                 match kind.as_ref() {
                     crate::object::IteratorHelperKind::Map { mapper } => {
-                        if let Some(p) = mapper.as_heap_ptr() { tracer.trace_ref(p); }
+                        if let Some(p) = mapper.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
                     }
                     crate::object::IteratorHelperKind::Filter { predicate } => {
-                        if let Some(p) = predicate.as_heap_ptr() { tracer.trace_ref(p); }
+                        if let Some(p) = predicate.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
                     }
-                    crate::object::IteratorHelperKind::FlatMap { mapper, inner_iter, inner_next } => {
-                        if let Some(p) = mapper.as_heap_ptr() { tracer.trace_ref(p); }
-                        if let Some(it) = inner_iter { if let Some(p) = it.as_heap_ptr() { tracer.trace_ref(p); } }
-                        if let Some(nx) = inner_next { if let Some(p) = nx.as_heap_ptr() { tracer.trace_ref(p); } }
+                    crate::object::IteratorHelperKind::FlatMap {
+                        mapper,
+                        inner_iter,
+                        inner_next,
+                    } => {
+                        if let Some(p) = mapper.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
+                        if let Some(it) = inner_iter {
+                            if let Some(p) = it.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
+                        if let Some(nx) = inner_next {
+                            if let Some(p) = nx.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
                     }
-                    crate::object::IteratorHelperKind::Concat { iterables, current_iter, current_next, .. } => {
-                        for it in iterables { if let Some(p) = it.as_heap_ptr() { tracer.trace_ref(p); } }
-                        if let Some(it) = current_iter { if let Some(p) = it.as_heap_ptr() { tracer.trace_ref(p); } }
-                        if let Some(nx) = current_next { if let Some(p) = nx.as_heap_ptr() { tracer.trace_ref(p); } }
+                    crate::object::IteratorHelperKind::Concat {
+                        iterables,
+                        current_iter,
+                        current_next,
+                        ..
+                    } => {
+                        for it in iterables {
+                            if let Some(p) = it.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
+                        if let Some(it) = current_iter {
+                            if let Some(p) = it.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
+                        if let Some(nx) = current_next {
+                            if let Some(p) = nx.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
                     }
                     crate::object::IteratorHelperKind::Zip { others, padding, .. } => {
-                        for it in others { if let Some(p) = it.as_heap_ptr() { tracer.trace_ref(p); } }
-                        if let Some(pad) = padding { if let Some(p) = pad.as_heap_ptr() { tracer.trace_ref(p); } }
+                        for it in others {
+                            if let Some(p) = it.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
+                        if let Some(pad) = padding {
+                            if let Some(p) = pad.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -516,7 +561,9 @@ impl JsObject {
                 for req in &mut g.async_queue {
                     visitor(&mut req.promise);
                     match &mut req.kind {
-                        AsyncGenRequestKind::Next(v) | AsyncGenRequestKind::Return(v) | AsyncGenRequestKind::Throw(v) => {
+                        AsyncGenRequestKind::Next(v)
+                        | AsyncGenRequestKind::Return(v)
+                        | AsyncGenRequestKind::Throw(v) => {
                             visitor(v);
                         }
                     }
@@ -592,21 +639,48 @@ impl JsObject {
                 visitor(iterator);
                 visitor(next_method);
                 match kind.as_mut() {
-                    crate::object::IteratorHelperKind::Map { mapper } => { visitor(mapper); }
-                    crate::object::IteratorHelperKind::Filter { predicate } => { visitor(predicate); }
-                    crate::object::IteratorHelperKind::FlatMap { mapper, inner_iter, inner_next } => {
+                    crate::object::IteratorHelperKind::Map { mapper } => {
                         visitor(mapper);
-                        if let Some(it) = inner_iter { visitor(it); }
-                        if let Some(nx) = inner_next { visitor(nx); }
                     }
-                    crate::object::IteratorHelperKind::Concat { iterables, current_iter, current_next, .. } => {
-                        for it in iterables { visitor(it); }
-                        if let Some(it) = current_iter { visitor(it); }
-                        if let Some(nx) = current_next { visitor(nx); }
+                    crate::object::IteratorHelperKind::Filter { predicate } => {
+                        visitor(predicate);
+                    }
+                    crate::object::IteratorHelperKind::FlatMap {
+                        mapper,
+                        inner_iter,
+                        inner_next,
+                    } => {
+                        visitor(mapper);
+                        if let Some(it) = inner_iter {
+                            visitor(it);
+                        }
+                        if let Some(nx) = inner_next {
+                            visitor(nx);
+                        }
+                    }
+                    crate::object::IteratorHelperKind::Concat {
+                        iterables,
+                        current_iter,
+                        current_next,
+                        ..
+                    } => {
+                        for it in iterables {
+                            visitor(it);
+                        }
+                        if let Some(it) = current_iter {
+                            visitor(it);
+                        }
+                        if let Some(nx) = current_next {
+                            visitor(nx);
+                        }
                     }
                     crate::object::IteratorHelperKind::Zip { others, padding, .. } => {
-                        for it in others { visitor(it); }
-                        if let Some(pad) = padding { visitor(pad); }
+                        for it in others {
+                            visitor(it);
+                        }
+                        if let Some(pad) = padding {
+                            visitor(pad);
+                        }
                     }
                     _ => {}
                 }

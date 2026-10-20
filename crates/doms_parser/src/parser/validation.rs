@@ -1,45 +1,62 @@
 use super::{ParseError, Parser};
-use crate::ast::*;
 use crate::TokenKind;
+use crate::ast::*;
 
 impl<'a> Parser<'a> {
-    pub(crate) fn check_sub_statement(&self, stmt: &Statement, allow_sloppy_func: bool) -> Result<(), ParseError> {
+    pub(crate) fn check_sub_statement(
+        &self,
+        stmt: &Statement,
+        allow_sloppy_func: bool,
+    ) -> Result<(), ParseError> {
         match stmt {
             Statement::VarDecl { kind: VarKind::Let | VarKind::Const, .. }
             | Statement::ClassDecl(_)
             | Statement::AsyncFunctionDecl { .. }
             | Statement::GeneratorDecl { .. }
-            | Statement::AsyncGeneratorDecl { .. } => {
-                Err(ParseError::General("Declaration cannot appear in a single-statement context".into()))
-            }
+            | Statement::AsyncGeneratorDecl { .. } => Err(ParseError::General(
+                "Declaration cannot appear in a single-statement context".into(),
+            )),
             Statement::FunctionDecl { .. } => {
                 if allow_sloppy_func && !self.is_strict {
                     Ok(())
                 } else {
-                    Err(ParseError::General("Function declaration cannot appear in a single-statement context".into()))
+                    Err(ParseError::General(
+                        "Function declaration cannot appear in a single-statement context".into(),
+                    ))
                 }
             }
-            Statement::Labeled { body, .. } => {
-                self.check_sub_statement(body, allow_sloppy_func)
-            }
+            Statement::Labeled { body, .. } => self.check_sub_statement(body, allow_sloppy_func),
             _ => Ok(()),
         }
     }
 
-    pub(crate) fn validate_block_declarations(&self, stmts: &[Statement]) -> Result<(), ParseError> {
+    pub(crate) fn validate_block_declarations(
+        &self,
+        stmts: &[Statement],
+    ) -> Result<(), ParseError> {
         let mut lex_names: Vec<(String, bool)> = Vec::new();
         for stmt in stmts {
             match stmt {
                 Statement::VarDecl { kind, declarations } if *kind != VarKind::Var => {
                     for decl in declarations {
                         if !decl.name.starts_with("__") {
-                            Self::add_lexical_name(&mut lex_names, decl.name.clone(), false, self.is_strict)?;
+                            Self::add_lexical_name(
+                                &mut lex_names,
+                                decl.name.clone(),
+                                false,
+                                self.is_strict,
+                            )?;
                         }
                     }
                 }
                 Statement::ClassDecl(class_def) => {
                     if let Some(ref name) = class_def.name {
-                        Self::add_lexical_name(&mut lex_names, name.clone(), false, self.is_strict)?;
+                        Self::add_lexical_name(
+                            &mut lex_names,
+                            name.clone(),
+                            false,
+                            self.is_strict,
+                        )?;
                     }
                 }
                 Statement::FunctionDecl { name, .. } => {
@@ -121,7 +138,8 @@ impl<'a> Parser<'a> {
                 }
                 Self::collect_var_declared_names(body, vars);
             }
-            Statement::ForIn { var_kind, left, body, .. } | Statement::ForOf { var_kind, left, body, .. } => {
+            Statement::ForIn { var_kind, left, body, .. }
+            | Statement::ForOf { var_kind, left, body, .. } => {
                 if *var_kind == Some(VarKind::Var) && !vars.contains(left) {
                     vars.push(left.clone());
                 }
@@ -150,7 +168,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn parse_sub_statement(&mut self, allow_sloppy_func: bool) -> Result<Statement, ParseError> {
+    pub(crate) fn parse_sub_statement(
+        &mut self,
+        allow_sloppy_func: bool,
+    ) -> Result<Statement, ParseError> {
         let prev = self.in_single_statement_context;
         self.in_single_statement_context = true;
         let res = self.parse_statement();
@@ -176,7 +197,13 @@ impl<'a> Parser<'a> {
         let mut active_labels = Vec::new();
         let mut iteration_labels = Vec::new();
         for stmt in stmts {
-            Self::check_labels_and_jumps_stmt(stmt, &mut active_labels, &mut iteration_labels, false, false)?;
+            Self::check_labels_and_jumps_stmt(
+                stmt,
+                &mut active_labels,
+                &mut iteration_labels,
+                false,
+                false,
+            )?;
         }
         Ok(())
     }
@@ -316,7 +343,13 @@ impl<'a> Parser<'a> {
                 if is_iter {
                     iteration_labels.push(label.clone());
                 }
-                let res = Self::check_labels_and_jumps_stmt(body, active_labels, iteration_labels, in_loop, in_switch);
+                let res = Self::check_labels_and_jumps_stmt(
+                    body,
+                    active_labels,
+                    iteration_labels,
+                    in_loop,
+                    in_switch,
+                );
                 active_labels.pop();
                 if is_iter {
                     iteration_labels.pop();
@@ -335,7 +368,10 @@ impl<'a> Parser<'a> {
             }
             Statement::Continue(Some(label)) => {
                 if !iteration_labels.contains(label) {
-                    return Err(ParseError::General(format!("Undefined continue label '{}'", label)));
+                    return Err(ParseError::General(format!(
+                        "Undefined continue label '{}'",
+                        label
+                    )));
                 }
             }
             Statement::Continue(None) => {
@@ -344,42 +380,102 @@ impl<'a> Parser<'a> {
                 }
             }
             Statement::While { body, .. } | Statement::DoWhile { body, .. } => {
-                Self::check_labels_and_jumps_stmt(body, active_labels, iteration_labels, true, in_switch)?;
+                Self::check_labels_and_jumps_stmt(
+                    body,
+                    active_labels,
+                    iteration_labels,
+                    true,
+                    in_switch,
+                )?;
             }
             Statement::For { body, .. }
             | Statement::ForIn { body, .. }
             | Statement::ForOf { body, .. } => {
-                Self::check_labels_and_jumps_stmt(body, active_labels, iteration_labels, true, in_switch)?;
+                Self::check_labels_and_jumps_stmt(
+                    body,
+                    active_labels,
+                    iteration_labels,
+                    true,
+                    in_switch,
+                )?;
             }
             Statement::Block(inner) => {
                 for s in inner {
-                    Self::check_labels_and_jumps_stmt(s, active_labels, iteration_labels, in_loop, in_switch)?;
+                    Self::check_labels_and_jumps_stmt(
+                        s,
+                        active_labels,
+                        iteration_labels,
+                        in_loop,
+                        in_switch,
+                    )?;
                 }
             }
             Statement::If { then_branch, else_branch, .. } => {
-                Self::check_labels_and_jumps_stmt(then_branch, active_labels, iteration_labels, in_loop, in_switch)?;
+                Self::check_labels_and_jumps_stmt(
+                    then_branch,
+                    active_labels,
+                    iteration_labels,
+                    in_loop,
+                    in_switch,
+                )?;
                 if let Some(eb) = else_branch {
-                    Self::check_labels_and_jumps_stmt(eb, active_labels, iteration_labels, in_loop, in_switch)?;
+                    Self::check_labels_and_jumps_stmt(
+                        eb,
+                        active_labels,
+                        iteration_labels,
+                        in_loop,
+                        in_switch,
+                    )?;
                 }
             }
             Statement::Switch { cases, .. } => {
                 for c in cases {
                     for s in &c.consequent {
-                        Self::check_labels_and_jumps_stmt(s, active_labels, iteration_labels, in_loop, true)?;
+                        Self::check_labels_and_jumps_stmt(
+                            s,
+                            active_labels,
+                            iteration_labels,
+                            in_loop,
+                            true,
+                        )?;
                     }
                 }
             }
             Statement::TryCatch { try_block, catch_block, finally_block, .. } => {
-                Self::check_labels_and_jumps_stmt(try_block, active_labels, iteration_labels, in_loop, in_switch)?;
+                Self::check_labels_and_jumps_stmt(
+                    try_block,
+                    active_labels,
+                    iteration_labels,
+                    in_loop,
+                    in_switch,
+                )?;
                 if let Some(cb) = catch_block {
-                    Self::check_labels_and_jumps_stmt(cb, active_labels, iteration_labels, in_loop, in_switch)?;
+                    Self::check_labels_and_jumps_stmt(
+                        cb,
+                        active_labels,
+                        iteration_labels,
+                        in_loop,
+                        in_switch,
+                    )?;
                 }
                 if let Some(fb) = finally_block {
-                    Self::check_labels_and_jumps_stmt(fb, active_labels, iteration_labels, in_loop, in_switch)?;
+                    Self::check_labels_and_jumps_stmt(
+                        fb,
+                        active_labels,
+                        iteration_labels,
+                        in_loop,
+                        in_switch,
+                    )?;
                 }
             }
             Statement::With { body, .. } => {
-                Self::check_labels_and_jumps_stmt(body, active_labels, iteration_labels, in_loop, in_switch)?;
+                Self::check_labels_and_jumps_stmt(
+                    body,
+                    active_labels,
+                    iteration_labels,
+                    in_loop,
+                    in_switch,
+                )?;
             }
             Statement::FunctionDecl { body, .. }
             | Statement::AsyncFunctionDecl { body, .. }
@@ -427,7 +523,9 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn validate_assignment_pattern(&self, expr: &Expression) -> Result<(), ParseError> {
         if self.trailing_comma_after_rest {
-            return Err(ParseError::General("Rest element cannot have a trailing comma in assignment pattern".into()));
+            return Err(ParseError::General(
+                "Rest element cannot have a trailing comma in assignment pattern".into(),
+            ));
         }
         self.validate_assignment_pattern_inner(expr)
     }
@@ -436,7 +534,11 @@ impl<'a> Parser<'a> {
         match expr {
             Expression::Identifier(name) => {
                 if self.is_strict && (name == "eval" || name == "arguments") {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(name.clone()), self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Ident(name.clone()),
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 Ok(())
             }
@@ -446,23 +548,38 @@ impl<'a> Parser<'a> {
                 let mut has_rest = false;
                 for elem in elements {
                     if has_rest {
-                        return Err(ParseError::General("Elements cannot follow rest element".into()));
+                        return Err(ParseError::General(
+                            "Elements cannot follow rest element".into(),
+                        ));
                     }
                     match elem {
                         Expression::Literal(Literal::Hole) => {}
                         Expression::Spread(inner) => {
                             has_rest = true;
-                            if matches!(&**inner, Expression::Assignment { .. } | Expression::MemberAssignment { .. } | Expression::IndexAssignment { .. } | Expression::DestructuringAssignment { .. }) {
-                                return Err(ParseError::General("Rest element cannot have an initializer".into()));
+                            if matches!(
+                                &**inner,
+                                Expression::Assignment { .. }
+                                    | Expression::MemberAssignment { .. }
+                                    | Expression::IndexAssignment { .. }
+                                    | Expression::DestructuringAssignment { .. }
+                            ) {
+                                return Err(ParseError::General(
+                                    "Rest element cannot have an initializer".into(),
+                                ));
                             }
                             self.validate_assignment_pattern_inner(inner)?;
                         }
                         Expression::Assignment { target, .. } => {
                             if self.is_strict && (target == "eval" || target == "arguments") {
-                                return Err(ParseError::UnexpectedToken(TokenKind::Ident(target.clone()), self.current.line, self.current.col));
+                                return Err(ParseError::UnexpectedToken(
+                                    TokenKind::Ident(target.clone()),
+                                    self.current.line,
+                                    self.current.col,
+                                ));
                             }
                         }
-                        Expression::MemberAssignment { .. } | Expression::IndexAssignment { .. } => {}
+                        Expression::MemberAssignment { .. }
+                        | Expression::IndexAssignment { .. } => {}
                         Expression::DestructuringAssignment { pattern, .. } => {
                             self.validate_assignment_pattern_inner(pattern)?;
                         }
@@ -477,27 +594,42 @@ impl<'a> Parser<'a> {
                 let mut has_rest = false;
                 for prop in props {
                     if has_rest {
-                        return Err(ParseError::General("Elements cannot follow rest element".into()));
+                        return Err(ParseError::General(
+                            "Elements cannot follow rest element".into(),
+                        ));
                     }
                     match prop {
                         ObjectProperty::KeyValue(_key, val) => {
                             if matches!(val, Expression::MethodExpr { .. }) {
-                                return Err(ParseError::General("Object pattern cannot contain methods".into()));
+                                return Err(ParseError::General(
+                                    "Object pattern cannot contain methods".into(),
+                                ));
                             }
                             if let Expression::Assignment { target, .. } = val {
                                 if self.is_strict && (target == "eval" || target == "arguments") {
-                                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(target.clone()), self.current.line, self.current.col));
+                                    return Err(ParseError::UnexpectedToken(
+                                        TokenKind::Ident(target.clone()),
+                                        self.current.line,
+                                        self.current.col,
+                                    ));
                                 }
-                            } else if matches!(val, Expression::MemberAssignment { .. } | Expression::IndexAssignment { .. }) {
+                            } else if matches!(
+                                val,
+                                Expression::MemberAssignment { .. }
+                                    | Expression::IndexAssignment { .. }
+                            ) {
                                 // Default initializer allowed in object pattern
-                            } else if let Expression::DestructuringAssignment { pattern, .. } = val {
+                            } else if let Expression::DestructuringAssignment { pattern, .. } = val
+                            {
                                 self.validate_assignment_pattern_inner(pattern)?;
                             } else {
                                 self.validate_assignment_pattern_inner(val)?;
                             }
                         }
                         ObjectProperty::Getter(..) | ObjectProperty::Setter(..) => {
-                            return Err(ParseError::General("Object pattern cannot contain getters or setters".into()));
+                            return Err(ParseError::General(
+                                "Object pattern cannot contain getters or setters".into(),
+                            ));
                         }
                         ObjectProperty::Spread(expr) => {
                             has_rest = true;

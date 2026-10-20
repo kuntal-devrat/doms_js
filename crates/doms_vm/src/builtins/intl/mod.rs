@@ -12,9 +12,9 @@ pub mod number_format;
 pub mod plural_rules;
 pub mod segmenter;
 
-pub use locale::canonicalize_locale_list;
 #[allow(unused_imports)]
 pub use locale::ParsedLocale;
+pub use locale::canonicalize_locale_list;
 
 pub(super) fn setup_prototype_and_constructor(
     vm: &mut Vm,
@@ -24,7 +24,12 @@ pub(super) fn setup_prototype_and_constructor(
     ctor_name: &str,
     parent_obj: JsValue,
 ) {
-    vm.define_builtin_property(ctor, "prototype", proto, PropertyAttributes::NON_WRITABLE_NON_ENUMERABLE);
+    vm.define_builtin_property(
+        ctor,
+        "prototype",
+        proto,
+        PropertyAttributes::NON_WRITABLE_NON_ENUMERABLE,
+    );
     vm.define_builtin_property(proto, "constructor", ctor, PropertyAttributes::BUILTIN_METHOD);
 
     if let Some(sym) = vm.symbol_to_string_tag {
@@ -44,13 +49,19 @@ pub(super) fn register_intl_builtins(vm: &mut Vm) {
     }
 
     // Intl.getCanonicalLocales(locales)
-    let get_canon_locales_fn = vm.alloc_native_function("getCanonicalLocales", 1, |vm, _this, args| {
-        let arg = args.first().copied().unwrap_or(JsValue::undefined());
-        let canons = canonicalize_locale_list(vm, arg)?;
-        let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
-        Ok(vm.alloc_array(items))
-    });
-    vm.define_builtin_property(intl_obj, "getCanonicalLocales", get_canon_locales_fn, PropertyAttributes::BUILTIN_METHOD);
+    let get_canon_locales_fn =
+        vm.alloc_native_function("getCanonicalLocales", 1, |vm, _this, args| {
+            let arg = args.first().copied().unwrap_or(JsValue::undefined());
+            let canons = canonicalize_locale_list(vm, arg)?;
+            let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
+            Ok(vm.alloc_array(items))
+        });
+    vm.define_builtin_property(
+        intl_obj,
+        "getCanonicalLocales",
+        get_canon_locales_fn,
+        PropertyAttributes::BUILTIN_METHOD,
+    );
 
     locale::register_locale(vm, intl_obj);
     number_format::register_number_format(vm, intl_obj);

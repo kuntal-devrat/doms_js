@@ -99,7 +99,9 @@ pub(super) fn register_legacy_accessors(vm: &mut Vm, object_proto: JsValue) {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             match key {
                 PropertyKeyVal::Symbol(sym) => {
-                    let accs = obj.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+                    let accs = obj
+                        .symbol_accessors
+                        .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
                     accs.entry(sym).or_default().getter = Some(getter);
                 }
                 PropertyKeyVal::String(s) => {
@@ -124,7 +126,9 @@ pub(super) fn register_legacy_accessors(vm: &mut Vm, object_proto: JsValue) {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             match key {
                 PropertyKeyVal::Symbol(sym) => {
-                    let accs = obj.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+                    let accs = obj
+                        .symbol_accessors
+                        .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
                     accs.entry(sym).or_default().setter = Some(setter);
                 }
                 PropertyKeyVal::String(s) => {

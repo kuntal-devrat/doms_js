@@ -21,7 +21,11 @@ impl<'a> Parser<'a> {
         self.advance()?; // for
         let is_await = if self.match_token(&TokenKind::Await)? {
             if !self.in_async && !self.is_module {
-                return Err(ParseError::UnexpectedToken(TokenKind::Await, self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Await,
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             true
         } else {
@@ -34,10 +38,17 @@ impl<'a> Parser<'a> {
             && matches!(&self.peeked.kind, TokenKind::Ident(s) if s == "of")
             && !self.peeked.has_escape
         {
-            return Err(ParseError::UnexpectedToken(TokenKind::Ident("async".into()), self.current.line, self.current.col));
+            return Err(ParseError::UnexpectedToken(
+                TokenKind::Ident("async".into()),
+                self.current.line,
+                self.current.col,
+            ));
         }
 
-        if self.check(&TokenKind::Let) || self.check(&TokenKind::Const) || self.check(&TokenKind::Var) {
+        if self.check(&TokenKind::Let)
+            || self.check(&TokenKind::Const)
+            || self.check(&TokenKind::Var)
+        {
             let kind_tok = self.advance()?; // let/const/var
             let var_kind = match kind_tok.kind {
                 TokenKind::Let => Some(VarKind::Let),
@@ -72,17 +83,28 @@ impl<'a> Parser<'a> {
                     let mut seen = std::collections::HashSet::new();
                     for name in &bound_names {
                         if !seen.insert(name) {
-                            return Err(ParseError::General(format!("Duplicate lexical binding '{}' in for loop head", name)));
+                            return Err(ParseError::General(format!(
+                                "Duplicate lexical binding '{}' in for loop head",
+                                name
+                            )));
                         }
                         if name == "let" {
-                            return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+                            return Err(ParseError::UnexpectedToken(
+                                TokenKind::Let,
+                                self.current.line,
+                                self.current.col,
+                            ));
                         }
                     }
                 }
 
                 if self.match_token(&TokenKind::In)? {
                     if is_await {
-                        return Err(ParseError::UnexpectedToken(TokenKind::In, self.current.line, self.current.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::In,
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                     let right = self.parse_expression(0)?;
                     self.expect(TokenKind::RParen)?;
@@ -93,12 +115,21 @@ impl<'a> Parser<'a> {
                         Parser::collect_var_declared_names(&body, &mut body_vars);
                         for name in &bound_names {
                             if body_vars.contains(name) {
-                                return Err(ParseError::General(format!("Identifier '{}' has already been declared", name)));
+                                return Err(ParseError::General(format!(
+                                    "Identifier '{}' has already been declared",
+                                    name
+                                )));
                             }
                         }
                     }
 
-                    let body = prepend_to_body(body, vec![Statement::VarDecl { kind: var_kind.unwrap(), declarations: destruct_decls }]);
+                    let body = prepend_to_body(
+                        body,
+                        vec![Statement::VarDecl {
+                            kind: var_kind.unwrap(),
+                            declarations: destruct_decls,
+                        }],
+                    );
                     return Ok(Statement::ForIn { var_kind, left: tmp_name, right, body });
                 }
                 if self.check_ident("of") {
@@ -112,16 +143,35 @@ impl<'a> Parser<'a> {
                         Parser::collect_var_declared_names(&body, &mut body_vars);
                         for name in &bound_names {
                             if body_vars.contains(name) {
-                                return Err(ParseError::General(format!("Identifier '{}' has already been declared", name)));
+                                return Err(ParseError::General(format!(
+                                    "Identifier '{}' has already been declared",
+                                    name
+                                )));
                             }
                         }
                     }
 
-                    let body = prepend_to_body(body, vec![Statement::VarDecl { kind: var_kind.unwrap(), declarations: destruct_decls }]);
-                    return Ok(Statement::ForOf { var_kind, left: tmp_name, right, body, is_await });
+                    let body = prepend_to_body(
+                        body,
+                        vec![Statement::VarDecl {
+                            kind: var_kind.unwrap(),
+                            declarations: destruct_decls,
+                        }],
+                    );
+                    return Ok(Statement::ForOf {
+                        var_kind,
+                        left: tmp_name,
+                        right,
+                        body,
+                        is_await,
+                    });
                 }
                 if is_await {
-                    return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        self.current.kind.clone(),
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 let kind = var_kind.unwrap();
                 let init_val = if self.match_token(&TokenKind::Eq)? {
@@ -184,21 +234,39 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokenKind::Semicolon)?;
                 let init = Some(Box::new(Statement::VarDecl { kind, declarations }));
-                let condition = if self.check(&TokenKind::Semicolon) { None } else { Some(self.parse_expression(0)?) };
+                let condition = if self.check(&TokenKind::Semicolon) {
+                    None
+                } else {
+                    Some(self.parse_expression(0)?)
+                };
                 self.expect(TokenKind::Semicolon)?;
-                let update = if self.check(&TokenKind::RParen) { None } else { Some(self.parse_expression(0)?) };
+                let update = if self.check(&TokenKind::RParen) {
+                    None
+                } else {
+                    Some(self.parse_expression(0)?)
+                };
                 self.expect(TokenKind::RParen)?;
                 let body = Box::new(self.parse_sub_statement(false)?);
                 return Ok(Statement::For { init, condition, update, body });
             }
 
             let var_name = self.expect_identifier()?;
-            if (var_kind == Some(VarKind::Let) || var_kind == Some(VarKind::Const)) && var_name == "let" {
-                return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+            if (var_kind == Some(VarKind::Let) || var_kind == Some(VarKind::Const))
+                && var_name == "let"
+            {
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Let,
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             if self.match_token(&TokenKind::In)? {
                 if is_await {
-                    return Err(ParseError::UnexpectedToken(TokenKind::In, self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::In,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 let right = self.parse_expression(0)?;
                 self.expect(TokenKind::RParen)?;
@@ -208,7 +276,10 @@ impl<'a> Parser<'a> {
                     let mut body_vars = Vec::new();
                     Parser::collect_var_declared_names(&body, &mut body_vars);
                     if body_vars.contains(&var_name) {
-                        return Err(ParseError::General(format!("Identifier '{}' has already been declared", var_name)));
+                        return Err(ParseError::General(format!(
+                            "Identifier '{}' has already been declared",
+                            var_name
+                        )));
                     }
                 }
 
@@ -224,14 +295,21 @@ impl<'a> Parser<'a> {
                     let mut body_vars = Vec::new();
                     Parser::collect_var_declared_names(&body, &mut body_vars);
                     if body_vars.contains(&var_name) {
-                        return Err(ParseError::General(format!("Identifier '{}' has already been declared", var_name)));
+                        return Err(ParseError::General(format!(
+                            "Identifier '{}' has already been declared",
+                            var_name
+                        )));
                     }
                 }
 
                 return Ok(Statement::ForOf { var_kind, left: var_name, right, body, is_await });
             }
             if is_await {
-                return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    self.current.kind.clone(),
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             let kind = match kind_tok.kind {
                 TokenKind::Let => VarKind::Let,
@@ -251,7 +329,11 @@ impl<'a> Parser<'a> {
             while self.match_token(&TokenKind::Comma)? {
                 let n = self.expect_identifier()?;
                 if (kind == VarKind::Let || kind == VarKind::Const) && n == "let" {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Let,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 let iv = if self.match_token(&TokenKind::Eq)? {
                     let old_in = self.allow_in;
@@ -266,9 +348,14 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokenKind::Semicolon)?;
             let init = Some(Box::new(Statement::VarDecl { kind, declarations }));
-            let condition = if self.check(&TokenKind::Semicolon) { None } else { Some(self.parse_expression(0)?) };
+            let condition = if self.check(&TokenKind::Semicolon) {
+                None
+            } else {
+                Some(self.parse_expression(0)?)
+            };
             self.expect(TokenKind::Semicolon)?;
-            let update = if self.check(&TokenKind::RParen) { None } else { Some(self.parse_expression(0)?) };
+            let update =
+                if self.check(&TokenKind::RParen) { None } else { Some(self.parse_expression(0)?) };
             self.expect(TokenKind::RParen)?;
             let body = Box::new(self.parse_sub_statement(false)?);
 
@@ -278,7 +365,10 @@ impl<'a> Parser<'a> {
                 if let Some(Statement::VarDecl { declarations: decls, .. }) = init.as_deref() {
                     for d in decls {
                         if !d.name.starts_with('@') && body_vars.contains(&d.name) {
-                            return Err(ParseError::General(format!("Identifier '{}' has already been declared", d.name)));
+                            return Err(ParseError::General(format!(
+                                "Identifier '{}' has already been declared",
+                                d.name
+                            )));
                         }
                     }
                 }
@@ -289,7 +379,11 @@ impl<'a> Parser<'a> {
 
         let init = if self.match_token(&TokenKind::Semicolon)? {
             if is_await {
-                return Err(ParseError::UnexpectedToken(TokenKind::Semicolon, self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Semicolon,
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             None
         } else {
@@ -300,7 +394,11 @@ impl<'a> Parser<'a> {
             let expr = expr_res?;
             if self.match_token(&TokenKind::In)? {
                 if is_await {
-                    return Err(ParseError::UnexpectedToken(TokenKind::In, self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::In,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 self.validate_assignment_pattern(&expr)?;
                 let right = self.parse_expression(0)?;
@@ -318,9 +416,18 @@ impl<'a> Parser<'a> {
                         let tmp_name = format!("@destruct_for_{}", self.destruct_counter);
                         self.destruct_counter += 1;
                         let mut assign_stmts = Vec::new();
-                        self.desugar_assignment_destructuring(other, Expression::Identifier(tmp_name.clone()), &mut assign_stmts);
+                        self.desugar_assignment_destructuring(
+                            other,
+                            Expression::Identifier(tmp_name.clone()),
+                            &mut assign_stmts,
+                        );
                         let body = prepend_to_body(body, assign_stmts);
-                        Ok(Statement::ForIn { var_kind: Some(VarKind::Let), left: tmp_name, right, body })
+                        Ok(Statement::ForIn {
+                            var_kind: Some(VarKind::Let),
+                            left: tmp_name,
+                            right,
+                            body,
+                        })
                     }
                 };
             }
@@ -335,29 +442,49 @@ impl<'a> Parser<'a> {
                     unwrapped = inner;
                 }
                 return match unwrapped {
-                    Expression::Identifier(n) => {
-                        Ok(Statement::ForOf { var_kind: None, left: n.clone(), right, body, is_await })
-                    }
+                    Expression::Identifier(n) => Ok(Statement::ForOf {
+                        var_kind: None,
+                        left: n.clone(),
+                        right,
+                        body,
+                        is_await,
+                    }),
                     other => {
                         let tmp_name = format!("@destruct_for_{}", self.destruct_counter);
                         self.destruct_counter += 1;
                         let mut assign_stmts = Vec::new();
-                        self.desugar_assignment_destructuring(other, Expression::Identifier(tmp_name.clone()), &mut assign_stmts);
+                        self.desugar_assignment_destructuring(
+                            other,
+                            Expression::Identifier(tmp_name.clone()),
+                            &mut assign_stmts,
+                        );
                         let body = prepend_to_body(body, assign_stmts);
-                        Ok(Statement::ForOf { var_kind: Some(VarKind::Let), left: tmp_name, right, body, is_await })
+                        Ok(Statement::ForOf {
+                            var_kind: Some(VarKind::Let),
+                            left: tmp_name,
+                            right,
+                            body,
+                            is_await,
+                        })
                     }
                 };
             }
             if is_await {
-                return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    self.current.kind.clone(),
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             self.expect(TokenKind::Semicolon)?;
             Some(Box::new(Statement::Expression(expr)))
         };
 
-        let condition = if self.check(&TokenKind::Semicolon) { None } else { Some(self.parse_expression(0)?) };
+        let condition =
+            if self.check(&TokenKind::Semicolon) { None } else { Some(self.parse_expression(0)?) };
         self.expect(TokenKind::Semicolon)?;
-        let update = if self.check(&TokenKind::RParen) { None } else { Some(self.parse_expression(0)?) };
+        let update =
+            if self.check(&TokenKind::RParen) { None } else { Some(self.parse_expression(0)?) };
         self.expect(TokenKind::RParen)?;
         let body = Box::new(self.parse_sub_statement(false)?);
         Ok(Statement::For { init, condition, update, body })

@@ -21,7 +21,8 @@ pub(super) fn register_group_by(vm: &mut Vm) -> JsValue {
         }
         for i in 0..len {
             let item = vm.get_element(items, i);
-            let key_val = vm.call(callback, JsValue::undefined(), &[item, JsValue::from_int32(i as i32)])?;
+            let key_val =
+                vm.call(callback, JsValue::undefined(), &[item, JsValue::from_int32(i as i32)])?;
             let key_str = vm.to_string_value(key_val);
             let existing = vm.get_property(out_obj, &key_str);
             if existing.is_undefined() {

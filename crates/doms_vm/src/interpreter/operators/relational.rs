@@ -3,18 +3,38 @@
 use super::*;
 
 impl Vm {
-    pub fn abstract_relational_comparison(&mut self, x: JsValue, y: JsValue) -> Result<Option<std::cmp::Ordering>, VmError> {
+    pub fn abstract_relational_comparison(
+        &mut self,
+        x: JsValue,
+        y: JsValue,
+    ) -> Result<Option<std::cmp::Ordering>, VmError> {
         let px = self.to_primitive(x, PreferredType::Number)?;
         let py = self.to_primitive(y, PreferredType::Number)?;
 
-        let px_is_sym = px.is_symbol() || (px.is_object() && px.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))));
-        let py_is_sym = py.is_symbol() || (py.is_object() && py.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))));
+        let px_is_sym = px.is_symbol()
+            || (px.is_object()
+                && px.as_object_ptr().is_some_and(|p| {
+                    matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))
+                }));
+        let py_is_sym = py.is_symbol()
+            || (py.is_object()
+                && py.as_object_ptr().is_some_and(|p| {
+                    matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))
+                }));
         if px_is_sym || py_is_sym {
             return Err(VmError::TypeError("Cannot convert a Symbol value to a number".into()));
         }
 
-        let px_is_str = px.is_string() || (px.is_object() && px.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))));
-        let py_is_str = py.is_string() || (py.is_object() && py.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))));
+        let px_is_str = px.is_string()
+            || (px.is_object()
+                && px.as_object_ptr().is_some_and(|p| {
+                    matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))
+                }));
+        let py_is_str = py.is_string()
+            || (py.is_object()
+                && py.as_object_ptr().is_some_and(|p| {
+                    matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))
+                }));
 
         if px_is_str && py_is_str {
             let sx = self.to_string_value(px);

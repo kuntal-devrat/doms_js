@@ -1,7 +1,6 @@
 [book]
 authors = ["DOMS Contributors"]
 language = "en"
-multilingual = false
 src = "src"
 title = "The DOMS.js Architecture Guide"
 

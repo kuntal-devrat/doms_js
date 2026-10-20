@@ -249,13 +249,12 @@ fn test_repeated_sweep_after_free_chunk_split_preserves_later_live_objects() {
     // the nursery is wrongly considered empty, reset, and C gets overwritten.
     let mut roots = vec![c];
     nursery.scavenge(&mut roots);
-    assert!(
-        nursery.bytes_allocated > 0,
-        "live object C must keep the nursery from resetting"
-    );
+    assert!(nursery.bytes_allocated > 0, "live object C must keep the nursery from resetting");
 
     // Allocate until the nursery is full: no allocation may reuse C's address.
-    unsafe { *(c as *mut u64) = 0x1122_3344_5566_7788; }
+    unsafe {
+        *(c as *mut u64) = 0x1122_3344_5566_7788;
+    }
     while let Some(p) = nursery.allocate(96, TypeTag::Object) {
         assert_ne!(p, c, "allocation reused a live object's address");
     }

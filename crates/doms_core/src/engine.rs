@@ -8,8 +8,8 @@
 
 use crate::value::JsValue;
 use doms_gc::heap::{Heap, HeapConfig};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Handle for asynchronously interrupting JavaScript execution from another thread.
 #[derive(Debug, Clone, Default)]
@@ -20,9 +20,7 @@ pub struct InterruptHandle {
 impl InterruptHandle {
     /// Create a new un-triggered interrupt handle.
     pub fn new() -> Self {
-        Self {
-            interrupted: Arc::new(AtomicBool::new(false)),
-        }
+        Self { interrupted: Arc::new(AtomicBool::new(false)) }
     }
 
     /// Trigger an interruption, causing the associated isolate to abort execution promptly.
@@ -358,8 +356,14 @@ mod tests {
         let mut isolate = engine.create_isolate();
         let mut ctx = isolate.create_context();
 
-        ctx.load_module("calc", "export var factor = 2; export function double(x) { return x * 2; }").unwrap();
-        let mod_res = ctx.eval_module("import { factor, double } from 'calc'; export var res = double(21);").unwrap();
+        ctx.load_module(
+            "calc",
+            "export var factor = 2; export function double(x) { return x * 2; }",
+        )
+        .unwrap();
+        let mod_res = ctx
+            .eval_module("import { factor, double } from 'calc'; export var res = double(21);")
+            .unwrap();
         let val = ctx.isolate.vm.get_property(mod_res, "res").to_int32();
         assert_eq!(val, Some(42));
     }
@@ -400,7 +404,7 @@ mod tests {
         let mut isolate = engine.create_isolate();
 
         let val_bool = true.into_js(&mut isolate.vm);
-        assert_eq!(bool::from_js(val_bool, &mut isolate.vm).unwrap(), true);
+        assert!(bool::from_js(val_bool, &mut isolate.vm).unwrap());
 
         let val_i32 = 42i32.into_js(&mut isolate.vm);
         assert_eq!(i32::from_js(val_i32, &mut isolate.vm).unwrap(), 42);
@@ -436,8 +440,9 @@ mod tests {
         ctx.isolate.vm.scavenge_nursery();
         ctx.isolate.vm.gc_collect();
 
-        let res = ctx.eval("[1, 2, 3].map(function (x) { return x * 2; }).join(',') === '2,4,6'").unwrap();
+        let res = ctx
+            .eval("[1, 2, 3].map(function (x) { return x * 2; }).join(',') === '2,4,6'")
+            .unwrap();
         assert_eq!(res.as_boolean(), Some(true));
     }
 }
-

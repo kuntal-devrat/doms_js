@@ -17,7 +17,10 @@ impl Vm {
             Ok(Some(val)) => {
                 if val.is_uninitialized() {
                     self.handle_exception_at_depth(
-                        VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                        VmError::ReferenceError(format!(
+                            "Cannot access '{}' before initialization",
+                            name
+                        )),
                         target_depth,
                     )?;
                     return Ok(None);
@@ -48,7 +51,10 @@ impl Vm {
             Ok(Some(val)) => {
                 if val.is_uninitialized() {
                     self.handle_exception_at_depth(
-                        VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                        VmError::ReferenceError(format!(
+                            "Cannot access '{}' before initialization",
+                            name
+                        )),
                         target_depth,
                     )?;
                     return Ok(None);
@@ -56,7 +62,10 @@ impl Vm {
                 self.push(val);
             }
             Ok(None) => {
-                self.handle_exception_at_depth(VmError::ReferenceError(format!("{} is not defined", name)), target_depth)?;
+                self.handle_exception_at_depth(
+                    VmError::ReferenceError(format!("{} is not defined", name)),
+                    target_depth,
+                )?;
             }
             Err(e) => {
                 self.handle_exception_at_depth(e, target_depth)?;

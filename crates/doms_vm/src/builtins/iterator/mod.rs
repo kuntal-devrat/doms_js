@@ -1,7 +1,9 @@
 //! The `Iterator` built-in object and prototype hierarchy.
 
 use crate::interpreter::{Vm, VmError};
-use crate::object::{ArrayIterationKind as IterKind, JsObject, MapIterationKind, ObjectKind, SetIterationKind};
+use crate::object::{
+    ArrayIterationKind as IterKind, JsObject, MapIterationKind, ObjectKind, SetIterationKind,
+};
 use crate::value::JsValue;
 
 pub mod concat;
@@ -58,7 +60,10 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
                             let el = vm.get_element_result(cur_target, curr_idx)?;
                             let prev = vm.temp_roots.len();
                             vm.temp_roots.push(el);
-                            let arr = vm.alloc_array(vec![JsValue::from_int32(curr_idx as i32), vm.temp_roots[prev]]);
+                            let arr = vm.alloc_array(vec![
+                                JsValue::from_int32(curr_idx as i32),
+                                vm.temp_roots[prev],
+                            ]);
                             vm.temp_roots.truncate(prev);
                             arr
                         }
@@ -69,7 +74,9 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
                 }
             }
         }
-        Err(VmError::TypeError("%ArrayIteratorPrototype%.next called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "%ArrayIteratorPrototype%.next called on incompatible receiver".into(),
+        ))
     });
     vm.set_property(array_iter_proto, "next", array_iter_next);
     vm.set_property_non_enumerable(array_iter_proto, "next".to_string());
@@ -112,7 +119,9 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
                 return vm.alloc_iter_result(JsValue::undefined(), true);
             }
         }
-        Err(VmError::TypeError("%MapIteratorPrototype%.next called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "%MapIteratorPrototype%.next called on incompatible receiver".into(),
+        ))
     });
     vm.set_property(map_iter_proto, "next", map_iter_next);
     vm.set_property_non_enumerable(map_iter_proto, "next".to_string());
@@ -154,7 +163,9 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
                 return vm.alloc_iter_result(JsValue::undefined(), true);
             }
         }
-        Err(VmError::TypeError("%SetIteratorPrototype%.next called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "%SetIteratorPrototype%.next called on incompatible receiver".into(),
+        ))
     });
     vm.set_property(set_iter_proto, "next", set_iter_next);
     vm.set_property_non_enumerable(set_iter_proto, "next".to_string());
@@ -188,7 +199,9 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
                 }
             }
         }
-        Err(VmError::TypeError("%StringIteratorPrototype%.next called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "%StringIteratorPrototype%.next called on incompatible receiver".into(),
+        ))
     });
     vm.set_property(string_iter_proto, "next", string_iter_next);
     vm.set_property_non_enumerable(string_iter_proto, "next".to_string());
@@ -215,12 +228,16 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
     // 9. Iterator Constructor
     let iter_ctor = vm.alloc_native_function("Iterator", 0, |vm, this, _args| {
         if !vm.is_constructing {
-            return Err(VmError::TypeError("Iterator constructor cannot be invoked without 'new'".into()));
+            return Err(VmError::TypeError(
+                "Iterator constructor cannot be invoked without 'new'".into(),
+            ));
         }
         let iter_ctor_val = vm.globals.get("Iterator").copied().unwrap_or(JsValue::undefined());
         let new_target = vm.current_new_target;
         if new_target.is_none() || new_target == Some(iter_ctor_val) {
-            return Err(VmError::TypeError("Iterator is an abstract constructor and cannot be directly instantiated".into()));
+            return Err(VmError::TypeError(
+                "Iterator is an abstract constructor and cannot be directly instantiated".into(),
+            ));
         }
         Ok(this)
     });
@@ -243,16 +260,13 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
     vm.set_property_non_enumerable(iter_ctor, "from".to_string());
 
     // Static method: Iterator.concat
-    let concat_fn = vm.alloc_native_function("concat", 0, |vm, _this, args| {
-        iterator_concat(vm, args)
-    });
+    let concat_fn =
+        vm.alloc_native_function("concat", 0, |vm, _this, args| iterator_concat(vm, args));
     vm.set_property(iter_ctor, "concat", concat_fn);
     vm.set_property_non_enumerable(iter_ctor, "concat".to_string());
 
     // Static method: Iterator.zip
-    let zip_fn = vm.alloc_native_function("zip", 1, |vm, _this, args| {
-        iterator_zip(vm, args)
-    });
+    let zip_fn = vm.alloc_native_function("zip", 1, |vm, _this, args| iterator_zip(vm, args));
     vm.set_property(iter_ctor, "zip", zip_fn);
     vm.set_property_non_enumerable(iter_ctor, "zip".to_string());
 

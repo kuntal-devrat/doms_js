@@ -1,6 +1,6 @@
 //! %IteratorHelperPrototype% implementation.
 
-use crate::builtins::promise::iterator::{iterator_close, IteratorRecord};
+use crate::builtins::promise::iterator::{IteratorRecord, iterator_close};
 use crate::interpreter::{Vm, VmError};
 use crate::object::{IteratorHelperKind, JsObject, ObjectKind};
 use crate::value::JsValue;
@@ -30,7 +30,15 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
     let next_fn = vm.alloc_native_function("next", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::IteratorHelper { kind, iterator, next_method, done, index, executing } = &mut obj.kind {
+            if let ObjectKind::IteratorHelper {
+                kind,
+                iterator,
+                next_method,
+                done,
+                index,
+                executing,
+            } = &mut obj.kind
+            {
                 if *done {
                     return vm.alloc_iter_result(JsValue::undefined(), true);
                 }
@@ -52,7 +60,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
@@ -60,16 +72,25 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                             if !step.is_object() {
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
                                 }
-                                return Err(VmError::TypeError("Iterator step must be an object".into()));
+                                return Err(VmError::TypeError(
+                                    "Iterator step must be an object".into(),
+                                ));
                             }
                             let step_done = match vm.get_property_result(step, "done") {
                                 Ok(d) => d.is_truthy(),
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
@@ -77,7 +98,10 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                             if step_done {
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
                                 }
                                 return vm.alloc_iter_result(JsValue::undefined(), true);
                             }
@@ -86,26 +110,44 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
                             };
-                            let mapped = vm.call(cur_mapper, JsValue::undefined(), &[val, JsValue::from_int32(cur_idx as i32)]);
+                            let mapped = vm.call(
+                                cur_mapper,
+                                JsValue::undefined(),
+                                &[val, JsValue::from_int32(cur_idx as i32)],
+                            );
                             let mapped_val = match mapped {
                                 Ok(v) => v,
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
-                                    let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                    let rec = IteratorRecord {
+                                        iterator: cur_iter,
+                                        next_method: cur_next,
+                                        done: false,
+                                    };
                                     return Err(iterator_close(vm, &rec, Some(e)));
                                 }
                             };
                             if let Some(p) = this.as_object_ptr() {
                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                if let ObjectKind::IteratorHelper { index: idx, .. } = &mut o.kind { *idx += 1; }
+                                if let ObjectKind::IteratorHelper { index: idx, .. } = &mut o.kind {
+                                    *idx += 1;
+                                }
                             }
                             vm.alloc_iter_result(mapped_val, false)
                         }
@@ -118,7 +160,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
                                         return Err(e);
                                     }
@@ -126,16 +172,26 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 if !step.is_object() {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
-                                    return Err(VmError::TypeError("Iterator step must be an object".into()));
+                                    return Err(VmError::TypeError(
+                                        "Iterator step must be an object".into(),
+                                    ));
                                 }
                                 let step_done = match vm.get_property_result(step, "done") {
                                     Ok(d) => d.is_truthy(),
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
                                         return Err(e);
                                     }
@@ -143,7 +199,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 if step_done {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return vm.alloc_iter_result(JsValue::undefined(), true);
                                 }
@@ -152,30 +212,56 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
                                         return Err(e);
                                     }
                                 };
                                 let cur_i = if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &*(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { index: idx, .. } = &o.kind { *idx } else { 0 }
-                                } else { 0 };
-                                let selected = vm.call(cur_pred, JsValue::undefined(), &[val, JsValue::from_int32(cur_i as i32)]);
+                                    if let ObjectKind::IteratorHelper { index: idx, .. } = &o.kind {
+                                        *idx
+                                    } else {
+                                        0
+                                    }
+                                } else {
+                                    0
+                                };
+                                let selected = vm.call(
+                                    cur_pred,
+                                    JsValue::undefined(),
+                                    &[val, JsValue::from_int32(cur_i as i32)],
+                                );
                                 let sel_val = match selected {
                                     Ok(v) => v,
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
-                                        let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                        let rec = IteratorRecord {
+                                            iterator: cur_iter,
+                                            next_method: cur_next,
+                                            done: false,
+                                        };
                                         return Err(iterator_close(vm, &rec, Some(e)));
                                     }
                                 };
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { index: idx, .. } = &mut o.kind { *idx += 1; }
+                                    if let ObjectKind::IteratorHelper { index: idx, .. } =
+                                        &mut o.kind
+                                    {
+                                        *idx += 1;
+                                    }
                                 }
                                 if sel_val.is_truthy() {
                                     return vm.alloc_iter_result(val, false);
@@ -186,9 +272,16 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                             if *remaining <= 0.0 {
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
                                 }
-                                let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                let rec = IteratorRecord {
+                                    iterator: cur_iter,
+                                    next_method: cur_next,
+                                    done: false,
+                                };
                                 iterator_close_normal(vm, &rec)?;
                                 return vm.alloc_iter_result(JsValue::undefined(), true);
                             }
@@ -199,7 +292,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
@@ -207,16 +304,25 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                             if !step.is_object() {
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
                                 }
-                                return Err(VmError::TypeError("Iterator step must be an object".into()));
+                                return Err(VmError::TypeError(
+                                    "Iterator step must be an object".into(),
+                                ));
                             }
                             let step_done = match vm.get_property_result(step, "done") {
                                 Ok(d) => d.is_truthy(),
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
@@ -224,7 +330,10 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                             if step_done {
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
                                 }
                                 return vm.alloc_iter_result(JsValue::undefined(), true);
                             }
@@ -233,7 +342,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
@@ -249,7 +362,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
                                         return Err(e);
                                     }
@@ -257,16 +374,26 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 if !step.is_object() {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
-                                    return Err(VmError::TypeError("Iterator step must be an object".into()));
+                                    return Err(VmError::TypeError(
+                                        "Iterator step must be an object".into(),
+                                    ));
                                 }
                                 let step_done = match vm.get_property_result(step, "done") {
                                     Ok(d) => d.is_truthy(),
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
                                         return Err(e);
                                     }
@@ -274,7 +401,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 if step_done {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return vm.alloc_iter_result(JsValue::undefined(), true);
                                 }
@@ -285,7 +416,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
@@ -293,16 +428,25 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                             if !step.is_object() {
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
                                 }
-                                return Err(VmError::TypeError("Iterator step must be an object".into()));
+                                return Err(VmError::TypeError(
+                                    "Iterator step must be an object".into(),
+                                ));
                             }
                             let step_done = match vm.get_property_result(step, "done") {
                                 Ok(d) => d.is_truthy(),
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
@@ -310,7 +454,10 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                             if step_done {
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
                                 }
                                 return vm.alloc_iter_result(JsValue::undefined(), true);
                             }
@@ -319,7 +466,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 Err(e) => {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return Err(e);
                                 }
@@ -337,22 +488,53 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                         Err(e) => {
                                             if let Some(p) = this.as_object_ptr() {
                                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                if let ObjectKind::IteratorHelper {
+                                                    done: d, ..
+                                                } = &mut o.kind
+                                                {
+                                                    *d = true;
+                                                }
                                             }
-                                            let in_rec = IteratorRecord { iterator: inner, next_method: in_next, done: false };
+                                            let in_rec = IteratorRecord {
+                                                iterator: inner,
+                                                next_method: in_next,
+                                                done: false,
+                                            };
                                             let err = iterator_close(vm, &in_rec, Some(e));
-                                            let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                            let rec = IteratorRecord {
+                                                iterator: cur_iter,
+                                                next_method: cur_next,
+                                                done: false,
+                                            };
                                             return Err(iterator_close(vm, &rec, Some(err)));
                                         }
                                     };
                                     if !in_step.is_object() {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
-                                        let in_rec = IteratorRecord { iterator: inner, next_method: in_next, done: false };
-                                        let err = iterator_close(vm, &in_rec, Some(VmError::TypeError("Inner step must be an object".into())));
-                                        let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                        let in_rec = IteratorRecord {
+                                            iterator: inner,
+                                            next_method: in_next,
+                                            done: false,
+                                        };
+                                        let err = iterator_close(
+                                            vm,
+                                            &in_rec,
+                                            Some(VmError::TypeError(
+                                                "Inner step must be an object".into(),
+                                            )),
+                                        );
+                                        let rec = IteratorRecord {
+                                            iterator: cur_iter,
+                                            next_method: cur_next,
+                                            done: false,
+                                        };
                                         return Err(iterator_close(vm, &rec, Some(err)));
                                     }
                                     let in_done = match vm.get_property_result(in_step, "done") {
@@ -360,25 +542,53 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                         Err(e) => {
                                             if let Some(p) = this.as_object_ptr() {
                                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                if let ObjectKind::IteratorHelper {
+                                                    done: d, ..
+                                                } = &mut o.kind
+                                                {
+                                                    *d = true;
+                                                }
                                             }
-                                            let in_rec = IteratorRecord { iterator: inner, next_method: in_next, done: false };
+                                            let in_rec = IteratorRecord {
+                                                iterator: inner,
+                                                next_method: in_next,
+                                                done: false,
+                                            };
                                             let err = iterator_close(vm, &in_rec, Some(e));
-                                            let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                            let rec = IteratorRecord {
+                                                iterator: cur_iter,
+                                                next_method: cur_next,
+                                                done: false,
+                                            };
                                             return Err(iterator_close(vm, &rec, Some(err)));
                                         }
                                     };
                                     if !in_done {
-                                        let in_val = match vm.get_property_result(in_step, "value") {
+                                        let in_val = match vm.get_property_result(in_step, "value")
+                                        {
                                             Ok(v) => v,
                                             Err(e) => {
                                                 if let Some(p) = this.as_object_ptr() {
                                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                    if let ObjectKind::IteratorHelper {
+                                                        done: d,
+                                                        ..
+                                                    } = &mut o.kind
+                                                    {
+                                                        *d = true;
+                                                    }
                                                 }
-                                                let in_rec = IteratorRecord { iterator: inner, next_method: in_next, done: false };
+                                                let in_rec = IteratorRecord {
+                                                    iterator: inner,
+                                                    next_method: in_next,
+                                                    done: false,
+                                                };
                                                 let err = iterator_close(vm, &in_rec, Some(e));
-                                                let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                                let rec = IteratorRecord {
+                                                    iterator: cur_iter,
+                                                    next_method: cur_next,
+                                                    done: false,
+                                                };
                                                 return Err(iterator_close(vm, &rec, Some(err)));
                                             }
                                         };
@@ -394,7 +604,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
                                         return Err(e);
                                     }
@@ -402,16 +616,26 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 if !step.is_object() {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
-                                    return Err(VmError::TypeError("Iterator step must be an object".into()));
+                                    return Err(VmError::TypeError(
+                                        "Iterator step must be an object".into(),
+                                    ));
                                 }
                                 let step_done = match vm.get_property_result(step, "done") {
                                     Ok(d) => d.is_truthy(),
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
                                         return Err(e);
                                     }
@@ -419,7 +643,11 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 if step_done {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
                                     return vm.alloc_iter_result(JsValue::undefined(), true);
                                 }
@@ -428,46 +656,100 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
                                         return Err(e);
                                     }
                                 };
                                 let cur_i = if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &*(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { index: idx, .. } = &o.kind { *idx } else { 0 }
-                                } else { 0 };
-                                let mapped = vm.call(cur_mapper, JsValue::undefined(), &[val, JsValue::from_int32(cur_i as i32)]);
+                                    if let ObjectKind::IteratorHelper { index: idx, .. } = &o.kind {
+                                        *idx
+                                    } else {
+                                        0
+                                    }
+                                } else {
+                                    0
+                                };
+                                let mapped = vm.call(
+                                    cur_mapper,
+                                    JsValue::undefined(),
+                                    &[val, JsValue::from_int32(cur_i as i32)],
+                                );
                                 let mapped_val = match mapped {
                                     Ok(v) => v,
                                     Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
-                                        let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                        let rec = IteratorRecord {
+                                            iterator: cur_iter,
+                                            next_method: cur_next,
+                                            done: false,
+                                        };
                                         return Err(iterator_close(vm, &rec, Some(e)));
                                     }
                                 };
                                 if let Some(p) = this.as_object_ptr() {
                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                    if let ObjectKind::IteratorHelper { index: idx, .. } = &mut o.kind { *idx += 1; }
+                                    if let ObjectKind::IteratorHelper { index: idx, .. } =
+                                        &mut o.kind
+                                    {
+                                        *idx += 1;
+                                    }
                                 }
                                 if mapped_val.is_string() {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
-                                    let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
-                                    return Err(iterator_close(vm, &rec, Some(VmError::TypeError("flatMap mapper returned primitive string".into()))));
+                                    let rec = IteratorRecord {
+                                        iterator: cur_iter,
+                                        next_method: cur_next,
+                                        done: false,
+                                    };
+                                    return Err(iterator_close(
+                                        vm,
+                                        &rec,
+                                        Some(VmError::TypeError(
+                                            "flatMap mapper returned primitive string".into(),
+                                        )),
+                                    ));
                                 }
                                 if !mapped_val.is_object() {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
-                                    let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
-                                    return Err(iterator_close(vm, &rec, Some(VmError::TypeError("flatMap mapper returned non-object".into()))));
+                                    let rec = IteratorRecord {
+                                        iterator: cur_iter,
+                                        next_method: cur_next,
+                                        done: false,
+                                    };
+                                    return Err(iterator_close(
+                                        vm,
+                                        &rec,
+                                        Some(VmError::TypeError(
+                                            "flatMap mapper returned non-object".into(),
+                                        )),
+                                    ));
                                 }
 
                                 // Get iterator flattenable
@@ -480,10 +762,26 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                             } else if !vm.is_callable(m) {
                                                 if let Some(p) = this.as_object_ptr() {
                                                     let o = unsafe { &mut *(p as *mut JsObject) };
-                                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                    if let ObjectKind::IteratorHelper {
+                                                        done: d,
+                                                        ..
+                                                    } = &mut o.kind
+                                                    {
+                                                        *d = true;
+                                                    }
                                                 }
-                                                let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
-                                                return Err(iterator_close(vm, &rec, Some(VmError::TypeError("Symbol.iterator not callable".into()))));
+                                                let rec = IteratorRecord {
+                                                    iterator: cur_iter,
+                                                    next_method: cur_next,
+                                                    done: false,
+                                                };
+                                                return Err(iterator_close(
+                                                    vm,
+                                                    &rec,
+                                                    Some(VmError::TypeError(
+                                                        "Symbol.iterator not callable".into(),
+                                                    )),
+                                                ));
                                             } else {
                                                 Some(m)
                                             }
@@ -491,9 +789,18 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                         Err(e) => {
                                             if let Some(p) = this.as_object_ptr() {
                                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                if let ObjectKind::IteratorHelper {
+                                                    done: d, ..
+                                                } = &mut o.kind
+                                                {
+                                                    *d = true;
+                                                }
                                             }
-                                            let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                            let rec = IteratorRecord {
+                                                iterator: cur_iter,
+                                                next_method: cur_next,
+                                                done: false,
+                                            };
                                             return Err(iterator_close(vm, &rec, Some(e)));
                                         }
                                     }
@@ -507,28 +814,60 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                         Err(e) => {
                                             if let Some(p) = this.as_object_ptr() {
                                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                if let ObjectKind::IteratorHelper {
+                                                    done: d, ..
+                                                } = &mut o.kind
+                                                {
+                                                    *d = true;
+                                                }
                                             }
-                                            let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                            let rec = IteratorRecord {
+                                                iterator: cur_iter,
+                                                next_method: cur_next,
+                                                done: false,
+                                            };
                                             return Err(iterator_close(vm, &rec, Some(e)));
                                         }
                                     };
                                     if !iter_obj.is_object() {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
-                                        let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
-                                        return Err(iterator_close(vm, &rec, Some(VmError::TypeError("Symbol.iterator must return an object".into()))));
+                                        let rec = IteratorRecord {
+                                            iterator: cur_iter,
+                                            next_method: cur_next,
+                                            done: false,
+                                        };
+                                        return Err(iterator_close(
+                                            vm,
+                                            &rec,
+                                            Some(VmError::TypeError(
+                                                "Symbol.iterator must return an object".into(),
+                                            )),
+                                        ));
                                     }
                                     let nxt = match vm.get_property_result(iter_obj, "next") {
                                         Ok(n) => n,
                                         Err(e) => {
                                             if let Some(p) = this.as_object_ptr() {
                                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                if let ObjectKind::IteratorHelper {
+                                                    done: d, ..
+                                                } = &mut o.kind
+                                                {
+                                                    *d = true;
+                                                }
                                             }
-                                            let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                            let rec = IteratorRecord {
+                                                iterator: cur_iter,
+                                                next_method: cur_next,
+                                                done: false,
+                                            };
                                             return Err(iterator_close(vm, &rec, Some(e)));
                                         }
                                     };
@@ -539,9 +878,18 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                         Err(e) => {
                                             if let Some(p) = this.as_object_ptr() {
                                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                if let ObjectKind::IteratorHelper {
+                                                    done: d, ..
+                                                } = &mut o.kind
+                                                {
+                                                    *d = true;
+                                                }
                                             }
-                                            let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                                            let rec = IteratorRecord {
+                                                iterator: cur_iter,
+                                                next_method: cur_next,
+                                                done: false,
+                                            };
                                             return Err(iterator_close(vm, &rec, Some(e)));
                                         }
                                     };
@@ -551,101 +899,154 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                                 if !vm.is_callable(in_nx) {
                                     if let Some(p) = this.as_object_ptr() {
                                         let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
                                     }
-                                    let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
-                                    return Err(iterator_close(vm, &rec, Some(VmError::TypeError("inner iterator next is not callable".into()))));
+                                    let rec = IteratorRecord {
+                                        iterator: cur_iter,
+                                        next_method: cur_next,
+                                        done: false,
+                                    };
+                                    return Err(iterator_close(
+                                        vm,
+                                        &rec,
+                                        Some(VmError::TypeError(
+                                            "inner iterator next is not callable".into(),
+                                        )),
+                                    ));
                                 }
 
                                 *inner_iter = Some(in_it);
                                 *inner_next = Some(in_nx);
                             }
                         }
-                        IteratorHelperKind::Concat { iterables, current_idx, current_iter, current_next } => {
-                            loop {
-                                if let Some(in_it) = *current_iter {
-                                    let in_nxt = (*current_next).unwrap();
-                                    let step_res = vm.call(in_nxt, in_it, &[]);
-                                    let step = match step_res {
-                                        Ok(s) => s,
-                                        Err(e) => {
-                                            if let Some(p) = this.as_object_ptr() {
-                                                let o = unsafe { &mut *(p as *mut JsObject) };
-                                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
-                                            }
-                                            return Err(e);
-                                        }
-                                    };
-                                    if !step.is_object() {
+                        IteratorHelperKind::Concat {
+                            iterables,
+                            current_idx,
+                            current_iter,
+                            current_next,
+                        } => loop {
+                            if let Some(in_it) = *current_iter {
+                                let in_nxt = (*current_next).unwrap();
+                                let step_res = vm.call(in_nxt, in_it, &[]);
+                                let step = match step_res {
+                                    Ok(s) => s,
+                                    Err(e) => {
                                         if let Some(p) = this.as_object_ptr() {
                                             let o = unsafe { &mut *(p as *mut JsObject) };
-                                            if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
                                         }
-                                        return Err(VmError::TypeError("Iterator step must be an object".into()));
+                                        return Err(e);
                                     }
-                                    let step_done = match vm.get_property_result(step, "done") {
-                                        Ok(d) => d.is_truthy(),
+                                };
+                                if !step.is_object() {
+                                    if let Some(p) = this.as_object_ptr() {
+                                        let o = unsafe { &mut *(p as *mut JsObject) };
+                                        if let ObjectKind::IteratorHelper { done: d, .. } =
+                                            &mut o.kind
+                                        {
+                                            *d = true;
+                                        }
+                                    }
+                                    return Err(VmError::TypeError(
+                                        "Iterator step must be an object".into(),
+                                    ));
+                                }
+                                let step_done = match vm.get_property_result(step, "done") {
+                                    Ok(d) => d.is_truthy(),
+                                    Err(e) => {
+                                        if let Some(p) = this.as_object_ptr() {
+                                            let o = unsafe { &mut *(p as *mut JsObject) };
+                                            if let ObjectKind::IteratorHelper { done: d, .. } =
+                                                &mut o.kind
+                                            {
+                                                *d = true;
+                                            }
+                                        }
+                                        return Err(e);
+                                    }
+                                };
+                                if !step_done {
+                                    let val = match vm.get_property_result(step, "value") {
+                                        Ok(v) => v,
                                         Err(e) => {
                                             if let Some(p) = this.as_object_ptr() {
                                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                                if let ObjectKind::IteratorHelper {
+                                                    done: d, ..
+                                                } = &mut o.kind
+                                                {
+                                                    *d = true;
+                                                }
                                             }
                                             return Err(e);
                                         }
                                     };
-                                    if !step_done {
-                                        let val = match vm.get_property_result(step, "value") {
-                                            Ok(v) => v,
-                                            Err(e) => {
-                                                if let Some(p) = this.as_object_ptr() {
-                                                    let o = unsafe { &mut *(p as *mut JsObject) };
-                                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
-                                                }
-                                                return Err(e);
-                                            }
-                                        };
-                                        return vm.alloc_iter_result(val, false);
-                                    }
-                                    *current_iter = None;
-                                    *current_next = None;
+                                    return vm.alloc_iter_result(val, false);
                                 }
-
-                                if *current_idx >= iterables.len() {
-                                    if let Some(p) = this.as_object_ptr() {
-                                        let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
-                                    }
-                                    return vm.alloc_iter_result(JsValue::undefined(), true);
-                                }
-
-                                let item = iterables[*current_idx];
-                                *current_idx += 1;
-                                let sym_iter = vm.symbol_iterator.ok_or_else(|| VmError::TypeError("Symbol.iterator not found".into()))?;
-                                let iter_fn = vm.get_symbol_property_result(item, sym_iter)?;
-                                let it = vm.call(iter_fn, item, &[])?;
-                                if !it.is_object() {
-                                    if let Some(p) = this.as_object_ptr() {
-                                        let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
-                                    }
-                                    return Err(VmError::TypeError("Symbol.iterator must return an object".into()));
-                                }
-                                let nxt = vm.get_property_result(it, "next")?;
-                                if !vm.is_callable(nxt) {
-                                    if let Some(p) = this.as_object_ptr() {
-                                        let o = unsafe { &mut *(p as *mut JsObject) };
-                                        if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
-                                    }
-                                    return Err(VmError::TypeError("next method is not callable".into()));
-                                }
-                                *current_iter = Some(it);
-                                *current_next = Some(nxt);
+                                *current_iter = None;
+                                *current_next = None;
                             }
-                        }
+
+                            if *current_idx >= iterables.len() {
+                                if let Some(p) = this.as_object_ptr() {
+                                    let o = unsafe { &mut *(p as *mut JsObject) };
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
+                                }
+                                return vm.alloc_iter_result(JsValue::undefined(), true);
+                            }
+
+                            let item = iterables[*current_idx];
+                            *current_idx += 1;
+                            let sym_iter = vm.symbol_iterator.ok_or_else(|| {
+                                VmError::TypeError("Symbol.iterator not found".into())
+                            })?;
+                            let iter_fn = vm.get_symbol_property_result(item, sym_iter)?;
+                            let it = vm.call(iter_fn, item, &[])?;
+                            if !it.is_object() {
+                                if let Some(p) = this.as_object_ptr() {
+                                    let o = unsafe { &mut *(p as *mut JsObject) };
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
+                                }
+                                return Err(VmError::TypeError(
+                                    "Symbol.iterator must return an object".into(),
+                                ));
+                            }
+                            let nxt = vm.get_property_result(it, "next")?;
+                            if !vm.is_callable(nxt) {
+                                if let Some(p) = this.as_object_ptr() {
+                                    let o = unsafe { &mut *(p as *mut JsObject) };
+                                    if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind
+                                    {
+                                        *d = true;
+                                    }
+                                }
+                                return Err(VmError::TypeError(
+                                    "next method is not callable".into(),
+                                ));
+                            }
+                            *current_iter = Some(it);
+                            *current_next = Some(nxt);
+                        },
                         _ => {
                             if let Some(p) = this.as_object_ptr() {
                                 let o = unsafe { &mut *(p as *mut JsObject) };
-                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind { *d = true; }
+                                if let ObjectKind::IteratorHelper { done: d, .. } = &mut o.kind {
+                                    *d = true;
+                                }
                             }
                             vm.alloc_iter_result(JsValue::undefined(), true)
                         }
@@ -661,7 +1062,9 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                 return res;
             }
         }
-        Err(VmError::TypeError("%IteratorHelperPrototype%.next called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "%IteratorHelperPrototype%.next called on incompatible receiver".into(),
+        ))
     });
     vm.set_property(helper_proto, "next", next_fn);
     vm.set_property_non_enumerable(helper_proto, "next".to_string());
@@ -669,7 +1072,10 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
     let return_fn = vm.alloc_native_function("return", 0, |vm, this, _args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::IteratorHelper { kind, iterator, next_method, done, executing, .. } = &mut obj.kind {
+            if let ObjectKind::IteratorHelper {
+                kind, iterator, next_method, done, executing, ..
+            } = &mut obj.kind
+            {
                 if *done {
                     return vm.alloc_iter_result(JsValue::undefined(), true);
                 }
@@ -682,22 +1088,33 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                 let cur_next = *next_method;
 
                 let close_res = (|| -> Result<(), VmError> {
-                    if let IteratorHelperKind::FlatMap { inner_iter, inner_next, .. } = kind.as_mut() {
+                    if let IteratorHelperKind::FlatMap { inner_iter, inner_next, .. } =
+                        kind.as_mut()
+                    {
                         if let Some(inner) = *inner_iter {
                             let nx = (*inner_next).unwrap();
-                            let in_rec = IteratorRecord { iterator: inner, next_method: nx, done: false };
+                            let in_rec =
+                                IteratorRecord { iterator: inner, next_method: nx, done: false };
                             iterator_close_normal(vm, &in_rec)?;
                         }
                     }
                     if let IteratorHelperKind::Concat { current_iter, .. } = kind.as_mut() {
                         if let Some(inner) = *current_iter {
-                            let in_rec = IteratorRecord { iterator: inner, next_method: JsValue::undefined(), done: false };
+                            let in_rec = IteratorRecord {
+                                iterator: inner,
+                                next_method: JsValue::undefined(),
+                                done: false,
+                            };
                             iterator_close_normal(vm, &in_rec)?;
                         }
                     }
 
                     if cur_iter.is_object() {
-                        let rec = IteratorRecord { iterator: cur_iter, next_method: cur_next, done: false };
+                        let rec = IteratorRecord {
+                            iterator: cur_iter,
+                            next_method: cur_next,
+                            done: false,
+                        };
                         iterator_close_normal(vm, &rec)?;
                     }
                     Ok(())
@@ -713,7 +1130,9 @@ pub fn register_iterator_helper_proto(vm: &mut Vm, iter_proto: JsValue) -> JsVal
                 return vm.alloc_iter_result(JsValue::undefined(), true);
             }
         }
-        Err(VmError::TypeError("%IteratorHelperPrototype%.return called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "%IteratorHelperPrototype%.return called on incompatible receiver".into(),
+        ))
     });
     vm.set_property(helper_proto, "return", return_fn);
     vm.set_property_non_enumerable(helper_proto, "return".to_string());

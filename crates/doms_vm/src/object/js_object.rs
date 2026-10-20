@@ -91,25 +91,34 @@ impl JsObject {
     }
 
     pub fn insert_private_element(&mut self, name: String, val: JsValue) {
-        let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let privs =
+            self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         privs.insert(name, PrivateElement::Value(val));
     }
 
     pub fn insert_private_getter(&mut self, name: String, getter: JsValue) {
-        let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        let entry = privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor::default()));
+        let privs =
+            self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let entry =
+            privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor::default()));
         match entry {
             PrivateElement::Accessor(acc) => acc.getter = Some(getter),
-            PrivateElement::Value(_) => *entry = PrivateElement::Accessor(Accessor::with_getter(getter)),
+            PrivateElement::Value(_) => {
+                *entry = PrivateElement::Accessor(Accessor::with_getter(getter))
+            }
         }
     }
 
     pub fn insert_private_setter(&mut self, name: String, setter: JsValue) {
-        let privs = self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        let entry = privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor::default()));
+        let privs =
+            self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let entry =
+            privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor::default()));
         match entry {
             PrivateElement::Accessor(acc) => acc.setter = Some(setter),
-            PrivateElement::Value(_) => *entry = PrivateElement::Accessor(Accessor::with_setter(setter)),
+            PrivateElement::Value(_) => {
+                *entry = PrivateElement::Accessor(Accessor::with_setter(setter))
+            }
         }
     }
 
@@ -122,7 +131,9 @@ impl JsObject {
     }
 
     pub fn insert_symbol_property(&mut self, sym: JsValue, val: JsValue) {
-        let syms = self.symbol_properties.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let syms = self
+            .symbol_properties
+            .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         syms.insert(sym, val);
         let order = self.symbol_order.get_or_insert_with(Vec::new);
         if !order.contains(&sym) {
@@ -131,12 +142,15 @@ impl JsObject {
     }
 
     pub fn set_symbol_attributes(&mut self, sym: JsValue, attrs: PropertyAttributes) {
-        let attrs_map = self.symbol_attributes.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let attrs_map = self
+            .symbol_attributes
+            .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         attrs_map.insert(sym, attrs);
     }
 
     pub fn insert_symbol_accessor_getter(&mut self, sym: JsValue, getter: JsValue) {
-        let accs = self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let accs =
+            self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         accs.entry(sym).or_default().getter = Some(getter);
         let order = self.symbol_order.get_or_insert_with(Vec::new);
         if !order.contains(&sym) {
@@ -145,7 +159,8 @@ impl JsObject {
     }
 
     pub fn insert_symbol_accessor_setter(&mut self, sym: JsValue, setter: JsValue) {
-        let accs = self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let accs =
+            self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         accs.entry(sym).or_default().setter = Some(setter);
         let order = self.symbol_order.get_or_insert_with(Vec::new);
         if !order.contains(&sym) {
@@ -157,15 +172,15 @@ impl JsObject {
         Self::new_with_kind(shape_id, prototype, ObjectKind::Ordinary)
     }
 
-    pub fn new_array(shape_id: ShapeId, prototype: Option<JsValue>, elements: Vec<JsValue>) -> Self {
+    pub fn new_array(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        elements: Vec<JsValue>,
+    ) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::Array(elements))
     }
 
-    pub fn new_function(
-        shape_id: ShapeId,
-        prototype: Option<JsValue>,
-        func: JsFunction,
-    ) -> Self {
+    pub fn new_function(shape_id: ShapeId, prototype: Option<JsValue>, func: JsFunction) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::Function(func))
     }
 
@@ -177,11 +192,7 @@ impl JsObject {
         Self::new_with_kind(shape_id, prototype, ObjectKind::NativeFunction(native))
     }
 
-    pub fn new_string(
-        shape_id: ShapeId,
-        prototype: Option<JsValue>,
-        content: String,
-    ) -> Self {
+    pub fn new_string(shape_id: ShapeId, prototype: Option<JsValue>, content: String) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::String(content))
     }
 
@@ -212,19 +223,11 @@ impl JsObject {
         Self::new_with_kind(shape_id, prototype, ObjectKind::StringObject(content))
     }
 
-    pub fn new_number_object(
-        shape_id: ShapeId,
-        prototype: Option<JsValue>,
-        value: f64,
-    ) -> Self {
+    pub fn new_number_object(shape_id: ShapeId, prototype: Option<JsValue>, value: f64) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::NumberObject(value))
     }
 
-    pub fn new_boolean_object(
-        shape_id: ShapeId,
-        prototype: Option<JsValue>,
-        value: bool,
-    ) -> Self {
+    pub fn new_boolean_object(shape_id: ShapeId, prototype: Option<JsValue>, value: bool) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::BooleanObject(value))
     }
 
@@ -243,12 +246,16 @@ impl JsObject {
         state: PromiseState,
         result: JsValue,
     ) -> Self {
-        Self::new_with_kind(shape_id, prototype, ObjectKind::Promise(JsPromise {
-            state,
-            result,
-            fulfill_reactions: Vec::new(),
-            reject_reactions: Vec::new(),
-        }))
+        Self::new_with_kind(
+            shape_id,
+            prototype,
+            ObjectKind::Promise(JsPromise {
+                state,
+                result,
+                fulfill_reactions: Vec::new(),
+                reject_reactions: Vec::new(),
+            }),
+        )
     }
 
     pub fn new_array_buffer(
@@ -267,7 +274,11 @@ impl JsObject {
         byte_offset: usize,
         byte_length: usize,
     ) -> Self {
-        Self::new_with_kind(shape_id, prototype, ObjectKind::DataView { buffer_val, buffer, byte_offset, byte_length })
+        Self::new_with_kind(
+            shape_id,
+            prototype,
+            ObjectKind::DataView { buffer_val, buffer, byte_offset, byte_length },
+        )
     }
 
     pub fn new_shared_array_buffer(
@@ -322,11 +333,24 @@ impl JsObject {
         Self::new_with_kind(shape_id, prototype, ObjectKind::WeakRef(target))
     }
 
-    pub fn new_finalization_registry(shape_id: ShapeId, prototype: Option<JsValue>, callback: JsValue) -> Self {
-        Self::new_with_kind(shape_id, prototype, ObjectKind::FinalizationRegistry { callback, entries: Vec::new() })
+    pub fn new_finalization_registry(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        callback: JsValue,
+    ) -> Self {
+        Self::new_with_kind(
+            shape_id,
+            prototype,
+            ObjectKind::FinalizationRegistry { callback, entries: Vec::new() },
+        )
     }
 
-    pub fn new_regexp(shape_id: ShapeId, prototype: Option<JsValue>, pattern: String, flags: String) -> Self {
+    pub fn new_regexp(
+        shape_id: ShapeId,
+        prototype: Option<JsValue>,
+        pattern: String,
+        flags: String,
+    ) -> Self {
         Self::new_with_kind(shape_id, prototype, ObjectKind::RegExp { pattern, flags })
     }
 
@@ -377,7 +401,12 @@ impl JsObject {
         self.add_prop_order(key);
     }
 
-    pub fn define_accessor(&mut self, key: String, getter: Option<JsValue>, setter: Option<JsValue>) {
+    pub fn define_accessor(
+        &mut self,
+        key: String,
+        getter: Option<JsValue>,
+        setter: Option<JsValue>,
+    ) {
         let accs = self.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         let acc = accs.entry(key.clone()).or_default();
         if getter.is_some() {
@@ -393,7 +422,12 @@ impl JsObject {
         self.add_prop_order(key);
     }
 
-    pub fn define_builtin_accessor(&mut self, key: String, getter: Option<JsValue>, setter: Option<JsValue>) {
+    pub fn define_builtin_accessor(
+        &mut self,
+        key: String,
+        getter: Option<JsValue>,
+        setter: Option<JsValue>,
+    ) {
         self.define_accessor(key.clone(), getter, setter);
         if let Some(accs) = &mut self.accessors {
             if let Some(acc) = accs.get_mut(&key) {
@@ -403,8 +437,14 @@ impl JsObject {
         }
     }
 
-    pub fn define_symbol_accessor(&mut self, sym: JsValue, getter: Option<JsValue>, setter: Option<JsValue>) {
-        let accs = self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+    pub fn define_symbol_accessor(
+        &mut self,
+        sym: JsValue,
+        getter: Option<JsValue>,
+        setter: Option<JsValue>,
+    ) {
+        let accs =
+            self.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         let acc = accs.entry(sym).or_default();
         if getter.is_some() {
             acc.getter = getter;
@@ -423,11 +463,7 @@ impl JsObject {
         let idx = offset as usize;
         if idx < IN_OBJECT_SLOTS {
             let v = self.in_object_slots[idx];
-            if !v.is_hole() {
-                Some(v)
-            } else {
-                None
-            }
+            if !v.is_hole() { Some(v) } else { None }
         } else {
             self.extra_slots.get(idx - IN_OBJECT_SLOTS).copied()
         }

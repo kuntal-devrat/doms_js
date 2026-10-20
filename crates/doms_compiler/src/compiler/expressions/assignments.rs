@@ -12,11 +12,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         let inferred_name = if let Some(stripped) = target.strip_prefix("@name:") {
             let parts: Vec<&str> = stripped.split(':').collect();
-            if !parts.is_empty() {
-                Some(parts[0])
-            } else {
-                None
-            }
+            if !parts.is_empty() { Some(parts[0]) } else { None }
         } else if !target.starts_with('@') {
             Some(target)
         } else {
@@ -24,11 +20,18 @@ impl Compiler {
         };
 
         match value {
-            Expression::Conditional { condition, then_expr, else_expr } if inferred_name.is_some() => {
+            Expression::Conditional { condition, then_expr, else_expr }
+                if inferred_name.is_some() =>
+            {
                 self.compile_conditional_with_name(condition, then_expr, else_expr, inferred_name)?;
             }
-            Expression::ClassExpr(class_def) if inferred_name.is_some() && class_def.name.is_none() => {
-                self.compile_class_definition_with_name(class_def, inferred_name.map(|s| s.to_string()))?;
+            Expression::ClassExpr(class_def)
+                if inferred_name.is_some() && class_def.name.is_none() =>
+            {
+                self.compile_class_definition_with_name(
+                    class_def,
+                    inferred_name.map(|s| s.to_string()),
+                )?;
             }
             _ => {
                 self.compile_expression(value)?;
@@ -210,7 +213,11 @@ impl Compiler {
                     }
                 }
             }
-            _ => return Err(CompileError::General("Invalid assignment target in update expression".into())),
+            _ => {
+                return Err(CompileError::General(
+                    "Invalid assignment target in update expression".into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -227,8 +234,8 @@ impl Compiler {
         self.chunk.emit(OpCode::SetLocal(slot), 0);
         self.chunk.emit(OpCode::Pop, 0);
 
-        let mut parser = doms_parser::Parser::new("")
-            .map_err(|e| CompileError::General(format!("{:?}", e)))?;
+        let mut parser =
+            doms_parser::Parser::new("").map_err(|e| CompileError::General(format!("{:?}", e)))?;
         let mut stmts = Vec::new();
         parser.desugar_assignment_destructuring(
             pattern,

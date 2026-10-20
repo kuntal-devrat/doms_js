@@ -1,11 +1,16 @@
 //! String literal scanning, including escape sequences.
 
+use super::Lexer;
 use super::token::{LexError, TokenKind};
 use super::unicode::{flush_surrogate, push_unicode_code_unit};
-use super::Lexer;
 
 impl<'a> Lexer<'a> {
-    pub(super) fn read_string(&mut self, quote: char, line: usize, col: usize) -> Result<TokenKind, LexError> {
+    pub(super) fn read_string(
+        &mut self,
+        quote: char,
+        line: usize,
+        col: usize,
+    ) -> Result<TokenKind, LexError> {
         self.advance(); // consume opening quote
         let mut s = String::new();
         let mut has_escape = false;
@@ -19,11 +24,20 @@ impl<'a> Lexer<'a> {
                 if flush_surrogate(&mut s) {
                     has_unpaired_surrogate = true;
                 }
-                return Ok(TokenKind::StringLit { value: s, has_escape, has_legacy_escape, has_unpaired_surrogate });
+                return Ok(TokenKind::StringLit {
+                    value: s,
+                    has_escape,
+                    has_legacy_escape,
+                    has_unpaired_surrogate,
+                });
             } else if c == '\\' {
                 has_escape = true;
                 if let Some(escaped) = self.advance() {
-                    if escaped == '\r' || escaped == '\n' || escaped == '\u{2028}' || escaped == '\u{2029}' {
+                    if escaped == '\r'
+                        || escaped == '\n'
+                        || escaped == '\u{2028}'
+                        || escaped == '\u{2029}'
+                    {
                         // Line continuation: \ followed by line terminator
                         if escaped == '\r' && self.peek() == Some('\n') {
                             self.advance();
@@ -31,15 +45,42 @@ impl<'a> Lexer<'a> {
                         continue;
                     }
                     match escaped {
-                        'n' => { flush_surrogate(&mut s); s.push('\n'); }
-                        'r' => { flush_surrogate(&mut s); s.push('\r'); }
-                        't' => { flush_surrogate(&mut s); s.push('\t'); }
-                        'b' => { flush_surrogate(&mut s); s.push('\x08'); }
-                        'f' => { flush_surrogate(&mut s); s.push('\x0C'); }
-                        'v' => { flush_surrogate(&mut s); s.push('\x0B'); }
-                        '\\' => { flush_surrogate(&mut s); s.push('\\'); }
-                        '\'' => { flush_surrogate(&mut s); s.push('\''); }
-                        '"' => { flush_surrogate(&mut s); s.push('"'); }
+                        'n' => {
+                            flush_surrogate(&mut s);
+                            s.push('\n');
+                        }
+                        'r' => {
+                            flush_surrogate(&mut s);
+                            s.push('\r');
+                        }
+                        't' => {
+                            flush_surrogate(&mut s);
+                            s.push('\t');
+                        }
+                        'b' => {
+                            flush_surrogate(&mut s);
+                            s.push('\x08');
+                        }
+                        'f' => {
+                            flush_surrogate(&mut s);
+                            s.push('\x0C');
+                        }
+                        'v' => {
+                            flush_surrogate(&mut s);
+                            s.push('\x0B');
+                        }
+                        '\\' => {
+                            flush_surrogate(&mut s);
+                            s.push('\\');
+                        }
+                        '\'' => {
+                            flush_surrogate(&mut s);
+                            s.push('\'');
+                        }
+                        '"' => {
+                            flush_surrogate(&mut s);
+                            s.push('"');
+                        }
                         'x' => {
                             // Exactly 2 hex digits required
                             let mut hex = String::new();

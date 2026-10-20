@@ -82,7 +82,8 @@ pub(super) fn get_enumerable_keys(vm: &Vm, arg: JsValue) -> Vec<String> {
 
 pub(crate) fn add_species_getter(vm: &mut Vm, ctor: JsValue) {
     if let Some(sym_species) = vm.symbol_species {
-        let species_getter = vm.alloc_native_function("get [Symbol.species]", 0, |_vm, this, _args| Ok(this));
+        let species_getter =
+            vm.alloc_native_function("get [Symbol.species]", 0, |_vm, this, _args| Ok(this));
         if let Some(ptr) = ctor.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             obj.insert_symbol_accessor_getter(sym_species, species_getter);
@@ -95,7 +96,6 @@ pub(crate) fn add_species_getter(vm: &mut Vm, ctor: JsValue) {
     }
 }
 
-
 pub(crate) fn iterate_to_vec(vm: &mut Vm, iterable: JsValue) -> Result<Vec<JsValue>, VmError> {
     if iterable.is_nullish() {
         return Err(VmError::TypeError("Value is not iterable".into()));
@@ -103,16 +103,18 @@ pub(crate) fn iterate_to_vec(vm: &mut Vm, iterable: JsValue) -> Result<Vec<JsVal
     if let Some(ptr) = iterable.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut JsObject) };
         if let ObjectKind::Array(arr) = &obj.kind {
-            let has_custom_iter = obj.symbol_properties.as_ref().map_or(false, |sp| {
-                vm.symbol_iterator.map_or(false, |si| sp.contains_key(&si))
-            });
+            let has_custom_iter = obj
+                .symbol_properties
+                .as_ref()
+                .map_or(false, |sp| vm.symbol_iterator.map_or(false, |si| sp.contains_key(&si)));
             if !has_custom_iter {
                 return Ok(arr.clone());
             }
         }
     }
 
-    let sym_iter = vm.symbol_iterator.ok_or_else(|| VmError::TypeError("No Symbol.iterator".into()))?;
+    let sym_iter =
+        vm.symbol_iterator.ok_or_else(|| VmError::TypeError("No Symbol.iterator".into()))?;
     let prev_temp = vm.temp_roots.len();
     vm.temp_roots.push(iterable);
     let cur_iterable = vm.temp_roots[prev_temp];
@@ -204,7 +206,12 @@ pub(crate) fn iterate_to_vec(vm: &mut Vm, iterable: JsValue) -> Result<Vec<JsVal
     Ok(res)
 }
 
-pub(super) fn define_property_on_module_namespace(vm: &mut Vm, ns: JsValue, key: &PropertyKeyVal, desc: JsValue) -> Result<bool, VmError> {
+pub(super) fn define_property_on_module_namespace(
+    vm: &mut Vm,
+    ns: JsValue,
+    key: &PropertyKeyVal,
+    desc: JsValue,
+) -> Result<bool, VmError> {
     match key {
         PropertyKeyVal::Symbol(sym) => {
             if vm.symbol_to_string_tag == Some(*sym) {
@@ -232,23 +239,32 @@ pub(super) fn define_property_on_module_namespace(vm: &mut Vm, ns: JsValue, key:
         PropertyKeyVal::String(name) => {
             let has_prop = if let Some(ptr) = ns.as_object_ptr() {
                 let obj = unsafe { &*(ptr as *mut JsObject) };
-                vm.shapes.has_property(obj.shape_id, name) || vm.module_reexports.contains_key(&(ns, name.clone()))
+                vm.shapes.has_property(obj.shape_id, name)
+                    || vm.module_reexports.contains_key(&(ns, name.clone()))
             } else {
                 false
             };
             if !has_prop {
                 return Ok(false);
             }
-            if vm.has_property(desc, "get").unwrap_or(false) || vm.has_property(desc, "set").unwrap_or(false) {
+            if vm.has_property(desc, "get").unwrap_or(false)
+                || vm.has_property(desc, "set").unwrap_or(false)
+            {
                 return Ok(false);
             }
-            if vm.has_property(desc, "configurable").unwrap_or(false) && vm.get_property(desc, "configurable").is_truthy() {
+            if vm.has_property(desc, "configurable").unwrap_or(false)
+                && vm.get_property(desc, "configurable").is_truthy()
+            {
                 return Ok(false);
             }
-            if vm.has_property(desc, "enumerable").unwrap_or(false) && !vm.get_property(desc, "enumerable").is_truthy() {
+            if vm.has_property(desc, "enumerable").unwrap_or(false)
+                && !vm.get_property(desc, "enumerable").is_truthy()
+            {
                 return Ok(false);
             }
-            if vm.has_property(desc, "writable").unwrap_or(false) && !vm.get_property(desc, "writable").is_truthy() {
+            if vm.has_property(desc, "writable").unwrap_or(false)
+                && !vm.get_property(desc, "writable").is_truthy()
+            {
                 return Ok(false);
             }
             if vm.has_property(desc, "value").unwrap_or(false) {

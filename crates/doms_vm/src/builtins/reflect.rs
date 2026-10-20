@@ -32,7 +32,11 @@ pub(super) fn register_reflect(vm: &mut Vm) {
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
         let arg_list_val = match args.get(2) {
             Some(v) if v.is_js_object() => *v,
-            _ => return Err(VmError::TypeError("Reflect.apply: argumentsList is not an object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Reflect.apply: argumentsList is not an object".into(),
+                ));
+            }
         };
         let args_list = create_list_from_array_like(vm, arg_list_val)?;
         vm.call(target, this_arg, &args_list)
@@ -43,15 +47,23 @@ pub(super) fn register_reflect(vm: &mut Vm) {
     let construct_fn = vm.alloc_native_function("construct", 2, |vm, _this, args| {
         let target = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_constructor(target) {
-            return Err(VmError::TypeError("Reflect.construct: target is not a constructor".into()));
+            return Err(VmError::TypeError(
+                "Reflect.construct: target is not a constructor".into(),
+            ));
         }
         let new_target = args.get(2).copied().unwrap_or(target);
         if !vm.is_constructor(new_target) {
-            return Err(VmError::TypeError("Reflect.construct: newTarget is not a constructor".into()));
+            return Err(VmError::TypeError(
+                "Reflect.construct: newTarget is not a constructor".into(),
+            ));
         }
         let arg_list_val = match args.get(1) {
             Some(v) if v.is_js_object() => *v,
-            _ => return Err(VmError::TypeError("Reflect.construct: argumentsList is not an object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Reflect.construct: argumentsList is not an object".into(),
+                ));
+            }
         };
         let args_list = create_list_from_array_like(vm, arg_list_val)?;
         vm.construct_with_new_target(target, &args_list, new_target)
@@ -62,7 +74,11 @@ pub(super) fn register_reflect(vm: &mut Vm) {
     let define_prop_fn = vm.alloc_native_function("defineProperty", 3, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Reflect.defineProperty called on non-object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Reflect.defineProperty called on non-object".into(),
+                ));
+            }
         };
         let prop_key = match args.get(1) {
             Some(p) => vm.to_property_key(*p)?,
@@ -83,7 +99,9 @@ pub(super) fn register_reflect(vm: &mut Vm) {
             let success = define_property_on_module_namespace(vm, target, &prop_key, desc)?;
             return Ok(JsValue::from_boolean(success));
         }
-        let res = crate::builtins::object::define_property::define_property_internal(vm, target, prop_key, desc);
+        let res = crate::builtins::object::define_property::define_property_internal(
+            vm, target, prop_key, desc,
+        );
         match res {
             Ok(_) => Ok(JsValue::from_boolean(true)),
             Err(VmError::TypeError(_)) => Ok(JsValue::from_boolean(false)),
@@ -96,7 +114,11 @@ pub(super) fn register_reflect(vm: &mut Vm) {
     let delete_prop_fn = vm.alloc_native_function("deleteProperty", 2, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Reflect.deleteProperty called on non-object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Reflect.deleteProperty called on non-object".into(),
+                ));
+            }
         };
         let prop_key = match args.get(1) {
             Some(p) => vm.to_property_key(*p)?,
@@ -134,24 +156,33 @@ pub(super) fn register_reflect(vm: &mut Vm) {
     vm.set_property(reflect_obj, "get", get_fn);
 
     // 28.1.6 Reflect.getOwnPropertyDescriptor ( target, propertyKey )
-    let get_own_desc_fn = vm.alloc_native_function("getOwnPropertyDescriptor", 2, |vm, _this, args| {
-        let target = match args.first() {
-            Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Reflect.getOwnPropertyDescriptor called on non-object".into())),
-        };
-        let prop_key = match args.get(1) {
-            Some(p) => vm.to_property_key(*p)?,
-            None => PropertyKeyVal::String("undefined".to_string()),
-        };
-        get_own_property_descriptor_internal(vm, target, &prop_key)
-    });
+    let get_own_desc_fn =
+        vm.alloc_native_function("getOwnPropertyDescriptor", 2, |vm, _this, args| {
+            let target = match args.first() {
+                Some(t) if t.is_js_object() => *t,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "Reflect.getOwnPropertyDescriptor called on non-object".into(),
+                    ));
+                }
+            };
+            let prop_key = match args.get(1) {
+                Some(p) => vm.to_property_key(*p)?,
+                None => PropertyKeyVal::String("undefined".to_string()),
+            };
+            get_own_property_descriptor_internal(vm, target, &prop_key)
+        });
     vm.set_property(reflect_obj, "getOwnPropertyDescriptor", get_own_desc_fn);
 
     // 28.1.7 Reflect.getPrototypeOf ( target )
     let get_proto_fn = vm.alloc_native_function("getPrototypeOf", 1, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Reflect.getPrototypeOf called on non-object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Reflect.getPrototypeOf called on non-object".into(),
+                ));
+            }
         };
         vm.get_prototype_of_val(target)
     });
@@ -176,7 +207,9 @@ pub(super) fn register_reflect(vm: &mut Vm) {
     let is_ext_fn = vm.alloc_native_function("isExtensible", 1, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Reflect.isExtensible called on non-object".into())),
+            _ => {
+                return Err(VmError::TypeError("Reflect.isExtensible called on non-object".into()));
+            }
         };
         let ext = vm.is_extensible_val(target)?;
         Ok(JsValue::from_boolean(ext))
@@ -206,7 +239,11 @@ pub(super) fn register_reflect(vm: &mut Vm) {
     let prev_ext_fn = vm.alloc_native_function("preventExtensions", 1, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Reflect.preventExtensions called on non-object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Reflect.preventExtensions called on non-object".into(),
+                ));
+            }
         };
         let ok = vm.prevent_extensions_val(target)?;
         Ok(JsValue::from_boolean(ok))
@@ -243,11 +280,17 @@ pub(super) fn register_reflect(vm: &mut Vm) {
     let set_proto_fn = vm.alloc_native_function("setPrototypeOf", 2, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Reflect.setPrototypeOf called on non-object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Reflect.setPrototypeOf called on non-object".into(),
+                ));
+            }
         };
         let proto = args.get(1).copied().unwrap_or(JsValue::undefined());
         if !proto.is_js_object() && !proto.is_null() {
-            return Err(VmError::TypeError("Object prototype may only be an Object or null".into()));
+            return Err(VmError::TypeError(
+                "Object prototype may only be an Object or null".into(),
+            ));
         }
         if vm.module_namespace_objects.contains(&target) {
             return Ok(JsValue::from_boolean(proto.is_null()));

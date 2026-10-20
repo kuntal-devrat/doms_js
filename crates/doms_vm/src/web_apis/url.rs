@@ -22,18 +22,11 @@ fn parse_query_string(query: &str) -> Vec<(String, String)> {
 
 pub(super) fn register_url(vm: &mut Vm) {
     let usp_ctor = vm.alloc_native_function("URLSearchParams", 1, |vm, _this, args| {
-        let query_str = args
-            .first()
-            .map(|v| vm.to_string_value(*v))
-            .unwrap_or_default();
+        let query_str = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
         let pairs = parse_query_string(&query_str);
         let instance = vm.alloc_object();
 
-        let ser = pairs
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("&");
+        let ser = pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
         let ser_val = vm.alloc_string(ser);
         vm.set_property(instance, "__query__", ser_val);
 
@@ -78,7 +71,8 @@ pub(super) fn register_url(vm: &mut Vm) {
             if !found {
                 pairs.push((key, val));
             }
-            let new_ser = pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
+            let new_ser =
+                pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
             let new_ser_val = vm.alloc_string(new_ser);
             vm.set_property(this, "__query__", new_ser_val);
             Ok(JsValue::undefined())
@@ -92,7 +86,8 @@ pub(super) fn register_url(vm: &mut Vm) {
             let q_str = vm.to_string_value(q_val);
             let mut pairs = parse_query_string(&q_str);
             pairs.push((key, val));
-            let new_ser = pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
+            let new_ser =
+                pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
             let new_ser_val = vm.alloc_string(new_ser);
             vm.set_property(this, "__query__", new_ser_val);
             Ok(JsValue::undefined())
@@ -105,7 +100,8 @@ pub(super) fn register_url(vm: &mut Vm) {
             let q_str = vm.to_string_value(q_val);
             let mut pairs = parse_query_string(&q_str);
             pairs.retain(|(k, _)| k != &key);
-            let new_ser = pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
+            let new_ser =
+                pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
             let new_ser_val = vm.alloc_string(new_ser);
             vm.set_property(this, "__query__", new_ser_val);
             Ok(JsValue::undefined())

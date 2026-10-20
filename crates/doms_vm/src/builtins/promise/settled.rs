@@ -20,14 +20,13 @@ pub(super) fn create_settled_statics(vm: &mut Vm) -> Vec<(&'static str, JsValue)
 
     let all_settled_static = vm.alloc_native_function("allSettled", 1, |vm, this, args| {
         if !vm.is_constructor(this) {
-            return Err(VmError::TypeError(
-                "Promise.allSettled called on non-constructor".into(),
-            ));
+            return Err(VmError::TypeError("Promise.allSettled called on non-constructor".into()));
         }
         let capability = super::new_promise_capability(vm, this)?;
         let resolve_method = vm.get_property(this, "resolve");
         if !vm.is_callable(resolve_method) {
-            let err = vm.alloc_error("TypeError".into(), "Promise resolve method is not callable".into());
+            let err =
+                vm.alloc_error("TypeError".into(), "Promise resolve method is not callable".into());
             let _ = vm.call(capability.reject, JsValue::undefined(), &[err]);
             return Ok(capability.promise);
         }
@@ -119,31 +118,36 @@ pub(super) fn create_settled_statics(vm: &mut Vm) -> Vec<(&'static str, JsValue)
             let resolve_item = vm.alloc_closure_native_function(
                 "",
                 1,
-                Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-                    if ac1.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        return Ok(JsValue::undefined());
-                    }
-                    let v = args.first().copied().unwrap_or(JsValue::undefined());
-                    let item_obj = vm.alloc_object();
-                    let status_str = vm.alloc_string("fulfilled".into());
-                    vm.set_property(item_obj, "status", status_str);
-                    vm.set_property(item_obj, "value", v);
-                    {
-                        let mut lock = res_store1.lock().unwrap();
-                        if item_idx < lock.len() {
-                            lock[item_idx] = item_obj;
+                Arc::new(
+                    move |vm: &mut Vm,
+                          _this: JsValue,
+                          args: &[JsValue]|
+                          -> Result<JsValue, VmError> {
+                        if ac1.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                            return Ok(JsValue::undefined());
                         }
-                    }
-                    if rem1.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
-                        let final_res = res_store1.lock().unwrap().clone();
-                        let arr = vm.alloc_array(final_res);
-                        if let Err(e) = vm.call(cap_resolve, JsValue::undefined(), &[arr]) {
-                            let err_val = vm.vm_error_to_js_value(&e);
-                            let _ = vm.call(cap_reject, JsValue::undefined(), &[err_val]);
+                        let v = args.first().copied().unwrap_or(JsValue::undefined());
+                        let item_obj = vm.alloc_object();
+                        let status_str = vm.alloc_string("fulfilled".into());
+                        vm.set_property(item_obj, "status", status_str);
+                        vm.set_property(item_obj, "value", v);
+                        {
+                            let mut lock = res_store1.lock().unwrap();
+                            if item_idx < lock.len() {
+                                lock[item_idx] = item_obj;
+                            }
                         }
-                    }
-                    Ok(JsValue::undefined())
-                }),
+                        if rem1.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                            let final_res = res_store1.lock().unwrap().clone();
+                            let arr = vm.alloc_array(final_res);
+                            if let Err(e) = vm.call(cap_resolve, JsValue::undefined(), &[arr]) {
+                                let err_val = vm.vm_error_to_js_value(&e);
+                                let _ = vm.call(cap_reject, JsValue::undefined(), &[err_val]);
+                            }
+                        }
+                        Ok(JsValue::undefined())
+                    },
+                ),
             );
 
             let ac2 = Arc::clone(&already_called);
@@ -152,31 +156,36 @@ pub(super) fn create_settled_statics(vm: &mut Vm) -> Vec<(&'static str, JsValue)
             let reject_item = vm.alloc_closure_native_function(
                 "",
                 1,
-                Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-                    if ac2.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        return Ok(JsValue::undefined());
-                    }
-                    let err = args.first().copied().unwrap_or(JsValue::undefined());
-                    let item_obj = vm.alloc_object();
-                    let status_str = vm.alloc_string("rejected".into());
-                    vm.set_property(item_obj, "status", status_str);
-                    vm.set_property(item_obj, "reason", err);
-                    {
-                        let mut lock = res_store2.lock().unwrap();
-                        if item_idx < lock.len() {
-                            lock[item_idx] = item_obj;
+                Arc::new(
+                    move |vm: &mut Vm,
+                          _this: JsValue,
+                          args: &[JsValue]|
+                          -> Result<JsValue, VmError> {
+                        if ac2.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                            return Ok(JsValue::undefined());
                         }
-                    }
-                    if rem2.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
-                        let final_res = res_store2.lock().unwrap().clone();
-                        let arr = vm.alloc_array(final_res);
-                        if let Err(e) = vm.call(cap_resolve, JsValue::undefined(), &[arr]) {
-                            let err_val = vm.vm_error_to_js_value(&e);
-                            let _ = vm.call(cap_reject, JsValue::undefined(), &[err_val]);
+                        let err = args.first().copied().unwrap_or(JsValue::undefined());
+                        let item_obj = vm.alloc_object();
+                        let status_str = vm.alloc_string("rejected".into());
+                        vm.set_property(item_obj, "status", status_str);
+                        vm.set_property(item_obj, "reason", err);
+                        {
+                            let mut lock = res_store2.lock().unwrap();
+                            if item_idx < lock.len() {
+                                lock[item_idx] = item_obj;
+                            }
                         }
-                    }
-                    Ok(JsValue::undefined())
-                }),
+                        if rem2.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                            let final_res = res_store2.lock().unwrap().clone();
+                            let arr = vm.alloc_array(final_res);
+                            if let Err(e) = vm.call(cap_resolve, JsValue::undefined(), &[arr]) {
+                                let err_val = vm.vm_error_to_js_value(&e);
+                                let _ = vm.call(cap_reject, JsValue::undefined(), &[err_val]);
+                            }
+                        }
+                        Ok(JsValue::undefined())
+                    },
+                ),
             );
 
             let cur_resolve_method = vm.temp_roots[prev_temp + 3];
@@ -236,14 +245,13 @@ pub(super) fn create_settled_statics(vm: &mut Vm) -> Vec<(&'static str, JsValue)
 
     let any_static = vm.alloc_native_function("any", 1, |vm, this, args| {
         if !vm.is_constructor(this) {
-            return Err(VmError::TypeError(
-                "Promise.any called on non-constructor".into(),
-            ));
+            return Err(VmError::TypeError("Promise.any called on non-constructor".into()));
         }
         let capability = super::new_promise_capability(vm, this)?;
         let resolve_method = vm.get_property(this, "resolve");
         if !vm.is_callable(resolve_method) {
-            let err = vm.alloc_error("TypeError".into(), "Promise resolve method is not callable".into());
+            let err =
+                vm.alloc_error("TypeError".into(), "Promise resolve method is not callable".into());
             let _ = vm.call(capability.reject, JsValue::undefined(), &[err]);
             return Ok(capability.promise);
         }
@@ -333,29 +341,34 @@ pub(super) fn create_settled_statics(vm: &mut Vm) -> Vec<(&'static str, JsValue)
             let reject_item = vm.alloc_closure_native_function(
                 "",
                 1,
-                Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-                    if ac.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        return Ok(JsValue::undefined());
-                    }
-                    let err = args.first().copied().unwrap_or(JsValue::undefined());
-                    {
-                        let mut lock = err_store2.lock().unwrap();
-                        if item_idx < lock.len() {
-                            lock[item_idx] = err;
+                Arc::new(
+                    move |vm: &mut Vm,
+                          _this: JsValue,
+                          args: &[JsValue]|
+                          -> Result<JsValue, VmError> {
+                        if ac.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                            return Ok(JsValue::undefined());
                         }
-                    }
-                    if rem2.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
-                        let final_errs = err_store2.lock().unwrap().clone();
-                        let err_obj = vm.alloc_error(
-                            "AggregateError".into(),
-                            "All promises were rejected".into(),
-                        );
-                        let err_arr = vm.alloc_array(final_errs);
-                        vm.set_property(err_obj, "errors", err_arr);
-                        let _ = vm.call(cap_reject, JsValue::undefined(), &[err_obj]);
-                    }
-                    Ok(JsValue::undefined())
-                }),
+                        let err = args.first().copied().unwrap_or(JsValue::undefined());
+                        {
+                            let mut lock = err_store2.lock().unwrap();
+                            if item_idx < lock.len() {
+                                lock[item_idx] = err;
+                            }
+                        }
+                        if rem2.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                            let final_errs = err_store2.lock().unwrap().clone();
+                            let err_obj = vm.alloc_error(
+                                "AggregateError".into(),
+                                "All promises were rejected".into(),
+                            );
+                            let err_arr = vm.alloc_array(final_errs);
+                            vm.set_property(err_obj, "errors", err_arr);
+                            let _ = vm.call(cap_reject, JsValue::undefined(), &[err_obj]);
+                        }
+                        Ok(JsValue::undefined())
+                    },
+                ),
             );
 
             let cur_resolve_method = vm.temp_roots[prev_temp + 3];

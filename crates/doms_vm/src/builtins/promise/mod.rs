@@ -40,7 +40,10 @@ pub(super) struct PromiseCapability {
     pub reject: JsValue,
 }
 
-pub(super) fn new_promise_capability(vm: &mut Vm, ctor: JsValue) -> Result<PromiseCapability, VmError> {
+pub(super) fn new_promise_capability(
+    vm: &mut Vm,
+    ctor: JsValue,
+) -> Result<PromiseCapability, VmError> {
     if !vm.is_constructor(ctor) {
         return Err(VmError::TypeError("Promise constructor expected".into()));
     }
@@ -49,25 +52,33 @@ pub(super) fn new_promise_capability(vm: &mut Vm, ctor: JsValue) -> Result<Promi
     let res_c = Arc::clone(&res_holder);
     let rej_c = Arc::clone(&rej_holder);
 
-    let executor = vm.alloc_closure_native_function("", 2, Arc::new(move |_vm, _this, args| {
-        let mut r_guard = res_c.lock().unwrap();
-        let mut j_guard = rej_c.lock().unwrap();
-        if !r_guard.is_undefined() || !j_guard.is_undefined() {
-            return Err(VmError::TypeError("Promise capability executor called more than once".into()));
-        }
-        let r = args.first().copied().unwrap_or(JsValue::undefined());
-        let j = args.get(1).copied().unwrap_or(JsValue::undefined());
-        *r_guard = r;
-        *j_guard = j;
-        Ok(JsValue::undefined())
-    }));
+    let executor = vm.alloc_closure_native_function(
+        "",
+        2,
+        Arc::new(move |_vm, _this, args| {
+            let mut r_guard = res_c.lock().unwrap();
+            let mut j_guard = rej_c.lock().unwrap();
+            if !r_guard.is_undefined() || !j_guard.is_undefined() {
+                return Err(VmError::TypeError(
+                    "Promise capability executor called more than once".into(),
+                ));
+            }
+            let r = args.first().copied().unwrap_or(JsValue::undefined());
+            let j = args.get(1).copied().unwrap_or(JsValue::undefined());
+            *r_guard = r;
+            *j_guard = j;
+            Ok(JsValue::undefined())
+        }),
+    );
 
     let promise = vm.construct(ctor, &[executor])?;
     let resolve = *res_holder.lock().unwrap();
     let reject = *rej_holder.lock().unwrap();
 
     if !vm.is_callable(resolve) || !vm.is_callable(reject) {
-        return Err(VmError::TypeError("Promise capability executor did not set callable resolve and reject".into()));
+        return Err(VmError::TypeError(
+            "Promise capability executor did not set callable resolve and reject".into(),
+        ));
     }
 
     Ok(PromiseCapability { promise, resolve, reject })

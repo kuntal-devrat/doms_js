@@ -4,26 +4,51 @@
 use super::*;
 
 impl Vm {
-    pub fn alloc_shared_array_buffer(&mut self, sab: Arc<doms_parallel::SharedArrayBuffer>) -> JsValue {
+    pub fn alloc_shared_array_buffer(
+        &mut self,
+        sab: Arc<doms_parallel::SharedArrayBuffer>,
+    ) -> JsValue {
         let obj = JsObject::new_shared_array_buffer(ShapeRegistry::ROOT_SHAPE_ID, None, sab);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
     pub fn alloc_typed_array(&mut self, typed_array: JsTypedArray) -> JsValue {
-        let proto = self.globals.get(typed_array.kind.name()).copied().map(|ctor| self.get_property(ctor, "prototype"));
+        let proto = self
+            .globals
+            .get(typed_array.kind.name())
+            .copied()
+            .map(|ctor| self.get_property(ctor, "prototype"));
         let obj = JsObject::new_typed_array(ShapeRegistry::ROOT_SHAPE_ID, proto, typed_array);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
     pub fn alloc_array_buffer(&mut self, buffer: Arc<doms_parallel::SharedArrayBuffer>) -> JsValue {
-        let proto = self.globals.get("ArrayBuffer").copied().map(|ctor| self.get_property(ctor, "prototype"));
+        let proto = self
+            .globals
+            .get("ArrayBuffer")
+            .copied()
+            .map(|ctor| self.get_property(ctor, "prototype"));
         let obj = JsObject::new_array_buffer(ShapeRegistry::ROOT_SHAPE_ID, proto, buffer);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
-    pub fn alloc_data_view(&mut self, buffer_val: JsValue, buffer: Arc<doms_parallel::SharedArrayBuffer>, byte_offset: usize, byte_length: usize) -> JsValue {
-        let proto = self.globals.get("DataView").copied().map(|ctor| self.get_property(ctor, "prototype"));
-        let obj = JsObject::new_data_view(ShapeRegistry::ROOT_SHAPE_ID, proto, buffer_val, buffer, byte_offset, byte_length);
+    pub fn alloc_data_view(
+        &mut self,
+        buffer_val: JsValue,
+        buffer: Arc<doms_parallel::SharedArrayBuffer>,
+        byte_offset: usize,
+        byte_length: usize,
+    ) -> JsValue {
+        let proto =
+            self.globals.get("DataView").copied().map(|ctor| self.get_property(ctor, "prototype"));
+        let obj = JsObject::new_data_view(
+            ShapeRegistry::ROOT_SHAPE_ID,
+            proto,
+            buffer_val,
+            buffer,
+            byte_offset,
+            byte_length,
+        );
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
@@ -196,7 +221,11 @@ impl Vm {
         true
     }
 
-    pub fn read_typed_array_element_vm(&mut self, ta: &JsTypedArray, index: usize) -> Option<JsValue> {
+    pub fn read_typed_array_element_vm(
+        &mut self,
+        ta: &JsTypedArray,
+        index: usize,
+    ) -> Option<JsValue> {
         if ta.buffer.is_detached() || index >= ta.length {
             return None;
         }
@@ -241,7 +270,11 @@ impl Vm {
             return Ok(b);
         }
         if prim.is_boolean() {
-            return Ok(if prim.as_boolean() == Some(true) { BigInt::one() } else { BigInt::zero() });
+            return Ok(if prim.as_boolean() == Some(true) {
+                BigInt::one()
+            } else {
+                BigInt::zero()
+            });
         }
         let s = self.to_string_value(prim);
         let trimmed = s.trim();
@@ -254,7 +287,12 @@ impl Vm {
         Err(VmError::SyntaxError("Cannot convert string to a BigInt".into()))
     }
 
-    pub fn write_typed_array_element_vm(&mut self, ta: &JsTypedArray, index: usize, value: JsValue) -> Result<bool, VmError> {
+    pub fn write_typed_array_element_vm(
+        &mut self,
+        ta: &JsTypedArray,
+        index: usize,
+        value: JsValue,
+    ) -> Result<bool, VmError> {
         if ta.buffer.is_detached() || index >= ta.length {
             return Ok(false);
         }
@@ -297,7 +335,10 @@ impl Vm {
         }
         Ok(true)
     }
-    pub fn alloc_worker(&mut self, port: Arc<std::sync::Mutex<doms_parallel::MessagePort>>) -> JsValue {
+    pub fn alloc_worker(
+        &mut self,
+        port: Arc<std::sync::Mutex<doms_parallel::MessagePort>>,
+    ) -> JsValue {
         let obj = JsObject::new_worker(ShapeRegistry::ROOT_SHAPE_ID, None, port);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }

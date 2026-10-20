@@ -25,19 +25,23 @@ pub(super) fn register_fetch(vm: &mut Vm) {
         }
 
         let get_fn = vm.alloc_native_function("get", 1, |vm, this, args| {
-            let name = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default().to_ascii_lowercase();
+            let name = args
+                .first()
+                .map(|v| vm.to_string_value(*v))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             let store = vm.get_property(this, "__store__");
             let val = vm.get_property(store, &name);
-            if val.is_undefined() {
-                Ok(JsValue::null())
-            } else {
-                Ok(val)
-            }
+            if val.is_undefined() { Ok(JsValue::null()) } else { Ok(val) }
         });
         vm.set_property(instance, "get", get_fn);
 
         let set_fn = vm.alloc_native_function("set", 2, |vm, this, args| {
-            let name = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default().to_ascii_lowercase();
+            let name = args
+                .first()
+                .map(|v| vm.to_string_value(*v))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             let val = args.get(1).copied().unwrap_or(JsValue::undefined());
             let store = vm.get_property(this, "__store__");
             vm.set_property(store, &name, val);
@@ -46,7 +50,11 @@ pub(super) fn register_fetch(vm: &mut Vm) {
         vm.set_property(instance, "set", set_fn);
 
         let has_fn = vm.alloc_native_function("has", 1, |vm, this, args| {
-            let name = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default().to_ascii_lowercase();
+            let name = args
+                .first()
+                .map(|v| vm.to_string_value(*v))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             let store = vm.get_property(this, "__store__");
             let val = vm.get_property(store, &name);
             Ok(JsValue::from_boolean(!val.is_undefined()))
@@ -95,11 +103,8 @@ pub(super) fn register_fetch(vm: &mut Vm) {
             }
         }
 
-        let body_str = if body_arg.is_undefined() {
-            String::new()
-        } else {
-            vm.to_string_value(body_arg)
-        };
+        let body_str =
+            if body_arg.is_undefined() { String::new() } else { vm.to_string_value(body_arg) };
 
         let body_val = vm.alloc_string(body_str);
         vm.set_property(instance, "__body__", body_val);

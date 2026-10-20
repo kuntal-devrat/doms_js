@@ -4,11 +4,7 @@ use super::*;
 
 #[inline]
 fn to_uint32(n: f64) -> u32 {
-    if n.is_nan() || n.is_infinite() || n == 0.0 {
-        0
-    } else {
-        n.rem_euclid(4294967296.0) as u32
-    }
+    if n.is_nan() || n.is_infinite() || n == 0.0 { 0 } else { n.rem_euclid(4294967296.0) as u32 }
 }
 
 pub(super) fn register_math(vm: &mut Vm) {
@@ -404,11 +400,10 @@ pub(super) fn register_math(vm: &mut Vm) {
         vm.set_symbol_property(math_obj, tag_sym, tag_val);
         if let Some(ptr) = math_obj.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            obj.set_symbol_attributes(tag_sym, PropertyAttributes {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            });
+            obj.set_symbol_attributes(
+                tag_sym,
+                PropertyAttributes { writable: false, enumerable: false, configurable: true },
+            );
         }
     }
 

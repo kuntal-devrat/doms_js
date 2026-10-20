@@ -29,10 +29,7 @@ impl SharedArrayBuffer {
         for _ in 0..byte_length {
             vec.push(AtomicU8::new(0));
         }
-        Ok(Self {
-            data: Arc::new(vec),
-            detached: Arc::new(AtomicBool::new(false)),
-        })
+        Ok(Self { data: Arc::new(vec), detached: Arc::new(AtomicBool::new(false)) })
     }
 
     pub fn is_detached(&self) -> bool {
@@ -44,11 +41,7 @@ impl SharedArrayBuffer {
     }
 
     pub fn byte_length(&self) -> usize {
-        if self.is_detached() {
-            0
-        } else {
-            self.data.len()
-        }
+        if self.is_detached() { 0 } else { self.data.len() }
     }
 
     pub fn get(&self, index: usize) -> Option<u8> {

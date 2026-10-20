@@ -6,16 +6,26 @@ impl<'a> Parser<'a> {
         match tok.kind {
             TokenKind::Number(n) => Ok(Expression::Literal(Literal::Number(n))),
             TokenKind::BigInt(b) => Ok(Expression::Literal(Literal::BigInt(b))),
-            TokenKind::StringLit { value, has_escape, has_legacy_escape, .. } => Ok(Expression::Literal(Literal::String { value, has_escape, has_legacy_escape })),
-            TokenKind::TemplateLiteral { quasis, raw_exprs } => self.parse_template_expression(quasis, raw_exprs),
-            TokenKind::RegExp { pattern, flags } => Ok(Expression::Literal(Literal::RegExp { pattern, flags })),
+            TokenKind::StringLit { value, has_escape, has_legacy_escape, .. } => {
+                Ok(Expression::Literal(Literal::String { value, has_escape, has_legacy_escape }))
+            }
+            TokenKind::TemplateLiteral { quasis, raw_exprs } => {
+                self.parse_template_expression(quasis, raw_exprs)
+            }
+            TokenKind::RegExp { pattern, flags } => {
+                Ok(Expression::Literal(Literal::RegExp { pattern, flags }))
+            }
             TokenKind::True => Ok(Expression::Literal(Literal::Boolean(true))),
             TokenKind::False => Ok(Expression::Literal(Literal::Boolean(false))),
             TokenKind::Null => Ok(Expression::Literal(Literal::Null)),
             TokenKind::Undefined => Ok(Expression::Literal(Literal::Undefined)),
             TokenKind::Ident(s) => {
                 if tok.has_escape && crate::lexer::is_reserved_word(&s) {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(s), tok.line, tok.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Ident(s),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 self.parse_identifier_expr(s, tok.line, tok.col)
             }
@@ -23,11 +33,19 @@ impl<'a> Parser<'a> {
             TokenKind::Super => {
                 if self.check(&TokenKind::LParen) {
                     if !self.in_derived_constructor {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Super, tok.line, tok.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Super,
+                            tok.line,
+                            tok.col,
+                        ));
                     }
                 } else if self.check(&TokenKind::Dot) || self.check(&TokenKind::LBracket) {
                     if !self.in_method && !self.in_derived_constructor {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Super, tok.line, tok.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Super,
+                            tok.line,
+                            tok.col,
+                        ));
                     }
                 } else {
                     return Err(ParseError::UnexpectedToken(TokenKind::Super, tok.line, tok.col));
@@ -67,7 +85,11 @@ impl<'a> Parser<'a> {
             TokenKind::Delete => {
                 let expr = self.parse_expression(22)?;
                 if self.is_strict && matches!(&expr, Expression::Identifier(_)) {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Delete, self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Delete,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 Ok(Expression::Unary { op: UnaryOp::Delete, expr: Box::new(expr) })
             }
@@ -85,7 +107,8 @@ impl<'a> Parser<'a> {
             | TokenKind::Static
             | TokenKind::Let => self.parse_reserved_word_expr(tok.kind.clone(), tok.line, tok.col),
             TokenKind::Await => {
-                let can_await = (self.in_async || (self.is_module && !self.in_function)) && !self.in_param;
+                let can_await =
+                    (self.in_async || (self.is_module && !self.in_function)) && !self.in_param;
                 if can_await {
                     let expr = self.parse_expression(20)?;
                     Ok(Expression::Await(Box::new(expr)))
@@ -98,7 +121,11 @@ impl<'a> Parser<'a> {
             TokenKind::Yield => {
                 if !self.in_generator {
                     if self.is_strict {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Yield, tok.line, tok.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Yield,
+                            tok.line,
+                            tok.col,
+                        ));
                     }
                     return Ok(Expression::Identifier("yield".to_string()));
                 }
@@ -133,10 +160,20 @@ impl<'a> Parser<'a> {
                 let prop = format!("#{}", s);
                 let scoped = match self.resolve_private_name(&prop) {
                     Some(n) => n,
-                    None => return Err(ParseError::UnexpectedToken(TokenKind::PrivateIdent(s), tok.line, tok.col)),
+                    None => {
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::PrivateIdent(s),
+                            tok.line,
+                            tok.col,
+                        ));
+                    }
                 };
                 if !self.allow_in || !self.check(&TokenKind::In) {
-                    return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        self.current.kind.clone(),
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 Ok(Expression::PrivateIdentifier(scoped))
             }

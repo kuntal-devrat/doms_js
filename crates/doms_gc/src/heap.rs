@@ -53,9 +53,7 @@ pub struct RememberedSet {
 
 impl RememberedSet {
     pub fn new() -> Self {
-        Self {
-            slots: std::collections::HashSet::new(),
-        }
+        Self { slots: std::collections::HashSet::new() }
     }
 
     /// Add a pointer slot to the remembered set.

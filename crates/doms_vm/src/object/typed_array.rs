@@ -52,4 +52,3 @@ pub struct JsTypedArray {
     pub length: usize,
     pub byte_offset: usize,
 }
-

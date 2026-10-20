@@ -9,8 +9,28 @@ impl Vm {
 
         if let Some(frame) = self.frames.last() {
             let call_site_ip = frame.ip.saturating_sub(1);
-            let lm = if a.is_int32() { doms_compiler::TypeMask::INT32 } else if a.is_number() { doms_compiler::TypeMask::DOUBLE } else if a.is_string() { doms_compiler::TypeMask::STRING } else if a.is_js_object() { doms_compiler::TypeMask::OBJECT } else { doms_compiler::TypeMask::OTHER };
-            let rm = if b.is_int32() { doms_compiler::TypeMask::INT32 } else if b.is_number() { doms_compiler::TypeMask::DOUBLE } else if b.is_string() { doms_compiler::TypeMask::STRING } else if b.is_js_object() { doms_compiler::TypeMask::OBJECT } else { doms_compiler::TypeMask::OTHER };
+            let lm = if a.is_int32() {
+                doms_compiler::TypeMask::INT32
+            } else if a.is_number() {
+                doms_compiler::TypeMask::DOUBLE
+            } else if a.is_string() {
+                doms_compiler::TypeMask::STRING
+            } else if a.is_js_object() {
+                doms_compiler::TypeMask::OBJECT
+            } else {
+                doms_compiler::TypeMask::OTHER
+            };
+            let rm = if b.is_int32() {
+                doms_compiler::TypeMask::INT32
+            } else if b.is_number() {
+                doms_compiler::TypeMask::DOUBLE
+            } else if b.is_string() {
+                doms_compiler::TypeMask::STRING
+            } else if b.is_js_object() {
+                doms_compiler::TypeMask::OBJECT
+            } else {
+                doms_compiler::TypeMask::OTHER
+            };
             frame.chunk.record_feedback_binary_op(call_site_ip, lm, rm);
         }
 
@@ -43,15 +63,39 @@ impl Vm {
         };
         self.temp_roots.push(b_prim);
 
-        let a_is_sym = a_prim.is_symbol() || (a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))));
-        let b_is_sym = b_prim.is_symbol() || (b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))));
+        let a_is_sym = a_prim.is_symbol()
+            || (a_prim.is_object()
+                && a_prim.as_object_ptr().is_some_and(|p| {
+                    matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))
+                }));
+        let b_is_sym = b_prim.is_symbol()
+            || (b_prim.is_object()
+                && b_prim.as_object_ptr().is_some_and(|p| {
+                    matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))
+                }));
         if a_is_sym || b_is_sym {
             self.temp_roots.truncate(prev_temp);
-            return Err(VmError::TypeError("Cannot convert a Symbol value to a number or string".into()));
+            return Err(VmError::TypeError(
+                "Cannot convert a Symbol value to a number or string".into(),
+            ));
         }
 
-        let a_is_str = a_prim.is_string() || (a_prim.is_object() && a_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_) | ObjectKind::ConsString { .. })));
-        let b_is_str = b_prim.is_string() || (b_prim.is_object() && b_prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_) | ObjectKind::ConsString { .. })));
+        let a_is_str = a_prim.is_string()
+            || (a_prim.is_object()
+                && a_prim.as_object_ptr().is_some_and(|p| {
+                    matches!(
+                        unsafe { &(*(p as *mut JsObject)).kind },
+                        ObjectKind::String(_) | ObjectKind::ConsString { .. }
+                    )
+                }));
+        let b_is_str = b_prim.is_string()
+            || (b_prim.is_object()
+                && b_prim.as_object_ptr().is_some_and(|p| {
+                    matches!(
+                        unsafe { &(*(p as *mut JsObject)).kind },
+                        ObjectKind::String(_) | ObjectKind::ConsString { .. }
+                    )
+                }));
 
         if a_is_str || b_is_str {
             let left_str_val = if a_is_str {
@@ -88,13 +132,17 @@ impl Vm {
 
             self.temp_roots.truncate(prev_temp);
             self.push(res);
-        } else if let (Some(ba), Some(bb)) = (self.as_bigint_val(a_prim), self.as_bigint_val(b_prim)) {
+        } else if let (Some(ba), Some(bb)) =
+            (self.as_bigint_val(a_prim), self.as_bigint_val(b_prim))
+        {
             let res = self.alloc_bigint(&ba + &bb);
             self.temp_roots.truncate(prev_temp);
             self.push(res);
         } else if self.as_bigint_val(a_prim).is_some() || self.as_bigint_val(b_prim).is_some() {
             self.temp_roots.truncate(prev_temp);
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let na = match self.to_number_value(a_prim) {
                 Ok(n) => n,
@@ -122,8 +170,20 @@ impl Vm {
 
         if let Some(frame) = self.frames.last() {
             let call_site_ip = frame.ip.saturating_sub(1);
-            let lm = if a_val.is_int32() { doms_compiler::TypeMask::INT32 } else if a_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
-            let rm = if b_val.is_int32() { doms_compiler::TypeMask::INT32 } else if b_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            let lm = if a_val.is_int32() {
+                doms_compiler::TypeMask::INT32
+            } else if a_val.is_number() {
+                doms_compiler::TypeMask::DOUBLE
+            } else {
+                doms_compiler::TypeMask::OTHER
+            };
+            let rm = if b_val.is_int32() {
+                doms_compiler::TypeMask::INT32
+            } else if b_val.is_number() {
+                doms_compiler::TypeMask::DOUBLE
+            } else {
+                doms_compiler::TypeMask::OTHER
+            };
             frame.chunk.record_feedback_binary_op(call_site_ip, lm, rm);
         }
 
@@ -140,7 +200,9 @@ impl Vm {
             let res = self.alloc_bigint(&ba - &bb);
             self.push(res);
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a = a_num.to_number().unwrap_or(f64::NAN);
             let b = b_num.to_number().unwrap_or(f64::NAN);
@@ -155,8 +217,20 @@ impl Vm {
 
         if let Some(frame) = self.frames.last() {
             let call_site_ip = frame.ip.saturating_sub(1);
-            let lm = if a_val.is_int32() { doms_compiler::TypeMask::INT32 } else if a_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
-            let rm = if b_val.is_int32() { doms_compiler::TypeMask::INT32 } else if b_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            let lm = if a_val.is_int32() {
+                doms_compiler::TypeMask::INT32
+            } else if a_val.is_number() {
+                doms_compiler::TypeMask::DOUBLE
+            } else {
+                doms_compiler::TypeMask::OTHER
+            };
+            let rm = if b_val.is_int32() {
+                doms_compiler::TypeMask::INT32
+            } else if b_val.is_number() {
+                doms_compiler::TypeMask::DOUBLE
+            } else {
+                doms_compiler::TypeMask::OTHER
+            };
             frame.chunk.record_feedback_binary_op(call_site_ip, lm, rm);
         }
 
@@ -177,7 +251,9 @@ impl Vm {
             let res = self.alloc_bigint(&ba * &bb);
             self.push(res);
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a = a_num.to_number().unwrap_or(f64::NAN);
             let b = b_num.to_number().unwrap_or(f64::NAN);
@@ -192,8 +268,20 @@ impl Vm {
 
         if let Some(frame) = self.frames.last() {
             let call_site_ip = frame.ip.saturating_sub(1);
-            let lm = if a_val.is_int32() { doms_compiler::TypeMask::INT32 } else if a_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
-            let rm = if b_val.is_int32() { doms_compiler::TypeMask::INT32 } else if b_val.is_number() { doms_compiler::TypeMask::DOUBLE } else { doms_compiler::TypeMask::OTHER };
+            let lm = if a_val.is_int32() {
+                doms_compiler::TypeMask::INT32
+            } else if a_val.is_number() {
+                doms_compiler::TypeMask::DOUBLE
+            } else {
+                doms_compiler::TypeMask::OTHER
+            };
+            let rm = if b_val.is_int32() {
+                doms_compiler::TypeMask::INT32
+            } else if b_val.is_number() {
+                doms_compiler::TypeMask::DOUBLE
+            } else {
+                doms_compiler::TypeMask::OTHER
+            };
             frame.chunk.record_feedback_binary_op(call_site_ip, lm, rm);
         }
 
@@ -206,7 +294,9 @@ impl Vm {
             let res = self.alloc_bigint(&ba / &bb);
             self.push(res);
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a = a_num.to_number().unwrap_or(f64::NAN);
             let b = b_num.to_number().unwrap_or(f64::NAN);
@@ -227,7 +317,9 @@ impl Vm {
             let res = self.alloc_bigint(&ba % &bb);
             self.push(res);
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a = a_num.to_number().unwrap_or(f64::NAN);
             let b = b_num.to_number().unwrap_or(f64::NAN);
@@ -248,12 +340,16 @@ impl Vm {
                 let res = self.alloc_bigint(BigInt::one());
                 self.push(res);
             } else {
-                let exp = bb.to_u32().ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
+                let exp = bb
+                    .to_u32()
+                    .ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
                 let res = self.alloc_bigint(ba.pow(exp));
                 self.push(res);
             }
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a = a_num.to_number().unwrap_or(f64::NAN);
             let b = b_num.to_number().unwrap_or(f64::NAN);
@@ -312,16 +408,18 @@ impl Vm {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
                 ObjectKind::String(_) => "string",
-                ObjectKind::Symbol(_) => if v.is_symbol() { "symbol" } else { "object" },
+                ObjectKind::Symbol(_) => {
+                    if v.is_symbol() {
+                        "symbol"
+                    } else {
+                        "object"
+                    }
+                }
                 ObjectKind::BigInt(_) => "bigint",
                 ObjectKind::Function(_) | ObjectKind::NativeFunction(_) => "function",
                 ObjectKind::Proxy { target, .. } => {
                     let tgt = *target;
-                    if self.is_callable(tgt) {
-                        "function"
-                    } else {
-                        "object"
-                    }
+                    if self.is_callable(tgt) { "function" } else { "object" }
                 }
                 _ => "object",
             }
@@ -342,7 +440,9 @@ impl Vm {
             let res = self.alloc_bigint(&ba & &bb);
             self.push(res);
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a_int = double_to_int32(self.to_number_value(a_num)?);
             let b_int = double_to_int32(self.to_number_value(b_num)?);
@@ -360,7 +460,9 @@ impl Vm {
             let res = self.alloc_bigint(&ba | &bb);
             self.push(res);
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a_int = double_to_int32(self.to_number_value(a_num)?);
             let b_int = double_to_int32(self.to_number_value(b_num)?);
@@ -378,7 +480,9 @@ impl Vm {
             let res = self.alloc_bigint(&ba ^ &bb);
             self.push(res);
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a_int = double_to_int32(self.to_number_value(a_num)?);
             let b_int = double_to_int32(self.to_number_value(b_num)?);
@@ -394,16 +498,22 @@ impl Vm {
         let b_num = self.to_numeric(b_val)?;
         if let (Some(ba), Some(bb)) = (self.as_bigint_val(a_num), self.as_bigint_val(b_num)) {
             if bb.is_negative() {
-                let shift = (-bb).to_usize().ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
+                let shift = (-bb)
+                    .to_usize()
+                    .ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
                 let res = self.alloc_bigint(&ba >> shift);
                 self.push(res);
             } else {
-                let shift = bb.to_usize().ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
+                let shift = bb
+                    .to_usize()
+                    .ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
                 let res = self.alloc_bigint(&ba << shift);
                 self.push(res);
             }
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a = self.to_number_value(a_num)?;
             let b = self.to_number_value(b_num)?;
@@ -421,16 +531,22 @@ impl Vm {
         let b_num = self.to_numeric(b_val)?;
         if let (Some(ba), Some(bb)) = (self.as_bigint_val(a_num), self.as_bigint_val(b_num)) {
             if bb.is_negative() {
-                let shift = (-bb).to_usize().ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
+                let shift = (-bb)
+                    .to_usize()
+                    .ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
                 let res = self.alloc_bigint(&ba << shift);
                 self.push(res);
             } else {
-                let shift = bb.to_usize().ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
+                let shift = bb
+                    .to_usize()
+                    .ok_or_else(|| VmError::RangeError("Maximum BigInt size exceeded".into()))?;
                 let res = self.alloc_bigint(&ba >> shift);
                 self.push(res);
             }
         } else if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("Cannot mix BigInt and other types, use explicit conversions".into()));
+            return Err(VmError::TypeError(
+                "Cannot mix BigInt and other types, use explicit conversions".into(),
+            ));
         } else {
             let a = self.to_number_value(a_num)?;
             let b = self.to_number_value(b_num)?;
@@ -447,7 +563,9 @@ impl Vm {
         let a_num = self.to_numeric(a_val)?;
         let b_num = self.to_numeric(b_val)?;
         if self.as_bigint_val(a_num).is_some() || self.as_bigint_val(b_num).is_some() {
-            return Err(VmError::TypeError("BigInt has no unsigned right shift, use >> instead".into()));
+            return Err(VmError::TypeError(
+                "BigInt has no unsigned right shift, use >> instead".into(),
+            ));
         } else {
             let a = self.to_number_value(a_num)?;
             let b = self.to_number_value(b_num)?;
@@ -480,7 +598,9 @@ impl Vm {
             }
             self.push(JsValue::from_boolean(is_instance));
         } else {
-            return Err(VmError::TypeError("Right-hand side of 'instanceof' is not an object".into()));
+            return Err(VmError::TypeError(
+                "Right-hand side of 'instanceof' is not an object".into(),
+            ));
         }
         Ok(())
     }
@@ -489,7 +609,9 @@ impl Vm {
         let rhs = self.pop()?;
         let lhs = self.pop()?;
         if !rhs.is_js_object() {
-            return Err(VmError::TypeError("Cannot use 'in' operator to search for property in non-object".into()));
+            return Err(VmError::TypeError(
+                "Cannot use 'in' operator to search for property in non-object".into(),
+            ));
         }
         let prop_key = self.to_property_key(lhs)?;
         let has = self.has_property_key(rhs, &prop_key)?;

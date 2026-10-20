@@ -16,7 +16,9 @@ pub(super) fn register_boolean_global(vm: &mut Vm) {
                 return Ok(JsValue::from_boolean(b));
             }
         }
-        Err(VmError::TypeError("Boolean.prototype.valueOf requires that 'this' be a Boolean".into()))
+        Err(VmError::TypeError(
+            "Boolean.prototype.valueOf requires that 'this' be a Boolean".into(),
+        ))
     });
     let bool_to_string = vm.alloc_native_function("toString", 0, |vm, this, _args| {
         let b = if this.is_boolean() {
@@ -26,10 +28,14 @@ pub(super) fn register_boolean_global(vm: &mut Vm) {
             if let ObjectKind::BooleanObject(b) = obj.kind {
                 b
             } else {
-                return Err(VmError::TypeError("Boolean.prototype.toString requires that 'this' be a Boolean".into()));
+                return Err(VmError::TypeError(
+                    "Boolean.prototype.toString requires that 'this' be a Boolean".into(),
+                ));
             }
         } else {
-            return Err(VmError::TypeError("Boolean.prototype.toString requires that 'this' be a Boolean".into()));
+            return Err(VmError::TypeError(
+                "Boolean.prototype.toString requires that 'this' be a Boolean".into(),
+            ));
         };
         Ok(vm.alloc_string(if b { "true".into() } else { "false".into() }))
     });

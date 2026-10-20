@@ -88,10 +88,8 @@ impl Nursery {
                         ptr::write(rem_header, GcHeader::new(remaining_sz as u32, TypeTag::Raw));
                         (*rem_header).set_free();
                     }
-                    self.free_chunks.push(FreeChunk {
-                        offset: chunk.offset + total_size,
-                        size: remaining_sz,
-                    });
+                    self.free_chunks
+                        .push(FreeChunk { offset: chunk.offset + total_size, size: remaining_sz });
                     total_size
                 } else if remaining_sz > 0 {
                     chunk.size
@@ -106,7 +104,9 @@ impl Nursery {
                 self.bytes_allocated += alloc_size;
                 self.total_allocations += 1;
                 let payload = unsafe { dest.add(HEADER_SIZE) };
-                unsafe { ptr::write_bytes(payload, 0, alloc_size - HEADER_SIZE); }
+                unsafe {
+                    ptr::write_bytes(payload, 0, alloc_size - HEADER_SIZE);
+                }
                 return Some(payload);
             }
         }

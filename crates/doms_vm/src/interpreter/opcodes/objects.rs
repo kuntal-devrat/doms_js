@@ -60,7 +60,10 @@ impl Vm {
         Ok(())
     }
 
-    pub(crate) fn op_require_object_coercible(&mut self, target_depth: usize) -> Result<(), VmError> {
+    pub(crate) fn op_require_object_coercible(
+        &mut self,
+        target_depth: usize,
+    ) -> Result<(), VmError> {
         let val = *self.peek()?;
         if val.is_null() || val.is_undefined() {
             self.handle_exception_at_depth(
@@ -71,7 +74,12 @@ impl Vm {
         Ok(())
     }
 
-    pub(crate) fn op_create_regexp(&mut self, p_idx: u16, f_idx: u16, chunk: &BytecodeChunk) -> Result<(), VmError> {
+    pub(crate) fn op_create_regexp(
+        &mut self,
+        p_idx: u16,
+        f_idx: u16,
+        chunk: &BytecodeChunk,
+    ) -> Result<(), VmError> {
         let pattern = match &chunk.constants[p_idx as usize] {
             Constant::String(s) => s.clone(),
             _ => String::new(),
@@ -95,7 +103,10 @@ impl Vm {
                     let val = self.get_property(obj_val, &name);
                     if val == JsValue::uninitialized() {
                         self.handle_exception_at_depth(
-                            VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                            VmError::ReferenceError(format!(
+                                "Cannot access '{}' before initialization",
+                                name
+                            )),
                             target_depth,
                         )?;
                         return Ok(Some(JsValue::undefined()));
@@ -110,13 +121,17 @@ impl Vm {
                 return Ok(Some(JsValue::undefined()));
             }
         };
-        let keys_vec: Vec<JsValue> = keys_to_alloc.into_iter().map(|k| self.alloc_string(k)).collect();
+        let keys_vec: Vec<JsValue> =
+            keys_to_alloc.into_iter().map(|k| self.alloc_string(k)).collect();
         let arr = self.alloc_array(keys_vec);
         self.push(arr);
         Ok(None)
     }
 
-    pub(crate) fn op_get_iterator(&mut self, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+    pub(crate) fn op_get_iterator(
+        &mut self,
+        target_depth: usize,
+    ) -> Result<Option<JsValue>, VmError> {
         let iterable = self.pop()?;
         let prev_temp = self.temp_roots.len();
         self.temp_roots.push(iterable);
@@ -205,7 +220,11 @@ impl Vm {
         Ok(None)
     }
 
-    pub(crate) fn op_iterator_next(&mut self, target: i32, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+    pub(crate) fn op_iterator_next(
+        &mut self,
+        target: i32,
+        target_depth: usize,
+    ) -> Result<Option<JsValue>, VmError> {
         let iter_rec_val = self.pop()?;
         let (iterator, next_fn) = if let Some(ptr) = iter_rec_val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -278,7 +297,11 @@ impl Vm {
         Ok(None)
     }
 
-    pub(crate) fn op_iterator_close(&mut self, is_abrupt: bool, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+    pub(crate) fn op_iterator_close(
+        &mut self,
+        is_abrupt: bool,
+        target_depth: usize,
+    ) -> Result<Option<JsValue>, VmError> {
         let iter_rec_val = self.pop()?;
         let iterator = if let Some(ptr) = iter_rec_val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -340,7 +363,10 @@ impl Vm {
         Ok(None)
     }
 
-    pub(crate) fn op_get_async_iterator(&mut self, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+    pub(crate) fn op_get_async_iterator(
+        &mut self,
+        target_depth: usize,
+    ) -> Result<Option<JsValue>, VmError> {
         let iterable = self.pop()?;
         if iterable.is_nullish() {
             let err = VmError::TypeError("Value is not async iterable".into());
@@ -405,11 +431,7 @@ impl Vm {
         let rec = JsObject::new_with_kind(
             ShapeRegistry::ROOT_SHAPE_ID,
             None,
-            ObjectKind::AsyncIteratorRecord {
-                iterator,
-                next_method: next_fn,
-                done: false,
-            },
+            ObjectKind::AsyncIteratorRecord { iterator, next_method: next_fn, done: false },
         );
         let ptr = self.allocate_js_object(rec);
         let rec_val = unsafe { JsValue::from_object_ptr(ptr as *mut u8) };
@@ -417,7 +439,11 @@ impl Vm {
         Ok(None)
     }
 
-    pub(crate) fn op_async_iterator_next(&mut self, target: i32, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+    pub(crate) fn op_async_iterator_next(
+        &mut self,
+        target: i32,
+        target_depth: usize,
+    ) -> Result<Option<JsValue>, VmError> {
         let iter_rec_val = self.pop()?;
         let (iterator, next_fn) = if let Some(ptr) = iter_rec_val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -498,7 +524,11 @@ impl Vm {
         Ok(None)
     }
 
-    pub(crate) fn op_async_iterator_close(&mut self, is_abrupt: bool, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+    pub(crate) fn op_async_iterator_close(
+        &mut self,
+        is_abrupt: bool,
+        target_depth: usize,
+    ) -> Result<Option<JsValue>, VmError> {
         let iter_rec_val = self.pop()?;
         let iterator = if let Some(ptr) = iter_rec_val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -573,7 +603,11 @@ impl Vm {
         Ok(None)
     }
 
-    pub(crate) fn op_define_getter(&mut self, prop_idx: u16, chunk: &BytecodeChunk) -> Result<(), VmError> {
+    pub(crate) fn op_define_getter(
+        &mut self,
+        prop_idx: u16,
+        chunk: &BytecodeChunk,
+    ) -> Result<(), VmError> {
         let name = match &chunk.constants[prop_idx as usize] {
             Constant::String(s) => s.clone(),
             _ => return Err(VmError::TypeError("Property name must be string".into())),
@@ -593,7 +627,11 @@ impl Vm {
         Ok(())
     }
 
-    pub(crate) fn op_define_setter(&mut self, prop_idx: u16, chunk: &BytecodeChunk) -> Result<(), VmError> {
+    pub(crate) fn op_define_setter(
+        &mut self,
+        prop_idx: u16,
+        chunk: &BytecodeChunk,
+    ) -> Result<(), VmError> {
         let name = match &chunk.constants[prop_idx as usize] {
             Constant::String(s) => s.clone(),
             _ => return Err(VmError::TypeError("Property name must be string".into())),
@@ -634,7 +672,9 @@ impl Vm {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             match prop_key {
                 PropertyKeyVal::String(s) => {
-                    let accs = obj.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+                    let accs = obj
+                        .accessors
+                        .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
                     accs.entry(s).or_default().getter = Some(getter_val);
                 }
                 PropertyKeyVal::Symbol(sym) => {
@@ -666,7 +706,9 @@ impl Vm {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             match prop_key {
                 PropertyKeyVal::String(s) => {
-                    let accs = obj.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+                    let accs = obj
+                        .accessors
+                        .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
                     accs.entry(s).or_default().setter = Some(setter_val);
                 }
                 PropertyKeyVal::Symbol(sym) => {

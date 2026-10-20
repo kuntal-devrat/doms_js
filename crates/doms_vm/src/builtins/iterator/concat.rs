@@ -6,7 +6,8 @@ use crate::object::IteratorHelperKind;
 use crate::value::JsValue;
 
 pub fn iterator_concat(vm: &mut Vm, args: &[JsValue]) -> Result<JsValue, VmError> {
-    let sym_iter = vm.symbol_iterator.ok_or_else(|| VmError::TypeError("Symbol.iterator not found".into()))?;
+    let sym_iter =
+        vm.symbol_iterator.ok_or_else(|| VmError::TypeError("Symbol.iterator not found".into()))?;
     let mut iterables = Vec::new();
     for arg in args {
         if !arg.is_object() {

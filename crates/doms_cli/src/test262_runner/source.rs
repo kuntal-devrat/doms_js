@@ -35,7 +35,9 @@ impl Test262Runner {
         out.push_str("        };\n");
         out.push_str("    };\n");
         out.push_str("}\n");
-        out.push_str("if (!$262.evalScript) $262.evalScript = function(src) { return eval(src); };\n");
+        out.push_str(
+            "if (!$262.evalScript) $262.evalScript = function(src) { return eval(src); };\n",
+        );
         out.push_str("if (!$262.gc) $262.gc = function() {};\n");
         out.push_str("if (!$262.agent) $262.agent = {};\n");
         out.push_str("var $DONE = function(err) { if (err) { throw err; } };\n");

@@ -18,7 +18,14 @@ impl<'a> Parser<'a> {
                         let expr = self.parse_expression(0)?;
                         self.consume_semicolon()?;
                         Ok(Statement::Expression(expr))
-                    } else if matches!(self.peeked.kind, TokenKind::Ident(_) | TokenKind::LBrace | TokenKind::Async | TokenKind::Await | TokenKind::Yield) {
+                    } else if matches!(
+                        self.peeked.kind,
+                        TokenKind::Ident(_)
+                            | TokenKind::LBrace
+                            | TokenKind::Async
+                            | TokenKind::Await
+                            | TokenKind::Yield
+                    ) {
                         self.parse_var_decl(VarKind::Let)
                     } else {
                         let expr = self.parse_expression(0)?;
@@ -31,12 +38,18 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Const => self.parse_var_decl(VarKind::Const),
             TokenKind::Var => self.parse_var_decl(VarKind::Var),
-            TokenKind::Ident(ref id) if id == "using" && !self.peeked.has_preceding_line_terminator && matches!(self.peeked.kind, TokenKind::Ident(_) | TokenKind::Await) => {
+            TokenKind::Ident(ref id)
+                if id == "using"
+                    && !self.peeked.has_preceding_line_terminator
+                    && matches!(self.peeked.kind, TokenKind::Ident(_) | TokenKind::Await) =>
+            {
                 self.advance()?; // 'using'
                 self.parse_using_decl()
             }
             TokenKind::Async => {
-                if self.peeked.kind == TokenKind::Function && !self.peeked.has_preceding_line_terminator {
+                if self.peeked.kind == TokenKind::Function
+                    && !self.peeked.has_preceding_line_terminator
+                {
                     self.advance()?; // async
                     self.parse_async_function_decl()
                 } else {
@@ -126,28 +139,39 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Debugger)
             }
             TokenKind::With => self.parse_with_statement(),
-            ref tok if self.peeked.kind == TokenKind::Colon && match tok {
-                TokenKind::Ident(_) => true,
-                TokenKind::Implements
-                | TokenKind::Interface
-                | TokenKind::Package
-                | TokenKind::Private
-                | TokenKind::Protected
-                | TokenKind::Public
-                | TokenKind::Static
-                | TokenKind::Yield
-                | TokenKind::Await => true,
-                _ => false,
-            } => {
+            ref tok
+                if self.peeked.kind == TokenKind::Colon
+                    && match tok {
+                        TokenKind::Ident(_) => true,
+                        TokenKind::Implements
+                        | TokenKind::Interface
+                        | TokenKind::Package
+                        | TokenKind::Private
+                        | TokenKind::Protected
+                        | TokenKind::Public
+                        | TokenKind::Static
+                        | TokenKind::Yield
+                        | TokenKind::Await => true,
+                        _ => false,
+                    } =>
+            {
                 let lbl = match &self.current.kind {
                     TokenKind::Ident(s) => s.clone(),
                     other => other.as_prop_name().unwrap_or_default(),
                 };
                 if self.is_strict && is_strict_reserved_word(&lbl) {
-                    return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        self.current.kind.clone(),
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 if (self.in_async || self.is_module || self.in_static_block) && lbl == "await" {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Await, self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Await,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 self.advance()?; // ident/keyword
                 self.advance()?; // colon

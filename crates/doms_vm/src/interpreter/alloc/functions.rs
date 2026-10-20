@@ -30,7 +30,12 @@ impl Vm {
         res
     }
 
-    pub fn alloc_closure_native_function(&mut self, name: &str, length: u8, func: crate::object::ClosureNativeFn) -> JsValue {
+    pub fn alloc_closure_native_function(
+        &mut self,
+        name: &str,
+        length: u8,
+        func: crate::object::ClosureNativeFn,
+    ) -> JsValue {
         let native = NativeFunction::new_closure(name.to_string(), length, func);
         let proto = self.function_proto.or(self.object_proto);
         let obj = JsObject::new_native_function(ShapeRegistry::ROOT_SHAPE_ID, proto, native);

@@ -12,7 +12,8 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
     let eval_script_fn = vm.alloc_native_function("evalScript", 1, |vm, _this, args| {
         let code = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
         let program = doms_parser::parse(&code).map_err(|e| VmError::SyntaxError(e.to_string()))?;
-        let chunk = doms_compiler::compile(&program).map_err(|e| VmError::SyntaxError(e.to_string()))?;
+        let chunk =
+            doms_compiler::compile(&program).map_err(|e| VmError::SyntaxError(e.to_string()))?;
         vm.in_eval = false;
         vm.run(&chunk)
     });

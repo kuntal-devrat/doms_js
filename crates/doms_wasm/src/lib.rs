@@ -8,8 +8,8 @@
 use doms_vm::Vm;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT_ISOLATE_ID: AtomicUsize = AtomicUsize::new(1);
 static ISOLATES: Mutex<Option<HashMap<usize, DomsWasmSandbox>>> = Mutex::new(None);
@@ -29,7 +29,8 @@ impl DomsWasmSandbox {
 
     pub fn eval(&mut self, source: &str) -> Result<String, String> {
         let program = doms_parser::parse(source).map_err(|e| format!("Parse error: {}", e))?;
-        let chunk = doms_compiler::compile(&program).map_err(|e| format!("Compile error: {}", e))?;
+        let chunk =
+            doms_compiler::compile(&program).map_err(|e| format!("Compile error: {}", e))?;
         let val = self.vm.run(&chunk).map_err(|e| format!("Runtime error: {}", e))?;
         Ok(self.vm.to_string_value(val))
     }
@@ -58,7 +59,8 @@ impl Default for DomsWasmSandbox {
 /// Every string returned by the eval entry points is allocated this way, so
 /// callers may uniformly release results with [`doms_wasm_free_string`].
 fn result_cstring(s: impl Into<Vec<u8>>) -> *const u8 {
-    CString::new(s).unwrap_or_else(|_| CString::new("Error: interior NUL").unwrap()).into_raw() as *const u8
+    CString::new(s).unwrap_or_else(|_| CString::new("Error: interior NUL").unwrap()).into_raw()
+        as *const u8
 }
 
 /// Lock the isolate table, recovering from poisoning after a panic.
@@ -232,7 +234,8 @@ mod tests {
         }
 
         let res_ptr = doms_wasm_eval(ptr, script.len());
-        let res_str = unsafe { CStr::from_ptr(res_ptr as *const std::ffi::c_char) }.to_str().unwrap();
+        let res_str =
+            unsafe { CStr::from_ptr(res_ptr as *const std::ffi::c_char) }.to_str().unwrap();
         assert_eq!(res_str, "42");
 
         doms_wasm_free_string(res_ptr as *mut _);

@@ -1,8 +1,8 @@
 //! Cursor movement, peeking, and whitespace/comment skipping.
 
+use super::Lexer;
 use super::chars::{is_ecma_whitespace, is_line_terminator};
 use super::token::LexError;
-use super::Lexer;
 
 impl<'a> Lexer<'a> {
     #[inline(always)]
@@ -45,11 +45,7 @@ impl<'a> Lexer<'a> {
             return None;
         }
         let b2 = self.bytes[off];
-        if b2 < 128 {
-            Some(b2 as char)
-        } else {
-            self.source[off..].chars().next()
-        }
+        if b2 < 128 { Some(b2 as char) } else { self.source[off..].chars().next() }
     }
 
     pub(super) fn advance(&mut self) -> Option<char> {

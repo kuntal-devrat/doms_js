@@ -1,7 +1,7 @@
 //! The `Date` constructor, its statics and global registration.
 
+use super::calendar::{DAYS, MONTHS, ms_to_utc, parse_iso_date, utc_to_ms};
 use super::*;
-use super::calendar::{ms_to_utc, parse_iso_date, utc_to_ms, DAYS, MONTHS};
 
 pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue) {
     let date_now_fn = vm.alloc_native_function("now", 0, |_vm, _this, _args| {
@@ -23,12 +23,27 @@ pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue)
         let s_num = if args.len() > 5 { vm.to_number_value(args[5])? } else { 0.0 };
         let ms_num = if args.len() > 6 { vm.to_number_value(args[6])? } else { 0.0 };
 
-        if y_num.is_nan() || m_num.is_nan() || d_num.is_nan() || h_num.is_nan() || min_num.is_nan() || s_num.is_nan() || ms_num.is_nan() {
+        if y_num.is_nan()
+            || m_num.is_nan()
+            || d_num.is_nan()
+            || h_num.is_nan()
+            || min_num.is_nan()
+            || s_num.is_nan()
+            || ms_num.is_nan()
+        {
             return Ok(JsValue::from_double(f64::NAN));
         }
         let y = y_num as i32;
         let final_y = if (0..=99).contains(&y) && y_num.fract() == 0.0 { y + 1900 } else { y };
-        Ok(JsValue::from_double(utc_to_ms(final_y, m_num as i32, d_num as i32, h_num as i32, min_num as i32, s_num as i32, ms_num as i32)))
+        Ok(JsValue::from_double(utc_to_ms(
+            final_y,
+            m_num as i32,
+            d_num as i32,
+            h_num as i32,
+            min_num as i32,
+            s_num as i32,
+            ms_num as i32,
+        )))
     });
     let date_parse_fn = vm.alloc_native_function("parse", 1, |vm, _this, args| {
         let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
@@ -50,7 +65,10 @@ pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue)
             if let Some((y, m, d, w, h, min, s, _)) = ms_to_utc(now_ms) {
                 let day_name = DAYS.get(w as usize).unwrap_or(&"Sun");
                 let mon_name = MONTHS.get(m as usize).unwrap_or(&"Jan");
-                let str_res = format!("{} {} {:02} {:04} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)", day_name, mon_name, d, y, h, min, s);
+                let str_res = format!(
+                    "{} {} {:02} {:04} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
+                    day_name, mon_name, d, y, h, min, s
+                );
                 return Ok(vm.alloc_string(str_res));
             }
             return Ok(vm.alloc_string("Invalid Date".into()));
@@ -82,12 +100,28 @@ pub(super) fn register_constructor_and_statics(vm: &mut Vm, date_proto: JsValue)
             let s_num = if args.len() > 5 { vm.to_number_value(args[5])? } else { 0.0 };
             let ms_num = if args.len() > 6 { vm.to_number_value(args[6])? } else { 0.0 };
 
-            if y_num.is_nan() || m_num.is_nan() || d_num.is_nan() || h_num.is_nan() || min_num.is_nan() || s_num.is_nan() || ms_num.is_nan() {
+            if y_num.is_nan()
+                || m_num.is_nan()
+                || d_num.is_nan()
+                || h_num.is_nan()
+                || min_num.is_nan()
+                || s_num.is_nan()
+                || ms_num.is_nan()
+            {
                 f64::NAN
             } else {
                 let y = y_num as i32;
-                let final_y = if (0..=99).contains(&y) && y_num.fract() == 0.0 { y + 1900 } else { y };
-                utc_to_ms(final_y, m_num as i32, d_num as i32, h_num as i32, min_num as i32, s_num as i32, ms_num as i32)
+                let final_y =
+                    if (0..=99).contains(&y) && y_num.fract() == 0.0 { y + 1900 } else { y };
+                utc_to_ms(
+                    final_y,
+                    m_num as i32,
+                    d_num as i32,
+                    h_num as i32,
+                    min_num as i32,
+                    s_num as i32,
+                    ms_num as i32,
+                )
             }
         };
         let proto = vm.date_proto.or(vm.object_proto);

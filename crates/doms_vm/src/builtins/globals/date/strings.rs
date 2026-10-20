@@ -1,14 +1,23 @@
 //! `Date.prototype` string conversion methods.
 
+use super::calendar::{DAYS, MONTHS, get_date_ms, ms_to_utc};
 use super::*;
-use super::calendar::{get_date_ms, ms_to_utc, DAYS, MONTHS};
 
 pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
     let date_to_iso_string = vm.alloc_native_function("toISOString", 0, |vm, this, _args| {
         let (_, ms) = get_date_ms(this)?;
         match ms_to_utc(ms) {
             Some((y, m, d, _, h, min, s, ms_part)) => {
-                let iso = format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", y, m + 1, d, h, min, s, ms_part);
+                let iso = format!(
+                    "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+                    y,
+                    m + 1,
+                    d,
+                    h,
+                    min,
+                    s,
+                    ms_part
+                );
                 Ok(vm.alloc_string(iso))
             }
             None => Err(VmError::RangeError("Invalid time value".into())),
@@ -21,7 +30,10 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
             Some((y, m, d, w, h, min, s, _)) => {
                 let day_name = DAYS.get(w as usize).unwrap_or(&"Sun");
                 let mon_name = MONTHS.get(m as usize).unwrap_or(&"Jan");
-                let utc_str = format!("{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT", day_name, d, mon_name, y, h, min, s);
+                let utc_str = format!(
+                    "{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
+                    day_name, d, mon_name, y, h, min, s
+                );
                 Ok(vm.alloc_string(utc_str))
             }
             None => Ok(vm.alloc_string("Invalid Date".into())),
@@ -45,7 +57,8 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
         let (_, ms) = get_date_ms(this)?;
         match ms_to_utc(ms) {
             Some((_, _, _, _, h, min, s, _)) => {
-                let s = format!("{:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)", h, min, s);
+                let s =
+                    format!("{:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)", h, min, s);
                 Ok(vm.alloc_string(s))
             }
             None => Ok(vm.alloc_string("Invalid Date".into())),
@@ -58,7 +71,10 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
             Some((y, m, d, w, h, min, s, _)) => {
                 let day_name = DAYS.get(w as usize).unwrap_or(&"Sun");
                 let mon_name = MONTHS.get(m as usize).unwrap_or(&"Jan");
-                let s = format!("{} {} {:02} {:04} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)", day_name, mon_name, d, y, h, min, s);
+                let s = format!(
+                    "{} {} {:02} {:04} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
+                    day_name, mon_name, d, y, h, min, s
+                );
                 Ok(vm.alloc_string(s))
             }
             None => Ok(vm.alloc_string("Invalid Date".into())),
@@ -85,27 +101,29 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
         }
     });
 
-    let date_to_locale_date_string = vm.alloc_native_function("toLocaleDateString", 0, |vm, this, _args| {
-        let (_, ms) = get_date_ms(this)?;
-        match ms_to_utc(ms) {
-            Some((y, m, d, _, _, _, _, _)) => {
-                let s = format!("{:02}/{:02}/{:04}", m + 1, d, y);
-                Ok(vm.alloc_string(s))
+    let date_to_locale_date_string =
+        vm.alloc_native_function("toLocaleDateString", 0, |vm, this, _args| {
+            let (_, ms) = get_date_ms(this)?;
+            match ms_to_utc(ms) {
+                Some((y, m, d, _, _, _, _, _)) => {
+                    let s = format!("{:02}/{:02}/{:04}", m + 1, d, y);
+                    Ok(vm.alloc_string(s))
+                }
+                None => Ok(vm.alloc_string("Invalid Date".into())),
             }
-            None => Ok(vm.alloc_string("Invalid Date".into())),
-        }
-    });
+        });
 
-    let date_to_locale_time_string = vm.alloc_native_function("toLocaleTimeString", 0, |vm, this, _args| {
-        let (_, ms) = get_date_ms(this)?;
-        match ms_to_utc(ms) {
-            Some((_, _, _, _, h, min, s, _)) => {
-                let s = format!("{:02}:{:02}:{:02}", h, min, s);
-                Ok(vm.alloc_string(s))
+    let date_to_locale_time_string =
+        vm.alloc_native_function("toLocaleTimeString", 0, |vm, this, _args| {
+            let (_, ms) = get_date_ms(this)?;
+            match ms_to_utc(ms) {
+                Some((_, _, _, _, h, min, s, _)) => {
+                    let s = format!("{:02}:{:02}:{:02}", h, min, s);
+                    Ok(vm.alloc_string(s))
+                }
+                None => Ok(vm.alloc_string("Invalid Date".into())),
             }
-            None => Ok(vm.alloc_string("Invalid Date".into())),
-        }
-    });
+        });
 
     vec![
         ("toISOString", date_to_iso_string),

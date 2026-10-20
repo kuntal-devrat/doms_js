@@ -1,19 +1,19 @@
 //! Complete ECMAScript Meta-Object Protocol (MOP) implementation for Proxy and Reflect.
 //!
 //! Implements all 13 internal methods per ECMAScript 2024 Chapter 10.5:
-//! 1.  [[GetPrototypeOf]]
-//! 2.  [[SetPrototypeOf]]
-//! 3.  [[IsExtensible]]
-//! 4.  [[PreventExtensions]]
-//! 5.  [[GetOwnProperty]]
-//! 6.  [[DefineOwnProperty]]
-//! 7.  [[HasProperty]]
-//! 8.  [[Get]]
-//! 9.  [[Set]]
-//! 10. [[Delete]]
-//! 11. [[OwnPropertyKeys]]
-//! 12. [[Call]]
-//! 13. [[Construct]]
+//! 1.  `[[GetPrototypeOf]]`
+//! 2.  `[[SetPrototypeOf]]`
+//! 3.  `[[IsExtensible]]`
+//! 4.  `[[PreventExtensions]]`
+//! 5.  `[[GetOwnProperty]]`
+//! 6.  `[[DefineOwnProperty]]`
+//! 7.  `[[HasProperty]]`
+//! 8.  `[[Get]]`
+//! 9.  `[[Set]]`
+//! 10. `[[Delete]]`
+//! 11. `[[OwnPropertyKeys]]`
+//! 12. `[[Call]]`
+//! 13. `[[Construct]]`
 
 use super::*;
 use crate::builtins::object::descriptor::get_own_property_descriptor_internal;
@@ -29,9 +29,9 @@ impl Vm {
         proxy: JsValue,
         trap_name: &str,
     ) -> Result<(JsValue, JsValue, Option<JsValue>), VmError> {
-        let ptr = proxy.as_object_ptr().ok_or_else(|| {
-            VmError::TypeError("Proxy operation requires an object".into())
-        })?;
+        let ptr = proxy
+            .as_object_ptr()
+            .ok_or_else(|| VmError::TypeError("Proxy operation requires an object".into()))?;
         let (target, handler) = {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
@@ -41,7 +41,9 @@ impl Vm {
         };
 
         if handler.is_null() || handler.is_undefined() {
-            return Err(VmError::TypeError("Cannot perform operation on a proxy that has been revoked".into()));
+            return Err(VmError::TypeError(
+                "Cannot perform operation on a proxy that has been revoked".into(),
+            ));
         }
 
         let trap = self.get_property_result(handler, trap_name)?;
@@ -56,13 +58,16 @@ impl Vm {
         Ok((target, handler, Some(trap)))
     }
 
-    /// 10.5.1 [[GetPrototypeOf]]
+    /// 10.5.1 `[[GetPrototypeOf]]`
     pub fn proxy_get_prototype_of(&mut self, proxy: JsValue) -> Result<JsValue, VmError> {
-        let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "getPrototypeOf")?;
+        let (target, handler, trap_opt) =
+            self.validate_proxy_and_get_trap(proxy, "getPrototypeOf")?;
         if let Some(trap) = trap_opt {
             let handler_proto = self.call(trap, handler, &[target])?;
             if !handler_proto.is_js_object() && !handler_proto.is_null() {
-                return Err(VmError::TypeError("Proxy getPrototypeOf handler returned non-object or non-null".into()));
+                return Err(VmError::TypeError(
+                    "Proxy getPrototypeOf handler returned non-object or non-null".into(),
+                ));
             }
             let is_ext = is_extensible_internal(self, target)?;
             if !is_ext {
@@ -77,12 +82,19 @@ impl Vm {
         }
     }
 
-    /// 10.5.2 [[SetPrototypeOf]]
-    pub fn proxy_set_prototype_of(&mut self, proxy: JsValue, proto: JsValue) -> Result<bool, VmError> {
+    /// 10.5.2 `[[SetPrototypeOf]]`
+    pub fn proxy_set_prototype_of(
+        &mut self,
+        proxy: JsValue,
+        proto: JsValue,
+    ) -> Result<bool, VmError> {
         if !proto.is_js_object() && !proto.is_null() {
-            return Err(VmError::TypeError("Object prototype may only be an Object or null".into()));
+            return Err(VmError::TypeError(
+                "Object prototype may only be an Object or null".into(),
+            ));
         }
-        let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "setPrototypeOf")?;
+        let (target, handler, trap_opt) =
+            self.validate_proxy_and_get_trap(proxy, "setPrototypeOf")?;
         if let Some(trap) = trap_opt {
             let trap_res = self.call(trap, handler, &[target, proto])?;
             let boolean_trap_result = trap_res.is_truthy();
@@ -102,15 +114,18 @@ impl Vm {
         }
     }
 
-    /// 10.5.3 [[IsExtensible]]
+    /// 10.5.3 `[[IsExtensible]]`
     pub fn proxy_is_extensible(&mut self, proxy: JsValue) -> Result<bool, VmError> {
-        let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "isExtensible")?;
+        let (target, handler, trap_opt) =
+            self.validate_proxy_and_get_trap(proxy, "isExtensible")?;
         if let Some(trap) = trap_opt {
             let trap_res = self.call(trap, handler, &[target])?;
             let boolean_trap_result = trap_res.is_truthy();
             let target_result = is_extensible_internal(self, target)?;
             if boolean_trap_result != target_result {
-                return Err(VmError::TypeError("Proxy isExtensible invariant: result must match target extensibility".into()));
+                return Err(VmError::TypeError(
+                    "Proxy isExtensible invariant: result must match target extensibility".into(),
+                ));
             }
             Ok(boolean_trap_result)
         } else {
@@ -118,9 +133,10 @@ impl Vm {
         }
     }
 
-    /// 10.5.4 [[PreventExtensions]]
+    /// 10.5.4 `[[PreventExtensions]]`
     pub fn proxy_prevent_extensions(&mut self, proxy: JsValue) -> Result<bool, VmError> {
-        let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "preventExtensions")?;
+        let (target, handler, trap_opt) =
+            self.validate_proxy_and_get_trap(proxy, "preventExtensions")?;
         if let Some(trap) = trap_opt {
             let trap_res = self.call(trap, handler, &[target])?;
             let boolean_trap_result = trap_res.is_truthy();
@@ -136,14 +152,21 @@ impl Vm {
         }
     }
 
-    /// 10.5.5 [[GetOwnProperty]]
-    pub fn proxy_get_own_property_descriptor(&mut self, proxy: JsValue, key: &PropertyKeyVal) -> Result<JsValue, VmError> {
-        let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "getOwnPropertyDescriptor")?;
+    /// 10.5.5 `[[GetOwnProperty]]`
+    pub fn proxy_get_own_property_descriptor(
+        &mut self,
+        proxy: JsValue,
+        key: &PropertyKeyVal,
+    ) -> Result<JsValue, VmError> {
+        let (target, handler, trap_opt) =
+            self.validate_proxy_and_get_trap(proxy, "getOwnPropertyDescriptor")?;
         let key_arg = self.property_key_to_value(key);
         if let Some(trap) = trap_opt {
             let trap_res = self.call(trap, handler, &[target, key_arg])?;
             if !trap_res.is_js_object() && !trap_res.is_undefined() {
-                return Err(VmError::TypeError("Proxy getOwnPropertyDescriptor trap must return an object or undefined".into()));
+                return Err(VmError::TypeError(
+                    "Proxy getOwnPropertyDescriptor trap must return an object or undefined".into(),
+                ));
             }
             let target_desc = get_own_property_descriptor_internal(self, target, key)?;
             if trap_res.is_undefined() {
@@ -194,9 +217,15 @@ impl Vm {
         }
     }
 
-    /// 10.5.6 [[DefineOwnProperty]]
-    pub fn proxy_define_own_property(&mut self, proxy: JsValue, key: &PropertyKeyVal, desc: JsValue) -> Result<bool, VmError> {
-        let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "defineProperty")?;
+    /// 10.5.6 `[[DefineOwnProperty]]`
+    pub fn proxy_define_own_property(
+        &mut self,
+        proxy: JsValue,
+        key: &PropertyKeyVal,
+        desc: JsValue,
+    ) -> Result<bool, VmError> {
+        let (target, handler, trap_opt) =
+            self.validate_proxy_and_get_trap(proxy, "defineProperty")?;
         let key_arg = self.property_key_to_value(key);
         if let Some(trap) = trap_opt {
             let trap_res = self.call(trap, handler, &[target, key_arg, desc])?;
@@ -245,12 +274,17 @@ impl Vm {
             }
             Ok(true)
         } else {
-            let res = crate::builtins::object::define_property::define_property_internal(self, target, key.clone(), desc);
+            let res = crate::builtins::object::define_property::define_property_internal(
+                self,
+                target,
+                key.clone(),
+                desc,
+            );
             Ok(res.is_ok())
         }
     }
 
-    /// 10.5.7 [[HasProperty]]
+    /// 10.5.7 `[[HasProperty]]`
     pub fn proxy_has(&mut self, proxy: JsValue, key: &PropertyKeyVal) -> Result<bool, VmError> {
         let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "has")?;
         let key_arg = self.property_key_to_value(key);
@@ -276,8 +310,13 @@ impl Vm {
         }
     }
 
-    /// 10.5.8 [[Get]]
-    pub fn proxy_get(&mut self, proxy: JsValue, key: &PropertyKeyVal, receiver: JsValue) -> Result<JsValue, VmError> {
+    /// 10.5.8 `[[Get]]`
+    pub fn proxy_get(
+        &mut self,
+        proxy: JsValue,
+        key: &PropertyKeyVal,
+        receiver: JsValue,
+    ) -> Result<JsValue, VmError> {
         let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "get")?;
         let key_arg = self.property_key_to_value(key);
         if let Some(trap) = trap_opt {
@@ -285,7 +324,8 @@ impl Vm {
             let target_desc = get_own_property_descriptor_internal(self, target, key)?;
             if !target_desc.is_undefined() {
                 let conf = self.get_property(target_desc, "configurable").is_truthy();
-                let has_val = !self.get_property(target_desc, "value").is_undefined() || self.has_property(target_desc, "value").unwrap_or(false);
+                let has_val = !self.get_property(target_desc, "value").is_undefined()
+                    || self.has_property(target_desc, "value").unwrap_or(false);
                 let is_writ = self.get_property(target_desc, "writable").is_truthy();
                 if !conf && has_val && !is_writ {
                     let target_val = self.get_property(target_desc, "value");
@@ -301,14 +341,22 @@ impl Vm {
             Ok(trap_res)
         } else {
             match key {
-                PropertyKeyVal::String(s) => Ok(self.get_property_with_receiver(target, s, receiver)),
+                PropertyKeyVal::String(s) => {
+                    Ok(self.get_property_with_receiver(target, s, receiver))
+                }
                 PropertyKeyVal::Symbol(sym) => Ok(self.get_symbol_property(target, *sym)),
             }
         }
     }
 
-    /// 10.5.9 [[Set]]
-    pub fn proxy_set(&mut self, proxy: JsValue, key: &PropertyKeyVal, value: JsValue, receiver: JsValue) -> Result<bool, VmError> {
+    /// 10.5.9 `[[Set]]`
+    pub fn proxy_set(
+        &mut self,
+        proxy: JsValue,
+        key: &PropertyKeyVal,
+        value: JsValue,
+        receiver: JsValue,
+    ) -> Result<bool, VmError> {
         let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "set")?;
         let key_arg = self.property_key_to_value(key);
         if let Some(trap) = trap_opt {
@@ -320,7 +368,8 @@ impl Vm {
             let target_desc = get_own_property_descriptor_internal(self, target, key)?;
             if !target_desc.is_undefined() {
                 let conf = self.get_property(target_desc, "configurable").is_truthy();
-                let has_val = !self.get_property(target_desc, "value").is_undefined() || self.has_property(target_desc, "value").unwrap_or(false);
+                let has_val = !self.get_property(target_desc, "value").is_undefined()
+                    || self.has_property(target_desc, "value").unwrap_or(false);
                 let is_writ = self.get_property(target_desc, "writable").is_truthy();
                 if !conf && has_val && !is_writ {
                     let target_val = self.get_property(target_desc, "value");
@@ -336,15 +385,24 @@ impl Vm {
             Ok(true)
         } else {
             match key {
-                PropertyKeyVal::String(s) => self.set_property_with_receiver(target, s, value, receiver),
-                PropertyKeyVal::Symbol(sym) => self.set_symbol_property_result(target, *sym, value).map(|_| true),
+                PropertyKeyVal::String(s) => {
+                    self.set_property_with_receiver(target, s, value, receiver)
+                }
+                PropertyKeyVal::Symbol(sym) => {
+                    self.set_symbol_property_result(target, *sym, value).map(|_| true)
+                }
             }
         }
     }
 
-    /// 10.5.10 [[Delete]]
-    pub fn proxy_delete_property(&mut self, proxy: JsValue, key: &PropertyKeyVal) -> Result<bool, VmError> {
-        let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "deleteProperty")?;
+    /// 10.5.10 `[[Delete]]`
+    pub fn proxy_delete_property(
+        &mut self,
+        proxy: JsValue,
+        key: &PropertyKeyVal,
+    ) -> Result<bool, VmError> {
+        let (target, handler, trap_opt) =
+            self.validate_proxy_and_get_trap(proxy, "deleteProperty")?;
         let key_arg = self.property_key_to_value(key);
         if let Some(trap) = trap_opt {
             let trap_res = self.call(trap, handler, &[target, key_arg])?;
@@ -356,7 +414,10 @@ impl Vm {
             if !target_desc.is_undefined() {
                 let conf = self.get_property(target_desc, "configurable").is_truthy();
                 if !conf {
-                    return Err(VmError::TypeError("Proxy deleteProperty invariant: cannot delete non-configurable property".into()));
+                    return Err(VmError::TypeError(
+                        "Proxy deleteProperty invariant: cannot delete non-configurable property"
+                            .into(),
+                    ));
                 }
                 let is_ext = is_extensible_internal(self, target)?;
                 if !is_ext {
@@ -369,8 +430,11 @@ impl Vm {
         }
     }
 
-    /// 10.5.11 [[OwnPropertyKeys]]
-    pub fn proxy_own_property_keys(&mut self, proxy: JsValue) -> Result<Vec<PropertyKeyVal>, VmError> {
+    /// 10.5.11 `[[OwnPropertyKeys]]`
+    pub fn proxy_own_property_keys(
+        &mut self,
+        proxy: JsValue,
+    ) -> Result<Vec<PropertyKeyVal>, VmError> {
         let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "ownKeys")?;
         if let Some(trap) = trap_opt {
             let trap_res = self.call(trap, handler, &[target])?;
@@ -381,11 +445,15 @@ impl Vm {
             let mut result_keys = Vec::with_capacity(keys_vec.len());
             for k_val in keys_vec {
                 if !k_val.is_js_string() && !k_val.is_js_symbol() {
-                    return Err(VmError::TypeError("Proxy ownKeys trap elements must be String or Symbol".into()));
+                    return Err(VmError::TypeError(
+                        "Proxy ownKeys trap elements must be String or Symbol".into(),
+                    ));
                 }
                 let key = self.to_property_key(k_val)?;
                 if result_keys.contains(&key) {
-                    return Err(VmError::TypeError("Proxy ownKeys trap cannot list duplicate property keys".into()));
+                    return Err(VmError::TypeError(
+                        "Proxy ownKeys trap cannot list duplicate property keys".into(),
+                    ));
                 }
                 result_keys.push(key);
             }
@@ -401,7 +469,10 @@ impl Vm {
                     true
                 };
                 if !is_conf && !result_keys.contains(tk) {
-                    return Err(VmError::TypeError("Proxy ownKeys invariant: must include all non-configurable properties".into()));
+                    return Err(VmError::TypeError(
+                        "Proxy ownKeys invariant: must include all non-configurable properties"
+                            .into(),
+                    ));
                 }
                 if !is_ext && !result_keys.contains(tk) {
                     return Err(VmError::TypeError("Proxy ownKeys invariant: non-extensible target must include all properties".into()));
@@ -422,8 +493,13 @@ impl Vm {
         }
     }
 
-    /// 10.5.12 [[Call]]
-    pub fn proxy_call(&mut self, proxy: JsValue, this_arg: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
+    /// 10.5.12 `[[Call]]`
+    pub fn proxy_call(
+        &mut self,
+        proxy: JsValue,
+        this_arg: JsValue,
+        args: &[JsValue],
+    ) -> Result<JsValue, VmError> {
         let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "apply")?;
         if !self.is_callable(target) {
             return Err(VmError::TypeError("Proxy target is not callable".into()));
@@ -436,8 +512,13 @@ impl Vm {
         }
     }
 
-    /// 10.5.13 [[Construct]]
-    pub fn proxy_construct(&mut self, proxy: JsValue, args: &[JsValue], new_target: JsValue) -> Result<JsValue, VmError> {
+    /// 10.5.13 `[[Construct]]`
+    pub fn proxy_construct(
+        &mut self,
+        proxy: JsValue,
+        args: &[JsValue],
+        new_target: JsValue,
+    ) -> Result<JsValue, VmError> {
         let (target, handler, trap_opt) = self.validate_proxy_and_get_trap(proxy, "construct")?;
         if !self.is_constructor(target) {
             return Err(VmError::TypeError("Proxy target is not a constructor".into()));
@@ -447,7 +528,9 @@ impl Vm {
             let new_target_val = if new_target.is_undefined() { proxy } else { new_target };
             let res = self.call(trap, handler, &[target, arg_arr, new_target_val])?;
             if !res.is_js_object() {
-                return Err(VmError::TypeError("Proxy construct trap must return an object".into()));
+                return Err(VmError::TypeError(
+                    "Proxy construct trap must return an object".into(),
+                ));
             }
             Ok(res)
         } else {
@@ -483,7 +566,11 @@ impl Vm {
         }
     }
 
-    pub(crate) fn set_prototype_of_val(&mut self, target: JsValue, proto: JsValue) -> Result<bool, VmError> {
+    pub(crate) fn set_prototype_of_val(
+        &mut self,
+        target: JsValue,
+        proto: JsValue,
+    ) -> Result<bool, VmError> {
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
@@ -548,7 +635,10 @@ impl Vm {
         Ok(false)
     }
 
-    pub(crate) fn create_list_from_array_like(&mut self, array_like: JsValue) -> Result<Vec<JsValue>, VmError> {
+    pub(crate) fn create_list_from_array_like(
+        &mut self,
+        array_like: JsValue,
+    ) -> Result<Vec<JsValue>, VmError> {
         if !array_like.is_object() {
             return Err(VmError::TypeError("CreateListFromArrayLike called on non-object".into()));
         }
@@ -556,7 +646,10 @@ impl Vm {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Array(elements) = &obj.kind {
                 if obj.accessors.is_none() {
-                    return Ok(elements.iter().map(|v| if v.is_hole() { JsValue::undefined() } else { *v }).collect());
+                    return Ok(elements
+                        .iter()
+                        .map(|v| if v.is_hole() { JsValue::undefined() } else { *v })
+                        .collect());
                 }
             }
         }

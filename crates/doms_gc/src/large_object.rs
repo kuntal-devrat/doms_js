@@ -4,7 +4,6 @@
 //! in the large object space. They are never moved (pinned), which avoids
 //! the cost of copying large buffers during scavenge.
 
-
 use crate::header::{GC_ALIGN, GcHeader, HEADER_SIZE, TypeTag};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
@@ -141,11 +140,7 @@ impl LargeObjectSpace {
             lo = lo.min(obj.ptr as usize);
             hi = hi.max(obj.ptr as usize + obj.layout.size());
         }
-        if lo < hi {
-            Some((lo, hi))
-        } else {
-            None
-        }
+        if lo < hi { Some((lo, hi)) } else { None }
     }
 }
 

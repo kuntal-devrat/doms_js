@@ -59,7 +59,11 @@ impl Compiler {
                 let exp_idx = self.chunk.add_constant(Constant::String(exp_name.clone()));
                 self.chunk.emit(OpCode::Export(exp_idx), 0);
                 if name != exp_name {
-                    self.chunk.export_aliases.entry(name.clone()).or_default().push(exp_name.clone());
+                    self.chunk
+                        .export_aliases
+                        .entry(name.clone())
+                        .or_default()
+                        .push(exp_name.clone());
                 }
             }
         } else if let Some(stmt) = decl {
@@ -68,7 +72,8 @@ impl Compiler {
                     self.compile_statement(stmt, false)?;
                     for decl in declarations {
                         if !decl.name.starts_with('@') {
-                            let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
+                            let name_idx =
+                                self.chunk.add_constant(Constant::String(decl.name.clone()));
                             self.chunk.emit(OpCode::GetGlobalSafe(name_idx), 0);
                             self.chunk.emit(OpCode::Export(name_idx), 0);
                         }
@@ -79,9 +84,24 @@ impl Compiler {
                 | Statement::GeneratorDecl { name, params, body }
                 | Statement::AsyncGeneratorDecl { name, params, body } => {
                     if is_default && name.is_empty() {
-                        let is_async = matches!(&**stmt, Statement::AsyncFunctionDecl { .. } | Statement::AsyncGeneratorDecl { .. });
-                        let is_gen = matches!(&**stmt, Statement::GeneratorDecl { .. } | Statement::AsyncGeneratorDecl { .. });
-                        let def = Self::compile_function_full(Some("default".to_string()), params.clone(), body, self.is_strict, is_gen, is_async, false)?;
+                        let is_async = matches!(
+                            &**stmt,
+                            Statement::AsyncFunctionDecl { .. }
+                                | Statement::AsyncGeneratorDecl { .. }
+                        );
+                        let is_gen = matches!(
+                            &**stmt,
+                            Statement::GeneratorDecl { .. } | Statement::AsyncGeneratorDecl { .. }
+                        );
+                        let def = Self::compile_function_full(
+                            Some("default".to_string()),
+                            params.clone(),
+                            body,
+                            self.is_strict,
+                            is_gen,
+                            is_async,
+                            false,
+                        )?;
                         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                         if is_async && is_gen {
                             self.chunk.emit(OpCode::CreateAsyncGenerator(const_idx), 0);
@@ -92,16 +112,23 @@ impl Compiler {
                         } else {
                             self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
                         }
-                        let def_idx = self.chunk.add_constant(Constant::String("default".to_string()));
+                        let def_idx =
+                            self.chunk.add_constant(Constant::String("default".to_string()));
                         self.chunk.emit(OpCode::Export(def_idx), 0);
                     } else {
                         self.compile_statement(stmt, false)?;
                         if is_default {
-                            let def_idx = self.chunk.add_constant(Constant::String("default".to_string()));
+                            let def_idx =
+                                self.chunk.add_constant(Constant::String("default".to_string()));
                             if !name.is_empty() {
-                                let id_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                                let id_idx =
+                                    self.chunk.add_constant(Constant::String(name.clone()));
                                 self.chunk.emit(OpCode::GetGlobalSafe(id_idx), 0);
-                                self.chunk.export_aliases.entry(name.clone()).or_default().push("default".to_string());
+                                self.chunk
+                                    .export_aliases
+                                    .entry(name.clone())
+                                    .or_default()
+                                    .push("default".to_string());
                             }
                             self.chunk.emit(OpCode::Export(def_idx), 0);
                         } else {
@@ -113,13 +140,18 @@ impl Compiler {
                 }
                 Statement::ClassDecl(class_def) => {
                     if is_default && class_def.name.is_none() {
-                        self.compile_class_definition_with_name(class_def, Some("default".to_string()))?;
-                        let def_idx = self.chunk.add_constant(Constant::String("default".to_string()));
+                        self.compile_class_definition_with_name(
+                            class_def,
+                            Some("default".to_string()),
+                        )?;
+                        let def_idx =
+                            self.chunk.add_constant(Constant::String("default".to_string()));
                         self.chunk.emit(OpCode::Export(def_idx), 0);
                     } else {
                         self.compile_statement(stmt, false)?;
                         if is_default {
-                            let def_idx = self.chunk.add_constant(Constant::String("default".to_string()));
+                            let def_idx =
+                                self.chunk.add_constant(Constant::String("default".to_string()));
                             if let Some(ref n) = class_def.name {
                                 let id_idx = self.chunk.add_constant(Constant::String(n.clone()));
                                 self.chunk.emit(OpCode::GetGlobalSafe(id_idx), 0);
@@ -139,11 +171,21 @@ impl Compiler {
                     let mut expr_cloned = expr.clone();
                     fn set_default_name(e: &mut Expression) {
                         match e {
-                            Expression::FunctionExpr { name, .. } if name.is_none() => *name = Some("default".to_string()),
-                            Expression::AsyncFunctionExpr { name, .. } if name.is_none() => *name = Some("default".to_string()),
-                            Expression::GeneratorExpr { name, .. } if name.is_none() => *name = Some("default".to_string()),
-                            Expression::AsyncGeneratorExpr { name, .. } if name.is_none() => *name = Some("default".to_string()),
-                            Expression::ClassExpr(class_def) if class_def.name.is_none() => class_def.name = Some("default".to_string()),
+                            Expression::FunctionExpr { name, .. } if name.is_none() => {
+                                *name = Some("default".to_string())
+                            }
+                            Expression::AsyncFunctionExpr { name, .. } if name.is_none() => {
+                                *name = Some("default".to_string())
+                            }
+                            Expression::GeneratorExpr { name, .. } if name.is_none() => {
+                                *name = Some("default".to_string())
+                            }
+                            Expression::AsyncGeneratorExpr { name, .. } if name.is_none() => {
+                                *name = Some("default".to_string())
+                            }
+                            Expression::ClassExpr(class_def) if class_def.name.is_none() => {
+                                class_def.name = Some("default".to_string())
+                            }
                             Expression::Grouping(inner) => set_default_name(inner),
                             _ => {}
                         }

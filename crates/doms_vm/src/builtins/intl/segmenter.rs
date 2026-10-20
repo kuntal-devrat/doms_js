@@ -1,8 +1,8 @@
 //! `Intl.Segmenter` implementation.
 
-use super::*;
-use super::setup_prototype_and_constructor;
 use super::locale::canonicalize_locale_list;
+use super::setup_prototype_and_constructor;
+use super::*;
 
 pub(super) fn register_segmenter(vm: &mut Vm, intl_obj: JsValue) {
     let seg_proto = vm.alloc_object();
@@ -95,15 +95,22 @@ pub(super) fn register_segmenter(vm: &mut Vm, intl_obj: JsValue) {
     vm.set_property(seg_proto, "resolvedOptions", seg_resolved_opts);
     vm.set_property_non_enumerable(seg_proto, "resolvedOptions".to_string());
 
-    let supported_locales_fn6 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
-        let loc = args.first().copied().unwrap_or(JsValue::undefined());
-        let canons = canonicalize_locale_list(vm, loc)?;
-        let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
-        Ok(vm.alloc_array(items))
-    });
+    let supported_locales_fn6 =
+        vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
+            let loc = args.first().copied().unwrap_or(JsValue::undefined());
+            let canons = canonicalize_locale_list(vm, loc)?;
+            let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
+            Ok(vm.alloc_array(items))
+        });
     vm.set_property(seg_ctor, "supportedLocalesOf", supported_locales_fn6);
     vm.set_property_non_enumerable(seg_ctor, "supportedLocalesOf".to_string());
 
-    setup_prototype_and_constructor(vm, seg_ctor, seg_proto, "Intl.Segmenter", "Segmenter", intl_obj);
-
+    setup_prototype_and_constructor(
+        vm,
+        seg_ctor,
+        seg_proto,
+        "Intl.Segmenter",
+        "Segmenter",
+        intl_obj,
+    );
 }

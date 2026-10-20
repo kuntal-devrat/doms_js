@@ -12,10 +12,16 @@ impl Vm {
         new_target: JsValue,
     ) -> Result<JsValue, VmError> {
         if !self.is_constructor(callee) {
-            return Err(VmError::TypeError(format!("{} is not a constructor", self.to_string_value(callee))));
+            return Err(VmError::TypeError(format!(
+                "{} is not a constructor",
+                self.to_string_value(callee)
+            )));
         }
         if !new_target.is_undefined() && !self.is_constructor(new_target) {
-            return Err(VmError::TypeError(format!("{} is not a constructor", self.to_string_value(new_target))));
+            return Err(VmError::TypeError(format!(
+                "{} is not a constructor",
+                self.to_string_value(new_target)
+            )));
         }
 
         let prev_temp = self.temp_roots.len();
@@ -63,7 +69,8 @@ impl Vm {
                     self.current_new_target = Some(new_target_val);
                     let res = if args_len <= 8 {
                         let mut stack_args = [JsValue::undefined(); 8];
-                        stack_args[..args_len].copy_from_slice(&self.temp_roots[args_start..args_start + args_len]);
+                        stack_args[..args_len]
+                            .copy_from_slice(&self.temp_roots[args_start..args_start + args_len]);
                         native.call(self, cur_this, &stack_args[..args_len])
                     } else {
                         let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
@@ -96,11 +103,7 @@ impl Vm {
                     let cur_nt = self.temp_roots[prev_temp + 1];
                     let new_target_val = if cur_nt.is_undefined() { cur_callee } else { cur_nt };
                     let proto = self.get_property_result(new_target_val, "prototype")?;
-                    let proto_obj = if proto.is_object() {
-                        Some(proto)
-                    } else {
-                        self.object_proto
-                    };
+                    let proto_obj = if proto.is_object() { Some(proto) } else { self.object_proto };
                     self.temp_roots.push(proto);
                     if new_target_val == cur_callee {
                         if let Some(callee_ptr) = cur_callee.as_object_ptr() {
@@ -125,7 +128,8 @@ impl Vm {
                     self.current_new_target = Some(new_target_val);
                     let call_res = if args_len <= 8 {
                         let mut stack_args = [JsValue::undefined(); 8];
-                        stack_args[..args_len].copy_from_slice(&self.temp_roots[args_start..args_start + args_len]);
+                        stack_args[..args_len]
+                            .copy_from_slice(&self.temp_roots[args_start..args_start + args_len]);
                         self.execute_call_internal(cur_callee, cur_this, &stack_args[..args_len])
                     } else {
                         let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
@@ -151,14 +155,29 @@ impl Vm {
                             if this_shape != ShapeRegistry::ROOT_SHAPE_ID {
                                 if let Some(callee_ptr) = cur_callee.as_object_ptr() {
                                     let callee_obj = unsafe { &mut *(callee_ptr as *mut JsObject) };
-                                    if let ObjectKind::Function(ref mut callee_func) = callee_obj.kind {
+                                    if let ObjectKind::Function(ref mut callee_func) =
+                                        callee_obj.kind
+                                    {
                                         callee_func.initial_shape = Some(this_shape);
                                         let chunk_id = callee_func.chunk.id;
-                                        for (ip, op) in callee_func.chunk.instructions.iter().enumerate() {
-                                            if let doms_compiler::bytecode::OpCode::SetProp(prop_idx) = op {
-                                                if let doms_compiler::bytecode::Constant::String(name) = &callee_func.chunk.constants[*prop_idx as usize] {
-                                                    if let Some(offset) = self.shapes.lookup_offset(this_shape, name) {
-                                                        callee_func.chunk.record_feedback_shape(ip, this_shape, offset);
+                                        for (ip, op) in
+                                            callee_func.chunk.instructions.iter().enumerate()
+                                        {
+                                            if let doms_compiler::bytecode::OpCode::SetProp(
+                                                prop_idx,
+                                            ) = op
+                                            {
+                                                if let doms_compiler::bytecode::Constant::String(
+                                                    name,
+                                                ) =
+                                                    &callee_func.chunk.constants[*prop_idx as usize]
+                                                {
+                                                    if let Some(offset) =
+                                                        self.shapes.lookup_offset(this_shape, name)
+                                                    {
+                                                        callee_func.chunk.record_feedback_shape(
+                                                            ip, this_shape, offset,
+                                                        );
                                                         let ics = self.chunk_ics.entry(chunk_id).or_insert_with(|| {
                                                             vec![crate::inline_cache::InlineCacheSlot::new(); callee_func.chunk.instructions.len()]
                                                         });
@@ -173,7 +192,10 @@ impl Vm {
                                             }
                                         }
                                         callee_func.jit_attempted = true;
-                                        callee_func.jit_entry = crate::jit::JitCompiler::compile_native(&callee_func.chunk);
+                                        callee_func.jit_entry =
+                                            crate::jit::JitCompiler::compile_native(
+                                                &callee_func.chunk,
+                                            );
                                     }
                                 }
                             }
@@ -181,16 +203,15 @@ impl Vm {
                     }
 
                     self.temp_roots.truncate(prev_temp);
-                    if val.is_object() {
-                        Ok(val)
-                    } else {
-                        Ok(cur_this)
-                    }
+                    if val.is_object() { Ok(val) } else { Ok(cur_this) }
                 }
                 _ => {
                     let cur_callee = self.temp_roots[prev_temp];
                     self.temp_roots.truncate(prev_temp);
-                    Err(VmError::TypeError(format!("{} is not a constructor", self.to_string_value(cur_callee))))
+                    Err(VmError::TypeError(format!(
+                        "{} is not a constructor",
+                        self.to_string_value(cur_callee)
+                    )))
                 }
             }
         } else {
@@ -226,7 +247,9 @@ impl Vm {
                 ObjectKind::Array(_) => return Ok(true),
                 ObjectKind::Proxy { target, handler } => {
                     if handler.is_null() {
-                        return Err(VmError::TypeError("Cannot perform IsArray on a revoked proxy".into()));
+                        return Err(VmError::TypeError(
+                            "Cannot perform IsArray on a revoked proxy".into(),
+                        ));
                     }
                     hops += 1;
                     if hops > 100 {
@@ -251,23 +274,26 @@ impl Vm {
         }
         if let Some(ptr) = val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
-            !matches!(obj.kind, ObjectKind::String(_) | ObjectKind::BigInt(_) | ObjectKind::Symbol(_))
+            !matches!(
+                obj.kind,
+                ObjectKind::String(_) | ObjectKind::BigInt(_) | ObjectKind::Symbol(_)
+            )
         } else {
             false
         }
     }
 
-    pub fn array_species_create(&mut self, original: JsValue, length: usize) -> Result<JsValue, VmError> {
+    pub fn array_species_create(
+        &mut self,
+        original: JsValue,
+        length: usize,
+    ) -> Result<JsValue, VmError> {
         let is_arr = self.is_array(original);
         let mut ctor = if is_arr {
             let c = self.get_property_result(original, "constructor")?;
             if self.is_constructor(c) {
                 if let Some(&array_ctor) = self.globals.get("Array") {
-                    if c == array_ctor {
-                        JsValue::undefined()
-                    } else {
-                        c
-                    }
+                    if c == array_ctor { JsValue::undefined() } else { c }
                 } else {
                     c
                 }
@@ -316,7 +342,11 @@ impl Vm {
 
     /// SpeciesConstructor ( O, defaultConstructor )
     /// ECMAScript 7.3.22
-    pub fn species_constructor(&mut self, obj: JsValue, default_ctor: JsValue) -> Result<JsValue, VmError> {
+    pub fn species_constructor(
+        &mut self,
+        obj: JsValue,
+        default_ctor: JsValue,
+    ) -> Result<JsValue, VmError> {
         let c = self.get_property_result(obj, "constructor")?;
         if c.is_undefined() {
             return Ok(default_ctor);
@@ -337,4 +367,3 @@ impl Vm {
         Ok(default_ctor)
     }
 }
-

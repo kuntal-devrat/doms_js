@@ -1,8 +1,8 @@
 //! `Intl.Collator` implementation.
 
-use super::*;
-use super::setup_prototype_and_constructor;
 use super::locale::canonicalize_locale_list;
+use super::setup_prototype_and_constructor;
+use super::*;
 
 pub(super) fn register_collator(vm: &mut Vm, intl_obj: JsValue) {
     let collator_proto = vm.alloc_object();
@@ -62,15 +62,22 @@ pub(super) fn register_collator(vm: &mut Vm, intl_obj: JsValue) {
     vm.set_property(collator_proto, "resolvedOptions", coll_resolved_opts);
     vm.set_property_non_enumerable(collator_proto, "resolvedOptions".to_string());
 
-    let supported_locales_fn3 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
-        let loc = args.first().copied().unwrap_or(JsValue::undefined());
-        let canons = canonicalize_locale_list(vm, loc)?;
-        let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
-        Ok(vm.alloc_array(items))
-    });
+    let supported_locales_fn3 =
+        vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
+            let loc = args.first().copied().unwrap_or(JsValue::undefined());
+            let canons = canonicalize_locale_list(vm, loc)?;
+            let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
+            Ok(vm.alloc_array(items))
+        });
     vm.set_property(collator_ctor, "supportedLocalesOf", supported_locales_fn3);
     vm.set_property_non_enumerable(collator_ctor, "supportedLocalesOf".to_string());
 
-    setup_prototype_and_constructor(vm, collator_ctor, collator_proto, "Intl.Collator", "Collator", intl_obj);
-
+    setup_prototype_and_constructor(
+        vm,
+        collator_ctor,
+        collator_proto,
+        "Intl.Collator",
+        "Collator",
+        intl_obj,
+    );
 }

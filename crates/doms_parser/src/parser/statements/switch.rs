@@ -22,13 +22,12 @@ impl<'a> Parser<'a> {
                 {
                     consequent.push(self.parse_statement()?);
                 }
-                cases.push(crate::ast::SwitchCase {
-                    test: Some(test),
-                    consequent,
-                });
+                cases.push(crate::ast::SwitchCase { test: Some(test), consequent });
             } else if self.match_token(&TokenKind::Default)? {
                 if has_default {
-                    return Err(ParseError::General("More than one default clause in switch statement".into()));
+                    return Err(ParseError::General(
+                        "More than one default clause in switch statement".into(),
+                    ));
                 }
                 has_default = true;
                 self.expect(TokenKind::Colon)?;
@@ -40,10 +39,7 @@ impl<'a> Parser<'a> {
                 {
                     consequent.push(self.parse_statement()?);
                 }
-                cases.push(crate::ast::SwitchCase {
-                    test: None,
-                    consequent,
-                });
+                cases.push(crate::ast::SwitchCase { test: None, consequent });
             } else {
                 let tok = self.advance()?;
                 return Err(ParseError::UnexpectedToken(tok.kind, tok.line, tok.col));

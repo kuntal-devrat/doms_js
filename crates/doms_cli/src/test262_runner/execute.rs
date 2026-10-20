@@ -85,7 +85,9 @@ impl Test262Runner {
                 }
                 return TestStatus::Fail(format!("Resolution error: {}", err));
             } else if meta.negative_phase.as_deref() == Some("resolution") {
-                return TestStatus::Fail("Expected resolution error, but resolved successfully".into());
+                return TestStatus::Fail(
+                    "Expected resolution error, but resolved successfully".into(),
+                );
             }
         }
 
@@ -112,7 +114,6 @@ impl Test262Runner {
 
         let chunk = compiled.unwrap();
 
-
         // 3. Execution Phase
         let mut vm = doms_vm::Vm::new();
         vm.is_strict = is_top_level_strict;
@@ -134,8 +135,11 @@ impl Test262Runner {
             vm.prevent_extensions_object(m);
             vm.current_module_obj = Some(m);
 
-            let canonical_key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-                .to_string_lossy().to_string();
+            let canonical_key = path
+                .canonicalize()
+                .unwrap_or_else(|_| path.to_path_buf())
+                .to_string_lossy()
+                .to_string();
             vm.modules.insert(canonical_key, m);
             if let Some(name) = path.file_name() {
                 vm.modules.insert(format!("./{}", name.to_string_lossy()), m);
@@ -165,7 +169,11 @@ impl Test262Runner {
                             let message_prop = vm.get_property(val, "message");
                             if !message_prop.is_undefined() {
                                 if !name_prop.is_undefined() {
-                                    format!("{}: {}", vm.to_string_value(name_prop), vm.to_string_value(message_prop))
+                                    format!(
+                                        "{}: {}",
+                                        vm.to_string_value(name_prop),
+                                        vm.to_string_value(message_prop)
+                                    )
                                 } else {
                                     format!("{}: {}", str_val, vm.to_string_value(message_prop))
                                 }

@@ -3,11 +3,17 @@
 
 use super::*;
 
-pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsValue, JsValue, JsValue, JsValue) {
+pub(super) fn register_statics(
+    vm: &mut Vm,
+) -> (JsValue, JsValue, JsValue, JsValue, JsValue, JsValue, JsValue) {
     let get_prototype_of_fn = vm.alloc_native_function("getPrototypeOf", 1, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if !t.is_nullish() => *t,
-            _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Cannot convert undefined or null to object".into(),
+                ));
+            }
         };
         vm.get_prototype_of_val(target)
     });
@@ -15,11 +21,17 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
     let set_prototype_of_fn = vm.alloc_native_function("setPrototypeOf", 2, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if !t.is_nullish() => *t,
-            _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Cannot convert undefined or null to object".into(),
+                ));
+            }
         };
         let proto = args.get(1).copied().unwrap_or(JsValue::undefined());
         if !proto.is_object() && !proto.is_null() {
-            return Err(VmError::TypeError("Object prototype may only be an Object or null".into()));
+            return Err(VmError::TypeError(
+                "Object prototype may only be an Object or null".into(),
+            ));
         }
         if !target.is_object() {
             return Ok(target);
@@ -28,7 +40,9 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
             if proto.is_null() {
                 return Ok(target);
             }
-            return Err(VmError::TypeError("Cannot set prototype of module namespace object".into()));
+            return Err(VmError::TypeError(
+                "Cannot set prototype of module namespace object".into(),
+            ));
         }
         let success = vm.set_prototype_of_val(target, proto)?;
         if !success {
@@ -40,7 +54,9 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
     let has_own_fn = vm.alloc_native_function("hasOwn", 2, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if !t.is_nullish() => *t,
-            _ => return Err(VmError::TypeError("Object.hasOwn called on null or undefined".into())),
+            _ => {
+                return Err(VmError::TypeError("Object.hasOwn called on null or undefined".into()));
+            }
         };
         let prop = args.get(1).copied().unwrap_or(JsValue::undefined());
         let prop_key = vm.to_property_key(prop)?;
@@ -107,50 +123,60 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
         Ok(JsValue::from_boolean(vm.strict_equal(a, b)))
     });
 
-    let define_properties_fn = vm.alloc_native_function("defineProperties", 2, |vm, _this, args| {
-        let target = match args.first() {
-            Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Object.defineProperties called on non-object".into())),
-        };
-        let props = match args.get(1) {
-            Some(p) if !p.is_nullish() => *p,
-            _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
-        };
-        let props_obj = if props.is_js_object() {
-            props
-        } else {
-            vm.to_object_value(props)?
-        };
-
-        // Pass 1: Collect own enumerable properties and descriptors
-        let keys = super::names::get_own_property_keys(vm, props_obj)?;
-        let mut descriptors = Vec::new();
-        for key in keys {
-            let desc = super::descriptor::get_own_property_descriptor_internal(vm, props_obj, &key)?;
-            if !desc.is_undefined() && vm.get_property(desc, "enumerable").is_truthy() {
-                let desc_val = match &key {
-                    PropertyKeyVal::String(s) => vm.get_property(props_obj, s),
-                    PropertyKeyVal::Symbol(sym) => vm.get_symbol_property(props_obj, *sym),
-                };
-                if !desc_val.is_js_object() {
-                    return Err(VmError::TypeError("Property description must be an object".into()));
+    let define_properties_fn =
+        vm.alloc_native_function("defineProperties", 2, |vm, _this, args| {
+            let target = match args.first() {
+                Some(t) if t.is_js_object() => *t,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "Object.defineProperties called on non-object".into(),
+                    ));
                 }
-                descriptors.push((key, desc_val));
+            };
+            let props = match args.get(1) {
+                Some(p) if !p.is_nullish() => *p,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "Cannot convert undefined or null to object".into(),
+                    ));
+                }
+            };
+            let props_obj = if props.is_js_object() { props } else { vm.to_object_value(props)? };
+
+            // Pass 1: Collect own enumerable properties and descriptors
+            let keys = super::names::get_own_property_keys(vm, props_obj)?;
+            let mut descriptors = Vec::new();
+            for key in keys {
+                let desc =
+                    super::descriptor::get_own_property_descriptor_internal(vm, props_obj, &key)?;
+                if !desc.is_undefined() && vm.get_property(desc, "enumerable").is_truthy() {
+                    let desc_val = match &key {
+                        PropertyKeyVal::String(s) => vm.get_property(props_obj, s),
+                        PropertyKeyVal::Symbol(sym) => vm.get_symbol_property(props_obj, *sym),
+                    };
+                    if !desc_val.is_js_object() {
+                        return Err(VmError::TypeError(
+                            "Property description must be an object".into(),
+                        ));
+                    }
+                    descriptors.push((key, desc_val));
+                }
             }
-        }
 
-        // Pass 2: Define each property
-        for (key, desc) in descriptors {
-            super::define_property::define_property_internal(vm, target, key, desc)?;
-        }
+            // Pass 2: Define each property
+            for (key, desc) in descriptors {
+                super::define_property::define_property_internal(vm, target, key, desc)?;
+            }
 
-        Ok(target)
-    });
+            Ok(target)
+        });
 
     let create_fn = vm.alloc_native_function("create", 2, |vm, _this, args| {
         let proto = args.first().copied().unwrap_or(JsValue::undefined());
         if !proto.is_js_object() && !proto.is_null() {
-            return Err(VmError::TypeError("Object prototype may only be an Object or null".into()));
+            return Err(VmError::TypeError(
+                "Object prototype may only be an Object or null".into(),
+            ));
         }
         let obj = vm.alloc_object();
         if let Some(ptr) = obj.as_object_ptr() {
@@ -159,7 +185,10 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
         }
         if let Some(props) = args.get(1) {
             if !props.is_undefined() {
-                let define_props_fn = vm.get_property(vm.globals.get("Object").copied().unwrap_or(JsValue::undefined()), "defineProperties");
+                let define_props_fn = vm.get_property(
+                    vm.globals.get("Object").copied().unwrap_or(JsValue::undefined()),
+                    "defineProperties",
+                );
                 if vm.is_callable(define_props_fn) {
                     vm.call(define_props_fn, JsValue::undefined(), &[obj, *props])?;
                 }
@@ -168,5 +197,13 @@ pub(super) fn register_statics(vm: &mut Vm) -> (JsValue, JsValue, JsValue, JsVal
         Ok(obj)
     });
 
-    (get_prototype_of_fn, set_prototype_of_fn, has_own_fn, from_entries_fn, is_fn, create_fn, define_properties_fn)
+    (
+        get_prototype_of_fn,
+        set_prototype_of_fn,
+        has_own_fn,
+        from_entries_fn,
+        is_fn,
+        create_fn,
+        define_properties_fn,
+    )
 }

@@ -1,8 +1,8 @@
 //! `Intl.NumberFormat` implementation.
 
-use super::*;
-use super::setup_prototype_and_constructor;
 use super::locale::canonicalize_locale_list;
+use super::setup_prototype_and_constructor;
+use super::*;
 
 pub(super) fn register_number_format(vm: &mut Vm, intl_obj: JsValue) {
     let num_format_proto = vm.alloc_object();
@@ -85,7 +85,8 @@ pub(super) fn register_number_format(vm: &mut Vm, intl_obj: JsValue) {
         let num_sys = vm.alloc_string("latn".to_string());
         vm.set_property(opts, "numberingSystem", num_sys);
         let style = vm.get_property(this, "_style");
-        let style_val = if style.is_js_string() { style } else { vm.alloc_string("decimal".to_string()) };
+        let style_val =
+            if style.is_js_string() { style } else { vm.alloc_string("decimal".to_string()) };
         vm.set_property(opts, "style", style_val);
         vm.set_property(opts, "minimumIntegerDigits", JsValue::from_int32(1));
         vm.set_property(opts, "minimumFractionDigits", JsValue::from_int32(0));
@@ -98,15 +99,22 @@ pub(super) fn register_number_format(vm: &mut Vm, intl_obj: JsValue) {
     vm.set_property(num_format_proto, "resolvedOptions", nf_resolved_opts);
     vm.set_property_non_enumerable(num_format_proto, "resolvedOptions".to_string());
 
-    let supported_locales_fn = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
-        let loc = args.first().copied().unwrap_or(JsValue::undefined());
-        let canons = canonicalize_locale_list(vm, loc)?;
-        let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
-        Ok(vm.alloc_array(items))
-    });
+    let supported_locales_fn =
+        vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
+            let loc = args.first().copied().unwrap_or(JsValue::undefined());
+            let canons = canonicalize_locale_list(vm, loc)?;
+            let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
+            Ok(vm.alloc_array(items))
+        });
     vm.set_property(num_format_ctor, "supportedLocalesOf", supported_locales_fn);
     vm.set_property_non_enumerable(num_format_ctor, "supportedLocalesOf".to_string());
 
-    setup_prototype_and_constructor(vm, num_format_ctor, num_format_proto, "Intl.NumberFormat", "NumberFormat", intl_obj);
-
+    setup_prototype_and_constructor(
+        vm,
+        num_format_ctor,
+        num_format_proto,
+        "Intl.NumberFormat",
+        "NumberFormat",
+        intl_obj,
+    );
 }

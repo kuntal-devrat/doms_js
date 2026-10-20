@@ -3,7 +3,7 @@
 use super::*;
 
 mod constructor;
-pub(crate) use constructor::{enumerable_own_property_names, EnumerableKind};
+pub(crate) use constructor::{EnumerableKind, enumerable_own_property_names};
 pub(crate) mod define_property;
 pub(crate) mod descriptor;
 mod group_by;
@@ -35,16 +35,17 @@ pub(super) fn register_object_builtins(vm: &mut Vm) {
     let define_property_fn = register_define_property(vm);
     let (get_own_prop_desc_fn, get_own_prop_descriptors_fn) = register_descriptor(vm);
     let (get_own_prop_names_fn, get_own_prop_symbols_fn) = register_names_and_symbols(vm);
+    let (prevent_extensions_fn, is_extensible_fn, freeze_fn, is_frozen_fn, seal_fn, is_sealed_fn) =
+        register_integrity(vm);
     let (
-        prevent_extensions_fn,
-        is_extensible_fn,
-        freeze_fn,
-        is_frozen_fn,
-        seal_fn,
-        is_sealed_fn,
-    ) = register_integrity(vm);
-    let (get_prototype_of_fn, set_prototype_of_fn, has_own_fn, from_entries_fn, is_fn, create_fn, define_properties_fn) =
-        register_statics(vm);
+        get_prototype_of_fn,
+        set_prototype_of_fn,
+        has_own_fn,
+        from_entries_fn,
+        is_fn,
+        create_fn,
+        define_properties_fn,
+    ) = register_statics(vm);
 
     vm.set_property(object_constructor, "is", is_fn);
     vm.set_property(object_constructor, "create", create_fn);
@@ -73,13 +74,30 @@ pub(super) fn register_object_builtins(vm: &mut Vm) {
     vm.set_property(object_constructor, "prototype", object_proto);
 
     let statics = [
-        "is", "create", "defineProperties", "defineProperty",
-        "getOwnPropertyDescriptor", "getOwnPropertyDescriptors",
-        "getOwnPropertyNames", "getOwnPropertySymbols",
-        "preventExtensions", "isExtensible", "freeze", "isFrozen",
-        "seal", "isSealed", "getPrototypeOf", "setPrototypeOf",
-        "hasOwn", "fromEntries", "keys", "values", "entries",
-        "assign", "groupBy", "prototype",
+        "is",
+        "create",
+        "defineProperties",
+        "defineProperty",
+        "getOwnPropertyDescriptor",
+        "getOwnPropertyDescriptors",
+        "getOwnPropertyNames",
+        "getOwnPropertySymbols",
+        "preventExtensions",
+        "isExtensible",
+        "freeze",
+        "isFrozen",
+        "seal",
+        "isSealed",
+        "getPrototypeOf",
+        "setPrototypeOf",
+        "hasOwn",
+        "fromEntries",
+        "keys",
+        "values",
+        "entries",
+        "assign",
+        "groupBy",
+        "prototype",
     ];
     for name in statics {
         vm.set_property_non_enumerable(object_constructor, name.to_string());

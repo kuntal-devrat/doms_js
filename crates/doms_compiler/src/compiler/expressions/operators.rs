@@ -91,7 +91,9 @@ impl Compiler {
             BinaryOp::Shl => self.chunk.emit(OpCode::Shl, 0),
             BinaryOp::Shr => self.chunk.emit(OpCode::Shr, 0),
             BinaryOp::Ushr => self.chunk.emit(OpCode::Ushr, 0),
-            BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::NullishCoalescing => unreachable!(),
+            BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::NullishCoalescing => {
+                unreachable!()
+            }
         };
         Ok(())
     }

@@ -4,29 +4,57 @@ use super::*;
 
 impl Vm {
     pub(crate) fn get_generator_next(&mut self, _gen_val: JsValue) -> Option<JsValue> {
-        Some(self.alloc_native_function("next", 1, |vm: &mut Vm, this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-            let send_val = args.first().copied().unwrap_or_default();
-            vm.generator_next(this, send_val)
-        }))
+        Some(self.alloc_native_function(
+            "next",
+            1,
+            |vm: &mut Vm, this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                let send_val = args.first().copied().unwrap_or_default();
+                vm.generator_next(this, send_val)
+            },
+        ))
     }
 
     pub(crate) fn get_generator_return(&mut self, _gen_val: JsValue) -> Option<JsValue> {
-        Some(self.alloc_native_function("return", 1, |vm: &mut Vm, this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-            let ret_val = args.first().copied().unwrap_or_default();
-            vm.generator_return(this, ret_val)
-        }))
+        Some(self.alloc_native_function(
+            "return",
+            1,
+            |vm: &mut Vm, this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                let ret_val = args.first().copied().unwrap_or_default();
+                vm.generator_return(this, ret_val)
+            },
+        ))
     }
 
     pub(crate) fn get_generator_throw(&mut self, _gen_val: JsValue) -> Option<JsValue> {
-        Some(self.alloc_native_function("throw", 1, |vm: &mut Vm, this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-            let err_val = args.first().copied().unwrap_or_default();
-            vm.generator_throw(this, err_val)
-        }))
+        Some(self.alloc_native_function(
+            "throw",
+            1,
+            |vm: &mut Vm, this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                let err_val = args.first().copied().unwrap_or_default();
+                vm.generator_throw(this, err_val)
+            },
+        ))
     }
 
-    pub fn generator_return(&mut self, gen_val: JsValue, ret_val: JsValue) -> Result<JsValue, VmError> {
+    pub fn generator_return(
+        &mut self,
+        gen_val: JsValue,
+        ret_val: JsValue,
+    ) -> Result<JsValue, VmError> {
         let ptr = gen_val.as_object_ptr().ok_or(VmError::TypeError("Not a generator".into()))?;
-        let (gen_fn, _ip, stack, locals, scopes, env_obj, catch_handlers, state, this_val, args_obj, mapped_args) = {
+        let (
+            gen_fn,
+            _ip,
+            stack,
+            locals,
+            scopes,
+            env_obj,
+            catch_handlers,
+            state,
+            this_val,
+            args_obj,
+            mapped_args,
+        ) = {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
                 ObjectKind::Generator(g) => (
@@ -50,7 +78,8 @@ impl Vm {
             if !gen_fn.is_async {
                 return Err(VmError::TypeError("Generator is already executing".into()));
             }
-            let promise = self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+            let promise =
+                self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Generator(ref mut g) = obj.kind {
                 g.async_queue.push(crate::object::AsyncGenRequest {
@@ -61,7 +90,9 @@ impl Vm {
             return Ok(promise);
         }
 
-        if state == crate::object::GeneratorState::Completed || state == crate::object::GeneratorState::SuspendedStart {
+        if state == crate::object::GeneratorState::Completed
+            || state == crate::object::GeneratorState::SuspendedStart
+        {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Generator(ref mut g) = obj.kind {
                 g.state = crate::object::GeneratorState::Completed;
@@ -165,9 +196,25 @@ impl Vm {
         }
     }
 
-    pub fn generator_throw(&mut self, gen_val: JsValue, err_val: JsValue) -> Result<JsValue, VmError> {
+    pub fn generator_throw(
+        &mut self,
+        gen_val: JsValue,
+        err_val: JsValue,
+    ) -> Result<JsValue, VmError> {
         let ptr = gen_val.as_object_ptr().ok_or(VmError::TypeError("Not a generator".into()))?;
-        let (gen_fn, ip, stack, locals, scopes, env_obj, catch_handlers, state, this_val, args_obj, mapped_args) = {
+        let (
+            gen_fn,
+            ip,
+            stack,
+            locals,
+            scopes,
+            env_obj,
+            catch_handlers,
+            state,
+            this_val,
+            args_obj,
+            mapped_args,
+        ) = {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
                 ObjectKind::Generator(g) => (
@@ -191,7 +238,8 @@ impl Vm {
             if !gen_fn.is_async {
                 return Err(VmError::TypeError("Generator is already executing".into()));
             }
-            let promise = self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+            let promise =
+                self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Generator(ref mut g) = obj.kind {
                 g.async_queue.push(crate::object::AsyncGenRequest {
@@ -202,7 +250,9 @@ impl Vm {
             return Ok(promise);
         }
 
-        if state == crate::object::GeneratorState::Completed || state == crate::object::GeneratorState::SuspendedStart {
+        if state == crate::object::GeneratorState::Completed
+            || state == crate::object::GeneratorState::SuspendedStart
+        {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Generator(ref mut g) = obj.kind {
                 g.state = crate::object::GeneratorState::Completed;
@@ -265,7 +315,9 @@ impl Vm {
             });
         }
 
-        if let Err(unhandled) = self.handle_exception_at_depth(VmError::Thrown(err_val), target_depth) {
+        if let Err(unhandled) =
+            self.handle_exception_at_depth(VmError::Thrown(err_val), target_depth)
+        {
             if let Some(ptr) = gen_val.as_object_ptr() {
                 let obj = unsafe { &mut *(ptr as *mut JsObject) };
                 if let ObjectKind::Generator(ref mut g) = obj.kind {
@@ -309,9 +361,25 @@ impl Vm {
         res
     }
 
-    pub fn generator_next(&mut self, gen_val: JsValue, send_val: JsValue) -> Result<JsValue, VmError> {
+    pub fn generator_next(
+        &mut self,
+        gen_val: JsValue,
+        send_val: JsValue,
+    ) -> Result<JsValue, VmError> {
         let ptr = gen_val.as_object_ptr().ok_or(VmError::TypeError("Not a generator".into()))?;
-        let (gen_fn, ip, stack, locals, scopes, env_obj, catch_handlers, state, this_val, args_obj, mapped_args) = {
+        let (
+            gen_fn,
+            ip,
+            stack,
+            locals,
+            scopes,
+            env_obj,
+            catch_handlers,
+            state,
+            this_val,
+            args_obj,
+            mapped_args,
+        ) = {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
                 ObjectKind::Generator(g) => (
@@ -335,7 +403,8 @@ impl Vm {
             if !gen_fn.is_async {
                 return Err(VmError::TypeError("Generator is already executing".into()));
             }
-            let promise = self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+            let promise =
+                self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Generator(ref mut g) = obj.kind {
                 g.async_queue.push(crate::object::AsyncGenRequest {
@@ -349,7 +418,8 @@ impl Vm {
         if state == crate::object::GeneratorState::Completed {
             let res = self.make_iter_result(JsValue::undefined(), true);
             if gen_fn.is_async {
-                let promise = self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+                let promise =
+                    self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
                 self.resolve_promise(promise, res);
                 let _ = self.drain_microtasks();
                 return Ok(promise);
@@ -433,13 +503,15 @@ impl Vm {
         if gen_fn.is_async {
             let res_promise = match res {
                 Ok(val) => {
-                    let promise = self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+                    let promise = self
+                        .alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
                     self.resolve_promise(promise, val);
                     let _ = self.drain_microtasks();
                     promise
                 }
                 Err(e) => {
-                    let promise = self.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+                    let promise = self
+                        .alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
                     let err_val = self.vm_error_to_js_value(&e);
                     self.reject_promise(promise, err_val);
                     let _ = self.drain_microtasks();
@@ -465,11 +537,7 @@ impl Vm {
                     if g.state == crate::object::GeneratorState::Executing {
                         return Ok(());
                     }
-                    if !g.async_queue.is_empty() {
-                        Some(g.async_queue.remove(0))
-                    } else {
-                        None
-                    }
+                    if !g.async_queue.is_empty() { Some(g.async_queue.remove(0)) } else { None }
                 } else {
                     None
                 }

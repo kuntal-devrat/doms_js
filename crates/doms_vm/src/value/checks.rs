@@ -87,7 +87,13 @@ impl JsValue {
         }
         if let Some(ptr) = self.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
-            !matches!(obj.kind, crate::object::ObjectKind::String(_) | crate::object::ObjectKind::ConsString { .. } | crate::object::ObjectKind::Symbol(_) | crate::object::ObjectKind::BigInt(_))
+            !matches!(
+                obj.kind,
+                crate::object::ObjectKind::String(_)
+                    | crate::object::ObjectKind::ConsString { .. }
+                    | crate::object::ObjectKind::Symbol(_)
+                    | crate::object::ObjectKind::BigInt(_)
+            )
         } else {
             false
         }
@@ -111,7 +117,10 @@ impl JsValue {
         }
         if let Some(ptr) = self.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
-            matches!(obj.kind, crate::object::ObjectKind::String(_) | crate::object::ObjectKind::ConsString { .. })
+            matches!(
+                obj.kind,
+                crate::object::ObjectKind::String(_) | crate::object::ObjectKind::ConsString { .. }
+            )
         } else {
             false
         }

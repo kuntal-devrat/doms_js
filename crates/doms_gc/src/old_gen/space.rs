@@ -54,10 +54,8 @@ impl OldGen {
                         ptr::write(rem_header, GcHeader::new(remaining_sz as u32, TypeTag::Raw));
                         (*rem_header).set_free();
                     }
-                    self.free_chunks.push(FreeChunk {
-                        offset: chunk.offset + total_size,
-                        size: remaining_sz,
-                    });
+                    self.free_chunks
+                        .push(FreeChunk { offset: chunk.offset + total_size, size: remaining_sz });
                     total_size
                 } else if remaining_sz > 0 {
                     chunk.size
@@ -73,7 +71,9 @@ impl OldGen {
                 self.object_count += 1;
                 self.bytes_used += alloc_size;
                 let payload = unsafe { dest.add(HEADER_SIZE) };
-                unsafe { ptr::write_bytes(payload, 0, alloc_size - HEADER_SIZE); }
+                unsafe {
+                    ptr::write_bytes(payload, 0, alloc_size - HEADER_SIZE);
+                }
                 return Some(payload);
             }
         }
@@ -92,7 +92,9 @@ impl OldGen {
         }
 
         let payload = unsafe { dest.add(HEADER_SIZE) };
-        unsafe { ptr::write_bytes(payload, 0, payload_size); }
+        unsafe {
+            ptr::write_bytes(payload, 0, payload_size);
+        }
         self.cursor = unsafe { self.cursor.add(total_size) };
         self.object_count += 1;
         self.bytes_used += total_size;
@@ -134,10 +136,8 @@ impl OldGen {
                         ptr::write(rem_header, GcHeader::new(remaining_sz as u32, TypeTag::Raw));
                         (*rem_header).set_free();
                     }
-                    self.free_chunks.push(FreeChunk {
-                        offset: chunk.offset + total_size,
-                        size: remaining_sz,
-                    });
+                    self.free_chunks
+                        .push(FreeChunk { offset: chunk.offset + total_size, size: remaining_sz });
                     total_size
                 } else if remaining_sz > 0 {
                     // Absorb the tail by enlarging the copied header and

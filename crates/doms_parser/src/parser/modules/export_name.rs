@@ -7,7 +7,9 @@ impl<'a> Parser<'a> {
             TokenKind::Ident(s) => Ok(s),
             TokenKind::StringLit { value, has_unpaired_surrogate, .. } => {
                 if has_unpaired_surrogate {
-                    return Err(ParseError::General("Export name contains unpaired surrogate".to_string()));
+                    return Err(ParseError::General(
+                        "Export name contains unpaired surrogate".to_string(),
+                    ));
                 }
                 Ok(value)
             }

@@ -3,7 +3,11 @@
 pub(super) fn flush_surrogate(s: &mut String) -> bool {
     let bytes = s.as_bytes();
     let len = bytes.len();
-    if len >= 3 && bytes[len - 3] == 0xED && (0xA0..=0xAF).contains(&bytes[len - 2]) && (0x80..=0xBF).contains(&bytes[len - 1]) {
+    if len >= 3
+        && bytes[len - 3] == 0xED
+        && (0xA0..=0xAF).contains(&bytes[len - 2])
+        && (0x80..=0xBF).contains(&bytes[len - 1])
+    {
         s.truncate(len - 3);
         s.push('\u{FFFD}');
         true
@@ -26,7 +30,11 @@ pub(super) fn push_unicode_code_unit(s: &mut String, code: u32) -> bool {
     } else if (0xDC00..=0xDFFF).contains(&code) {
         let bytes = s.as_bytes();
         let len = bytes.len();
-        if len >= 3 && bytes[len - 3] == 0xED && (0xA0..=0xAF).contains(&bytes[len - 2]) && (0x80..=0xBF).contains(&bytes[len - 1]) {
+        if len >= 3
+            && bytes[len - 3] == 0xED
+            && (0xA0..=0xAF).contains(&bytes[len - 2])
+            && (0x80..=0xBF).contains(&bytes[len - 1])
+        {
             let b1 = bytes[len - 2] as u32;
             let b2 = bytes[len - 1] as u32;
             let high = 0xD800 | ((b1 & 0x0F) << 6) | (b2 & 0x3F);

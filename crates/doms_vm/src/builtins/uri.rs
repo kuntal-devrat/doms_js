@@ -65,8 +65,10 @@ pub(super) fn uri_decode(s: &str, preserve_reserved: bool) -> Result<String, VmE
             if i + 2 >= len {
                 return Err(VmError::UriError("URI malformed".into()));
             }
-            let h1 = hex_val(bytes[i + 1]).ok_or_else(|| VmError::UriError("URI malformed".into()))?;
-            let h2 = hex_val(bytes[i + 2]).ok_or_else(|| VmError::UriError("URI malformed".into()))?;
+            let h1 =
+                hex_val(bytes[i + 1]).ok_or_else(|| VmError::UriError("URI malformed".into()))?;
+            let h2 =
+                hex_val(bytes[i + 2]).ok_or_else(|| VmError::UriError("URI malformed".into()))?;
             let byte_val = (h1 << 4) | h2;
             i += 3;
 

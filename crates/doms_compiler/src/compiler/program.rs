@@ -77,14 +77,7 @@ impl Compiler {
 
         let mut export_names = Vec::new();
         for stmt in &program.body {
-            if let Statement::Export {
-                decl,
-                is_default,
-                specifiers,
-                all_as,
-                ..
-            } = stmt
-            {
+            if let Statement::Export { decl, is_default, specifiers, all_as, .. } = stmt {
                 if *is_default {
                     export_names.push("default".to_string());
                 }
@@ -142,15 +135,31 @@ impl Compiler {
         // Hoist top-level function declarations
         for stmt in &program.body {
             let func_info = match stmt {
-                Statement::FunctionDecl { name, params, body } => Some((name, params, body, false, false, None)),
-                Statement::AsyncFunctionDecl { name, params, body } => Some((name, params, body, true, false, None)),
-                Statement::GeneratorDecl { name, params, body } => Some((name, params, body, false, true, None)),
-                Statement::AsyncGeneratorDecl { name, params, body } => Some((name, params, body, true, true, None)),
+                Statement::FunctionDecl { name, params, body } => {
+                    Some((name, params, body, false, false, None))
+                }
+                Statement::AsyncFunctionDecl { name, params, body } => {
+                    Some((name, params, body, true, false, None))
+                }
+                Statement::GeneratorDecl { name, params, body } => {
+                    Some((name, params, body, false, true, None))
+                }
+                Statement::AsyncGeneratorDecl { name, params, body } => {
+                    Some((name, params, body, true, true, None))
+                }
                 Statement::Export { decl: Some(inner), is_default, .. } => match &**inner {
-                    Statement::FunctionDecl { name, params, body } => Some((name, params, body, false, false, Some(*is_default))),
-                    Statement::AsyncFunctionDecl { name, params, body } => Some((name, params, body, true, false, Some(*is_default))),
-                    Statement::GeneratorDecl { name, params, body } => Some((name, params, body, false, true, Some(*is_default))),
-                    Statement::AsyncGeneratorDecl { name, params, body } => Some((name, params, body, true, true, Some(*is_default))),
+                    Statement::FunctionDecl { name, params, body } => {
+                        Some((name, params, body, false, false, Some(*is_default)))
+                    }
+                    Statement::AsyncFunctionDecl { name, params, body } => {
+                        Some((name, params, body, true, false, Some(*is_default)))
+                    }
+                    Statement::GeneratorDecl { name, params, body } => {
+                        Some((name, params, body, false, true, Some(*is_default)))
+                    }
+                    Statement::AsyncGeneratorDecl { name, params, body } => {
+                        Some((name, params, body, true, true, Some(*is_default)))
+                    }
                     _ => None,
                 },
                 _ => None,
@@ -158,11 +167,7 @@ impl Compiler {
             if let Some((name, params, body, is_async, is_gen, opt_default)) = func_info {
                 let def = Self::compile_function_full(
                     if name.is_empty() {
-                        if opt_default == Some(true) {
-                            Some("default".to_string())
-                        } else {
-                            None
-                        }
+                        if opt_default == Some(true) { Some("default".to_string()) } else { None }
                     } else {
                         Some(name.clone())
                     },
@@ -186,7 +191,8 @@ impl Compiler {
                 if let Some(is_dflt) = opt_default {
                     if is_dflt {
                         self.chunk.emit(OpCode::Dup, 0);
-                        let dflt_idx = self.chunk.add_constant(Constant::String("default".to_string()));
+                        let dflt_idx =
+                            self.chunk.add_constant(Constant::String("default".to_string()));
                         self.chunk.emit(OpCode::Export(dflt_idx), 0);
                     }
                     if !name.is_empty() && !is_dflt {

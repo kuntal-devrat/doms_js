@@ -1,7 +1,10 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    pub(crate) fn validate_module_early_errors(&self, body: &[Statement]) -> Result<(), ParseError> {
+    pub(crate) fn validate_module_early_errors(
+        &self,
+        body: &[Statement],
+    ) -> Result<(), ParseError> {
         let mut lex_names: Vec<String> = Vec::new();
         let mut var_names: Vec<String> = Vec::new();
         let mut exported_names: Vec<String> = Vec::new();
@@ -9,7 +12,10 @@ impl<'a> Parser<'a> {
 
         let add_lex = |names: &mut Vec<String>, name: String| -> Result<(), ParseError> {
             if names.contains(&name) {
-                return Err(ParseError::General(format!("Identifier '{}' has already been declared", name)));
+                return Err(ParseError::General(format!(
+                    "Identifier '{}' has already been declared",
+                    name
+                )));
             }
             names.push(name);
             Ok(())
@@ -125,14 +131,20 @@ impl<'a> Parser<'a> {
         // Check 1: Disjoint LexicallyDeclaredNames and VarDeclaredNames
         for lex in &lex_names {
             if var_names.contains(lex) {
-                return Err(ParseError::General(format!("Identifier '{}' has already been declared", lex)));
+                return Err(ParseError::General(format!(
+                    "Identifier '{}' has already been declared",
+                    lex
+                )));
             }
         }
 
         // Check 2: Unresolvable exports
         for exp_bind in unresolvable_exports {
             if !lex_names.contains(&exp_bind) && !var_names.contains(&exp_bind) {
-                return Err(ParseError::General(format!("Exported identifier '{}' is not defined", exp_bind)));
+                return Err(ParseError::General(format!(
+                    "Exported identifier '{}' is not defined",
+                    exp_bind
+                )));
             }
         }
 

@@ -61,7 +61,9 @@ pub(super) fn register_symbol(vm: &mut Vm) {
     let symbol_key_for = vm.alloc_native_function("keyFor", 1, |vm, _this, args| {
         let sym = args.first().copied().unwrap_or(JsValue::undefined());
         if !sym.is_symbol() {
-            return Err(VmError::TypeError("Symbol.keyFor requires that argument be a Symbol".into()));
+            return Err(VmError::TypeError(
+                "Symbol.keyFor requires that argument be a Symbol".into(),
+            ));
         }
         for (k, v) in &vm.symbol_registry {
             if *v == sym {

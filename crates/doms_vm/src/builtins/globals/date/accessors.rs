@@ -1,7 +1,7 @@
 //! `Date.prototype` getters and setters.
 
-use super::*;
 use super::calendar::{get_date_ms, ms_to_utc, utc_to_ms};
+use super::*;
 
 pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
     let date_get_time = vm.alloc_native_function("getTime", 0, |_vm, this, _args| {
@@ -20,13 +20,14 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
             None => Ok(JsValue::from_double(f64::NAN)),
         }
     });
-    let date_get_utc_full_year = vm.alloc_native_function("getUTCFullYear", 0, |_vm, this, _args| {
-        let (_, ms) = get_date_ms(this)?;
-        match ms_to_utc(ms) {
-            Some((y, _, _, _, _, _, _, _)) => Ok(JsValue::from_double(y as f64)),
-            None => Ok(JsValue::from_double(f64::NAN)),
-        }
-    });
+    let date_get_utc_full_year =
+        vm.alloc_native_function("getUTCFullYear", 0, |_vm, this, _args| {
+            let (_, ms) = get_date_ms(this)?;
+            match ms_to_utc(ms) {
+                Some((y, _, _, _, _, _, _, _)) => Ok(JsValue::from_double(y as f64)),
+                None => Ok(JsValue::from_double(f64::NAN)),
+            }
+        });
 
     let date_get_month = vm.alloc_native_function("getMonth", 0, |_vm, this, _args| {
         let (_, ms) = get_date_ms(this)?;
@@ -125,18 +126,20 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
             None => Ok(JsValue::from_double(f64::NAN)),
         }
     });
-    let date_get_utc_millis = vm.alloc_native_function("getUTCMilliseconds", 0, |_vm, this, _args| {
-        let (_, ms) = get_date_ms(this)?;
-        match ms_to_utc(ms) {
-            Some((_, _, _, _, _, _, _, m)) => Ok(JsValue::from_double(m as f64)),
-            None => Ok(JsValue::from_double(f64::NAN)),
-        }
-    });
+    let date_get_utc_millis =
+        vm.alloc_native_function("getUTCMilliseconds", 0, |_vm, this, _args| {
+            let (_, ms) = get_date_ms(this)?;
+            match ms_to_utc(ms) {
+                Some((_, _, _, _, _, _, _, m)) => Ok(JsValue::from_double(m as f64)),
+                None => Ok(JsValue::from_double(f64::NAN)),
+            }
+        });
 
-    let date_get_tz_offset = vm.alloc_native_function("getTimezoneOffset", 0, |_vm, this, _args| {
-        let _ = get_date_ms(this)?;
-        Ok(JsValue::from_double(0.0))
-    });
+    let date_get_tz_offset =
+        vm.alloc_native_function("getTimezoneOffset", 0, |_vm, this, _args| {
+            let _ = get_date_ms(this)?;
+            Ok(JsValue::from_double(0.0))
+        });
 
     let date_get_year = vm.alloc_native_function("getYear", 0, |_vm, this, _args| {
         let (_, ms) = get_date_ms(this)?;
@@ -207,7 +210,8 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
         if ms.is_nan() {
             return Ok(JsValue::from_double(f64::NAN));
         }
-        let (cur_y, _, cur_d, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let (cur_y, _, cur_d, _, cur_h, cur_min, cur_s, cur_ms) =
+            ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
         let d = d_num.unwrap_or(cur_d as f64);
         let new_ms = if arg_m.is_nan() || d.is_nan() {
             f64::NAN
@@ -228,7 +232,8 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
         if ms.is_nan() {
             return Ok(JsValue::from_double(f64::NAN));
         }
-        let (cur_y, cur_m, _, _, cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let (cur_y, cur_m, _, _, cur_h, cur_min, cur_s, cur_ms) =
+            ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
         let new_ms = if arg_d.is_nan() {
             f64::NAN
         } else {
@@ -251,7 +256,8 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
         if ms.is_nan() {
             return Ok(JsValue::from_double(f64::NAN));
         }
-        let (cur_y, cur_m, cur_d, _, _cur_h, cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let (cur_y, cur_m, cur_d, _, _cur_h, cur_min, cur_s, cur_ms) =
+            ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
         let min = min_num.unwrap_or(cur_min as f64);
         let s = s_num.unwrap_or(cur_s as f64);
         let milli = ms_num.unwrap_or(cur_ms as f64);
@@ -276,7 +282,8 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
         if ms.is_nan() {
             return Ok(JsValue::from_double(f64::NAN));
         }
-        let (cur_y, cur_m, cur_d, _, cur_h, _cur_min, cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let (cur_y, cur_m, cur_d, _, cur_h, _cur_min, cur_s, cur_ms) =
+            ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
         let s = s_num.unwrap_or(cur_s as f64);
         let milli = ms_num.unwrap_or(cur_ms as f64);
         let new_ms = if min_num.is_nan() || s.is_nan() || milli.is_nan() {
@@ -299,7 +306,8 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
         if ms.is_nan() {
             return Ok(JsValue::from_double(f64::NAN));
         }
-        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, _cur_s, cur_ms) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, _cur_s, cur_ms) =
+            ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
         let milli = ms_num.unwrap_or(cur_ms as f64);
         let new_ms = if s_num.is_nan() || milli.is_nan() {
             f64::NAN
@@ -320,7 +328,8 @@ pub(super) fn create_accessors(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
         if ms.is_nan() {
             return Ok(JsValue::from_double(f64::NAN));
         }
-        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, _) = ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
+        let (cur_y, cur_m, cur_d, _, cur_h, cur_min, cur_s, _) =
+            ms_to_utc(ms).unwrap_or((1970, 0, 1, 0, 0, 0, 0, 0));
         let new_ms = if ms_num.is_nan() {
             f64::NAN
         } else {

@@ -1,6 +1,6 @@
 //! Object model, prototypes, functions, and arrays.
 
-use crate::shape::{ShapeId, PropertyAttributes};
+use crate::shape::{PropertyAttributes, ShapeId};
 use crate::value::JsValue;
 use doms_compiler::bytecode::BytecodeChunk;
 use doms_gc::trace::{Trace, Tracer};

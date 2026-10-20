@@ -34,12 +34,16 @@ impl Vm {
                         if let Some(d) = self.deadline {
                             if Instant::now() > d {
                                 self.temp_roots.truncate(prev_temp);
-                                return Err(VmError::RuntimeError("Execution timeout exceeded".into()));
+                                return Err(VmError::RuntimeError(
+                                    "Execution timeout exceeded".into(),
+                                ));
                             }
                         }
                         if res.len() >= 1_000_000 {
                             self.temp_roots.truncate(prev_temp);
-                            return Err(VmError::RangeError("Spread iterable exceeds maximum size".into()));
+                            return Err(VmError::RangeError(
+                                "Spread iterable exceeds maximum size".into(),
+                            ));
                         }
                         let cur_it = self.temp_roots[prev_temp];
                         let cur_next = self.temp_roots[prev_temp + 1];
@@ -52,7 +56,9 @@ impl Vm {
                         };
                         if !step.is_js_object() {
                             self.temp_roots.truncate(prev_temp);
-                            return Err(VmError::TypeError("Iterator result is not an object".into()));
+                            return Err(VmError::TypeError(
+                                "Iterator result is not an object".into(),
+                            ));
                         }
                         self.temp_roots.push(step);
                         let cur_step = self.temp_roots[self.temp_roots.len() - 1];

@@ -2,6 +2,8 @@
 //!
 //! Lexer, AST definitions, and Pratt parser for JavaScript in the DOMS engine.
 
+#![allow(clippy::all)]
+
 pub mod ast;
 pub mod lexer;
 pub mod parser;

@@ -148,16 +148,15 @@ impl Test262Runner {
         let final_passed = passed_count.load(Ordering::SeqCst);
         let final_failed = failed_count.load(Ordering::SeqCst);
         let final_skipped = skipped_count.load(Ordering::SeqCst);
-        let final_pct = if total > 0 {
-            (final_passed as f64 * 100.0) / total as f64
-        } else {
-            0.0
-        };
+        let final_pct = if total > 0 { (final_passed as f64 * 100.0) / total as f64 } else { 0.0 };
 
         println!("\n============================================================");
         println!("Test262 Category Breakdown & Live Metrics");
         println!("============================================================");
-        println!("{:<36} | {:>7} | {:>7} | {:>7} | {:>8}", "Category", "Total", "Pass", "Fail", "Pass %");
+        println!(
+            "{:<36} | {:>7} | {:>7} | {:>7} | {:>8}",
+            "Category", "Total", "Pass", "Fail", "Pass %"
+        );
         println!("{:-<36}-+-{:-<7}-+-{:-<7}-+-{:-<7}-+-{:-<8}", "", "", "", "", "");
 
         let stats_map = category_stats.lock().unwrap();
@@ -165,12 +164,11 @@ impl Test262Runner {
         sorted_cats.sort_by_key(|(k, _)| (*k).clone());
 
         for (cat, st) in &sorted_cats {
-            let pct = if st.total > 0 {
-                (st.passed as f64 * 100.0) / st.total as f64
-            } else {
-                0.0
-            };
-            println!("{:<36} | {:>7} | {:>7} | {:>7} | {:>7.1}%", cat, st.total, st.passed, st.failed, pct);
+            let pct = if st.total > 0 { (st.passed as f64 * 100.0) / st.total as f64 } else { 0.0 };
+            println!(
+                "{:<36} | {:>7} | {:>7} | {:>7} | {:>7.1}%",
+                cat, st.total, st.passed, st.failed, pct
+            );
         }
 
         println!("============================================================");
@@ -179,7 +177,11 @@ impl Test262Runner {
             total, final_passed, final_failed, final_skipped
         );
         println!("Overall Conformance Rate: {:.2}%", final_pct);
-        println!("Time Elapsed            : {:.2}s ({:.1} tests/sec)", elapsed.as_secs_f64(), total as f64 / elapsed.as_secs_f64().max(0.001));
+        println!(
+            "Time Elapsed            : {:.2}s ({:.1} tests/sec)",
+            elapsed.as_secs_f64(),
+            total as f64 / elapsed.as_secs_f64().max(0.001)
+        );
         println!("============================================================");
 
         // Export summary JSON with persistent category merging
@@ -189,11 +191,12 @@ impl Test262Runner {
             }
 
             // Load existing categories if summary merging is enabled
-            let mut merged_categories: HashMap<String, CategoryStats> = if !self.config.clean_summary && out_path.is_file() {
-                load_existing_categories(out_path)
-            } else {
-                HashMap::new()
-            };
+            let mut merged_categories: HashMap<String, CategoryStats> =
+                if !self.config.clean_summary && out_path.is_file() {
+                    load_existing_categories(out_path)
+                } else {
+                    HashMap::new()
+                };
 
             // Merge current run's categories (overwriting updated ones only on full suite runs)
             if self.config.path_filter.is_none() && self.config.max_tests.is_none() {
@@ -228,7 +231,8 @@ impl Test262Runner {
 
             let mut categories_json = Vec::new();
             for (cat, st) in &sorted_merged {
-                let pct = if st.total > 0 { (st.passed as f64 * 100.0) / st.total as f64 } else { 0.0 };
+                let pct =
+                    if st.total > 0 { (st.passed as f64 * 100.0) / st.total as f64 } else { 0.0 };
                 categories_json.push(format!(
                     "    \"{}\": {{ \"total\": {}, \"passed\": {}, \"failed\": {}, \"percentage\": {:.2} }}",
                     cat, st.total, st.passed, st.failed, pct
@@ -270,10 +274,16 @@ impl Test262Runner {
             );
 
             if fs::write(out_path, json_body).is_ok() {
-                println!("Metrics saved to: {} (cumulative categories: {})", out_path.display(), merged_categories.len());
+                println!(
+                    "Metrics saved to: {} (cumulative categories: {})",
+                    out_path.display(),
+                    merged_categories.len()
+                );
                 if merged_categories.len() > sorted_cats.len() {
-                    println!("Cumulative Across All Categories: {} tests | Passed: {} | Conformance Rate: {:.2}%",
-                        cumulative_total, cumulative_passed, cumulative_pct);
+                    println!(
+                        "Cumulative Across All Categories: {} tests | Passed: {} | Conformance Rate: {:.2}%",
+                        cumulative_total, cumulative_passed, cumulative_pct
+                    );
                 }
             }
         }

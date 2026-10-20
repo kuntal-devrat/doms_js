@@ -64,64 +64,60 @@ impl Compiler {
         self.chunk.emit(OpCode::CreateObject, 0);
         for prop in props {
             match prop {
-                ObjectProperty::KeyValue(key, val_expr) => {
-                    match key {
-                        PropertyKey::Literal(k) => {
-                            self.chunk.emit(OpCode::Dup, 0);
-                            self.compile_expression(val_expr)?;
-                            if Self::is_anonymous_function_definition(val_expr) {
-                                let name_idx = self.chunk.add_constant(Constant::String(k.clone()));
-                                self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
-                            }
-                            let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
-                            self.chunk.emit(OpCode::SetProp(prop_idx), 0);
-                            self.chunk.emit(OpCode::Pop, 0);
+                ObjectProperty::KeyValue(key, val_expr) => match key {
+                    PropertyKey::Literal(k) => {
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.compile_expression(val_expr)?;
+                        if Self::is_anonymous_function_definition(val_expr) {
+                            let name_idx = self.chunk.add_constant(Constant::String(k.clone()));
+                            self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
                         }
-                        PropertyKey::Computed(k_expr) => {
-                            self.chunk.emit(OpCode::Dup, 0);
-                            self.compile_expression(k_expr)?;
-                            self.compile_expression(val_expr)?;
-                            self.chunk.emit(OpCode::SetElem, 0);
-                            self.chunk.emit(OpCode::Pop, 0);
-                        }
+                        let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
+                        self.chunk.emit(OpCode::SetProp(prop_idx), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
                     }
-                }
-                ObjectProperty::Getter(key, fn_expr) => {
-                    match key {
-                        PropertyKey::Literal(k) => {
-                            self.chunk.emit(OpCode::Dup, 0);
-                            self.compile_expression(fn_expr)?;
-                            let get_name = self.chunk.add_constant(Constant::String(format!("get {}", k)));
-                            self.chunk.emit(OpCode::SetFunctionName(get_name), 0);
-                            let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
-                            self.chunk.emit(OpCode::DefineGetter(prop_idx), 0);
-                        }
-                        PropertyKey::Computed(k_expr) => {
-                            self.chunk.emit(OpCode::Dup, 0);
-                            self.compile_expression(k_expr)?;
-                            self.compile_expression(fn_expr)?;
-                            self.chunk.emit(OpCode::DefineComputedGetter, 0);
-                        }
+                    PropertyKey::Computed(k_expr) => {
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.compile_expression(k_expr)?;
+                        self.compile_expression(val_expr)?;
+                        self.chunk.emit(OpCode::SetElem, 0);
+                        self.chunk.emit(OpCode::Pop, 0);
                     }
-                }
-                ObjectProperty::Setter(key, fn_expr) => {
-                    match key {
-                        PropertyKey::Literal(k) => {
-                            self.chunk.emit(OpCode::Dup, 0);
-                            self.compile_expression(fn_expr)?;
-                            let set_name = self.chunk.add_constant(Constant::String(format!("set {}", k)));
-                            self.chunk.emit(OpCode::SetFunctionName(set_name), 0);
-                            let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
-                            self.chunk.emit(OpCode::DefineSetter(prop_idx), 0);
-                        }
-                        PropertyKey::Computed(k_expr) => {
-                            self.chunk.emit(OpCode::Dup, 0);
-                            self.compile_expression(k_expr)?;
-                            self.compile_expression(fn_expr)?;
-                            self.chunk.emit(OpCode::DefineComputedSetter, 0);
-                        }
+                },
+                ObjectProperty::Getter(key, fn_expr) => match key {
+                    PropertyKey::Literal(k) => {
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.compile_expression(fn_expr)?;
+                        let get_name =
+                            self.chunk.add_constant(Constant::String(format!("get {}", k)));
+                        self.chunk.emit(OpCode::SetFunctionName(get_name), 0);
+                        let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
+                        self.chunk.emit(OpCode::DefineGetter(prop_idx), 0);
                     }
-                }
+                    PropertyKey::Computed(k_expr) => {
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.compile_expression(k_expr)?;
+                        self.compile_expression(fn_expr)?;
+                        self.chunk.emit(OpCode::DefineComputedGetter, 0);
+                    }
+                },
+                ObjectProperty::Setter(key, fn_expr) => match key {
+                    PropertyKey::Literal(k) => {
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.compile_expression(fn_expr)?;
+                        let set_name =
+                            self.chunk.add_constant(Constant::String(format!("set {}", k)));
+                        self.chunk.emit(OpCode::SetFunctionName(set_name), 0);
+                        let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
+                        self.chunk.emit(OpCode::DefineSetter(prop_idx), 0);
+                    }
+                    PropertyKey::Computed(k_expr) => {
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.compile_expression(k_expr)?;
+                        self.compile_expression(fn_expr)?;
+                        self.chunk.emit(OpCode::DefineComputedSetter, 0);
+                    }
+                },
                 ObjectProperty::Spread(expr) => {
                     self.compile_expression(expr)?;
                     self.chunk.emit(OpCode::ObjectSpread, 0);

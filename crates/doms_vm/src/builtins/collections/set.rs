@@ -1,7 +1,7 @@
 //! The `Set` global and `Set.prototype`.
 
 use super::*;
-use crate::builtins::promise::iterator::{iterator_close, IteratorRecord};
+use crate::builtins::promise::iterator::{IteratorRecord, iterator_close};
 
 struct SetRecord {
     set: JsValue,
@@ -19,11 +19,7 @@ fn get_set_record(vm: &mut Vm, other: JsValue) -> Result<SetRecord, VmError> {
     if num_size.is_nan() {
         return Err(VmError::TypeError("Set size must be a number".into()));
     }
-    let int_size = if num_size.is_infinite() {
-        num_size
-    } else {
-        num_size.trunc()
-    };
+    let int_size = if num_size.is_infinite() { num_size } else { num_size.trunc() };
     if int_size < 0.0 {
         return Err(VmError::RangeError("Set size must be non-negative".into()));
     }
@@ -35,12 +31,7 @@ fn get_set_record(vm: &mut Vm, other: JsValue) -> Result<SetRecord, VmError> {
     if !vm.is_callable(keys) {
         return Err(VmError::TypeError("Set keys must be a function".into()));
     }
-    Ok(SetRecord {
-        set: other,
-        size: int_size,
-        has,
-        keys,
-    })
+    Ok(SetRecord { set: other, size: int_size, has, keys })
 }
 
 fn get_keys_iterator(vm: &mut Vm, rec: &SetRecord) -> Result<IteratorRecord, VmError> {
@@ -52,11 +43,7 @@ fn get_keys_iterator(vm: &mut Vm, rec: &SetRecord) -> Result<IteratorRecord, VmE
     if !vm.is_callable(next_method) {
         return Err(VmError::TypeError("Iterator next must be callable".into()));
     }
-    Ok(IteratorRecord {
-        iterator: keys_iter,
-        next_method,
-        done: false,
-    })
+    Ok(IteratorRecord { iterator: keys_iter, next_method, done: false })
 }
 
 fn step_iterator(vm: &mut Vm, rec: &IteratorRecord) -> Result<Option<JsValue>, VmError> {
@@ -83,11 +70,7 @@ fn get_set_elements(this: JsValue) -> Result<Vec<JsValue>, VmError> {
 }
 
 fn normalize_set_element(el: JsValue) -> JsValue {
-    if el.to_number() == Some(0.0) {
-        JsValue::from_double(0.0)
-    } else {
-        el
-    }
+    if el.to_number() == Some(0.0) { JsValue::from_double(0.0) } else { el }
 }
 
 fn set_add_element(set_val: JsValue, el: JsValue) {
@@ -95,7 +78,9 @@ fn set_add_element(set_val: JsValue, el: JsValue) {
     if let Some(ptr) = set_val.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         if let ObjectKind::Set(elements) = &mut obj.kind {
-            if !elements.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, el))) {
+            if !elements.iter().any(|existing| {
+                existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, el))
+            }) {
                 elements.push(Some(el));
             }
         }
@@ -125,7 +110,9 @@ fn set_has_element(set_val: JsValue, el: JsValue) -> bool {
     if let Some(ptr) = set_val.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut JsObject) };
         if let ObjectKind::Set(elements) = &obj.kind {
-            return elements.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, el)));
+            return elements.iter().any(|existing| {
+                existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, el))
+            });
         }
     }
     false
@@ -138,7 +125,9 @@ fn alloc_set_with_elements(vm: &mut Vm, elements: &[JsValue]) -> JsValue {
         let mut set_els: Vec<Option<JsValue>> = Vec::with_capacity(elements.len());
         for &el in elements {
             let el = normalize_set_element(el);
-            if !set_els.iter().any(|existing| existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, el))) {
+            if !set_els.iter().any(|existing| {
+                existing.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, el))
+            }) {
                 set_els.push(Some(el));
             }
         }
@@ -157,7 +146,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if let ObjectKind::Set(elements) = &mut obj.kind {
-                if !elements.iter().any(|el| el.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, val))) {
+                if !elements.iter().any(|el| {
+                    el.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, val))
+                }) {
                     elements.push(Some(val));
                 }
                 return Ok(this);
@@ -172,7 +163,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Set(elements) = &obj.kind {
-                return Ok(JsValue::from_boolean(elements.iter().any(|el| el.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, val)))));
+                return Ok(JsValue::from_boolean(elements.iter().any(|el| {
+                    el.as_ref().map_or(false, |e| crate::object::js_values_equal(*e, val))
+                })));
             }
         }
         Err(VmError::TypeError("Method Set.prototype.has called on incompatible receiver".into()))
@@ -195,7 +188,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                 return Ok(JsValue::from_boolean(false));
             }
         }
-        Err(VmError::TypeError("Method Set.prototype.delete called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method Set.prototype.delete called on incompatible receiver".into(),
+        ))
     });
 
     let set_clear = vm.alloc_native_function("clear", 0, |_vm, this, _args| {
@@ -228,10 +223,14 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                         break;
                     }
                 } else {
-                    return Err(VmError::TypeError("Method Set.prototype.forEach called on incompatible receiver".into()));
+                    return Err(VmError::TypeError(
+                        "Method Set.prototype.forEach called on incompatible receiver".into(),
+                    ));
                 }
             } else {
-                return Err(VmError::TypeError("Method Set.prototype.forEach called on incompatible receiver".into()));
+                return Err(VmError::TypeError(
+                    "Method Set.prototype.forEach called on incompatible receiver".into(),
+                ));
             };
             idx += 1;
             if let Some(el) = el {
@@ -248,7 +247,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                 return Ok(vm.alloc_set_iterator(this, SetIterationKind::Value));
             }
         }
-        Err(VmError::TypeError("Method Set.prototype.values called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method Set.prototype.values called on incompatible receiver".into(),
+        ))
     });
 
     let set_entries = vm.alloc_native_function("entries", 0, |vm, this, _args| {
@@ -258,7 +259,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                 return Ok(vm.alloc_set_iterator(this, SetIterationKind::KeyValue));
             }
         }
-        Err(VmError::TypeError("Method Set.prototype.entries called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method Set.prototype.entries called on incompatible receiver".into(),
+        ))
     });
 
     let set_size_getter = vm.alloc_native_function("get size", 0, |_vm, this, _args| {
@@ -269,7 +272,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                 return Ok(JsValue::from_int32(count as i32));
             }
         }
-        Err(VmError::TypeError("Method get Set.prototype.size called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method get Set.prototype.size called on incompatible receiver".into(),
+        ))
     });
 
     // ES2024 Set methods
@@ -300,7 +305,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                         return Err(iterator_close(vm, &iter_rec, Some(e)));
                     }
                 };
-                let Some(next_val) = next else { break; };
+                let Some(next_val) = next else {
+                    break;
+                };
                 let already_in = set_has_element(result_set, next_val);
                 if !already_in {
                     let in_this = set_has_element(this, next_val);
@@ -333,7 +340,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                     return Err(iterator_close(vm, &iter_rec, Some(e)));
                 }
             };
-            let Some(next_val) = next else { break; };
+            let Some(next_val) = next else {
+                break;
+            };
             set_add_element(result_set, next_val);
         }
 
@@ -372,7 +381,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                         return Err(iterator_close(vm, &iter_rec, Some(e)));
                     }
                 };
-                let Some(next_val) = next else { break; };
+                let Some(next_val) = next else {
+                    break;
+                };
                 set_delete_element(res, next_val);
             }
             vm.temp_roots.truncate(prev_temp);
@@ -382,36 +393,39 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
         Ok(result_set)
     });
 
-    let set_symmetric_difference = vm.alloc_native_function("symmetricDifference", 1, |vm, this, args| {
-        let elements = get_set_elements(this)?;
-        let other_val = args.first().copied().unwrap_or(JsValue::undefined());
-        let other_rec = get_set_record(vm, other_val)?;
+    let set_symmetric_difference =
+        vm.alloc_native_function("symmetricDifference", 1, |vm, this, args| {
+            let elements = get_set_elements(this)?;
+            let other_val = args.first().copied().unwrap_or(JsValue::undefined());
+            let other_rec = get_set_record(vm, other_val)?;
 
-        let result_set = alloc_set_with_elements(vm, &elements);
-        let prev_temp = vm.temp_roots.len();
-        vm.temp_roots.push(result_set);
+            let result_set = alloc_set_with_elements(vm, &elements);
+            let prev_temp = vm.temp_roots.len();
+            vm.temp_roots.push(result_set);
 
-        let iter_rec = get_keys_iterator(vm, &other_rec)?;
-        loop {
-            let next = match step_iterator(vm, &iter_rec) {
-                Ok(v) => v,
-                Err(e) => {
-                    vm.temp_roots.truncate(prev_temp);
-                    return Err(iterator_close(vm, &iter_rec, Some(e)));
+            let iter_rec = get_keys_iterator(vm, &other_rec)?;
+            loop {
+                let next = match step_iterator(vm, &iter_rec) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        vm.temp_roots.truncate(prev_temp);
+                        return Err(iterator_close(vm, &iter_rec, Some(e)));
+                    }
+                };
+                let Some(next_val) = next else {
+                    break;
+                };
+                let in_this = set_has_element(this, next_val);
+                if in_this {
+                    set_delete_element(result_set, next_val);
+                } else {
+                    set_add_element(result_set, next_val);
                 }
-            };
-            let Some(next_val) = next else { break; };
-            let in_this = set_has_element(this, next_val);
-            if in_this {
-                set_delete_element(result_set, next_val);
-            } else {
-                set_add_element(result_set, next_val);
             }
-        }
 
-        vm.temp_roots.truncate(prev_temp);
-        Ok(result_set)
-    });
+            vm.temp_roots.truncate(prev_temp);
+            Ok(result_set)
+        });
 
     let set_is_subset_of = vm.alloc_native_function("isSubsetOf", 1, |vm, this, args| {
         let elements = get_set_elements(this)?;
@@ -447,7 +461,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                 Ok(v) => v,
                 Err(e) => return Err(iterator_close(vm, &iter_rec, Some(e))),
             };
-            let Some(next_val) = next else { break; };
+            let Some(next_val) = next else {
+                break;
+            };
             let in_this = set_has_element(this, next_val);
             if !in_this {
                 let _ = iterator_close(vm, &iter_rec, None);
@@ -478,7 +494,9 @@ pub(super) fn register_set_builtins(vm: &mut Vm) {
                     Ok(v) => v,
                     Err(e) => return Err(iterator_close(vm, &iter_rec, Some(e))),
                 };
-                let Some(next_val) = next else { break; };
+                let Some(next_val) = next else {
+                    break;
+                };
                 let in_this = set_has_element(this, next_val);
                 if in_this {
                     let _ = iterator_close(vm, &iter_rec, None);

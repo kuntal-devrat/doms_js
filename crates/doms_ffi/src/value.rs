@@ -96,7 +96,8 @@ pub unsafe extern "C" fn doms_value_is_function(val: *mut doms_value_t) -> c_int
     if let Some(ptr) = inner.as_object_ptr() {
         let obj = unsafe { &*(ptr as *mut doms_vm::object::JsObject) };
         match &obj.kind {
-            doms_vm::object::ObjectKind::Function(_) | doms_vm::object::ObjectKind::NativeFunction(_) => 1,
+            doms_vm::object::ObjectKind::Function(_)
+            | doms_vm::object::ObjectKind::NativeFunction(_) => 1,
             _ => 0,
         }
     } else {

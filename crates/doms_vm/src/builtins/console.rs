@@ -17,7 +17,11 @@ pub(super) fn register_console(vm: &mut Vm) {
     vm.globals.insert("console".to_string(), console_obj);
 }
 
-pub(super) fn native_console_log(vm: &mut Vm, _this: JsValue, args: &[JsValue]) -> Result<JsValue, VmError> {
+pub(super) fn native_console_log(
+    vm: &mut Vm,
+    _this: JsValue,
+    args: &[JsValue],
+) -> Result<JsValue, VmError> {
     let parts: Vec<String> = args.iter().map(|arg| vm.to_string_value(*arg)).collect();
     println!("{}", parts.join(" "));
     Ok(JsValue::undefined())

@@ -3,10 +3,7 @@
 use super::*;
 
 impl Vm {
-    pub(crate) fn op_return(
-        &mut self,
-        target_depth: usize,
-    ) -> Result<Option<JsValue>, VmError> {
+    pub(crate) fn op_return(&mut self, target_depth: usize) -> Result<Option<JsValue>, VmError> {
         let ret_val = self.pop().unwrap_or_default();
         let finished = self.frames.pop().unwrap();
         while let Some(top) = self.catch_stack.last() {
@@ -39,10 +36,7 @@ impl Vm {
         Ok(None)
     }
 
-    pub(crate) fn await_value(
-        &mut self,
-        val: JsValue,
-    ) -> Result<JsValue, VmError> {
+    pub(crate) fn await_value(&mut self, val: JsValue) -> Result<JsValue, VmError> {
         let resolved = if let Some(ptr) = val.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if let ObjectKind::Promise(_) = &obj.kind {
@@ -83,18 +77,26 @@ impl Vm {
                     let error_val = Arc::new(std::sync::Mutex::new(None));
                     let res_clone = Arc::clone(&result_val);
                     let rej_clone = Arc::clone(&error_val);
-                    let on_resolve = self.alloc_closure_native_function("resolve", 1, Arc::new(move |_vm, _this, args| {
-                        let v = args.first().copied().unwrap_or_else(JsValue::undefined);
-                        let mut l = res_clone.lock().unwrap();
-                        *l = Some(v);
-                        Ok(JsValue::undefined())
-                    }));
-                    let on_reject = self.alloc_closure_native_function("reject", 1, Arc::new(move |_vm, _this, args| {
-                        let e = args.first().copied().unwrap_or_else(JsValue::undefined);
-                        let mut l = rej_clone.lock().unwrap();
-                        *l = Some(e);
-                        Ok(JsValue::undefined())
-                    }));
+                    let on_resolve = self.alloc_closure_native_function(
+                        "resolve",
+                        1,
+                        Arc::new(move |_vm, _this, args| {
+                            let v = args.first().copied().unwrap_or_else(JsValue::undefined);
+                            let mut l = res_clone.lock().unwrap();
+                            *l = Some(v);
+                            Ok(JsValue::undefined())
+                        }),
+                    );
+                    let on_reject = self.alloc_closure_native_function(
+                        "reject",
+                        1,
+                        Arc::new(move |_vm, _this, args| {
+                            let e = args.first().copied().unwrap_or_else(JsValue::undefined);
+                            let mut l = rej_clone.lock().unwrap();
+                            *l = Some(e);
+                            Ok(JsValue::undefined())
+                        }),
+                    );
                     match self.call(then_fn, val, &[on_resolve, on_reject]) {
                         Ok(_) => {
                             self.drain_microtasks()?;
@@ -118,10 +120,7 @@ impl Vm {
         Ok(resolved)
     }
 
-    pub(crate) fn op_await(
-        &mut self,
-        target_depth: usize,
-    ) -> Result<(), VmError> {
+    pub(crate) fn op_await(&mut self, target_depth: usize) -> Result<(), VmError> {
         let val = self.pop()?;
         match self.await_value(val) {
             Ok(resolved) => {
@@ -255,10 +254,16 @@ impl Vm {
         });
     }
 
-    pub(crate) fn op_end_finally(&mut self, kind_slot: u16, target_depth: usize) -> Result<Option<JsValue>, VmError> {
+    pub(crate) fn op_end_finally(
+        &mut self,
+        kind_slot: u16,
+        target_depth: usize,
+    ) -> Result<Option<JsValue>, VmError> {
         let frame = self.frames.last().unwrap();
-        let kind = frame.locals.get(kind_slot as usize).and_then(|v| v.as_number()).unwrap_or(0.0) as i32;
-        let val = frame.locals.get((kind_slot + 1) as usize).copied().unwrap_or_else(JsValue::undefined);
+        let kind =
+            frame.locals.get(kind_slot as usize).and_then(|v| v.as_number()).unwrap_or(0.0) as i32;
+        let val =
+            frame.locals.get((kind_slot + 1) as usize).copied().unwrap_or_else(JsValue::undefined);
         match kind {
             0 => Ok(None),
             1 => {
@@ -273,7 +278,11 @@ impl Vm {
         }
     }
 
-    pub(crate) fn op_push_catch_scope(&mut self, name_idx: u16, chunk: &BytecodeChunk) -> Result<(), VmError> {
+    pub(crate) fn op_push_catch_scope(
+        &mut self,
+        name_idx: u16,
+        chunk: &BytecodeChunk,
+    ) -> Result<(), VmError> {
         let name = match &chunk.constants[name_idx as usize] {
             Constant::String(s) => s.clone(),
             _ => return Err(VmError::TypeError("Catch param name must be string".into())),

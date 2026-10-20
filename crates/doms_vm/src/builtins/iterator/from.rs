@@ -4,15 +4,15 @@ use crate::interpreter::{Vm, VmError};
 use crate::object::{JsObject, ObjectKind};
 use crate::value::JsValue;
 
-pub fn alloc_wrap_for_valid_iterator(vm: &mut Vm, iterator: JsValue, next_method: JsValue) -> JsValue {
+pub fn alloc_wrap_for_valid_iterator(
+    vm: &mut Vm,
+    iterator: JsValue,
+    next_method: JsValue,
+) -> JsValue {
     let wrap_obj = vm.alloc_object_with_exact_proto(vm.wrap_for_valid_iterator_proto);
     if let Some(ptr) = wrap_obj.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
-        obj.kind = ObjectKind::WrapForValidIterator {
-            iterator,
-            next_method,
-            done: false,
-        };
+        obj.kind = ObjectKind::WrapForValidIterator { iterator, next_method, done: false };
     }
     wrap_obj
 }

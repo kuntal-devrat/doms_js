@@ -17,8 +17,15 @@ impl<'a> Parser<'a> {
                     None
                 };
                 for d in &destruct_decls {
-                    if !d.name.starts_with('@') && (kind == VarKind::Let || kind == VarKind::Const) && d.name == "let" {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+                    if !d.name.starts_with('@')
+                        && (kind == VarKind::Let || kind == VarKind::Const)
+                        && d.name == "let"
+                    {
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Let,
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                 }
                 declarations.push(VarDeclarator { name: tmp_name, init });
@@ -34,8 +41,15 @@ impl<'a> Parser<'a> {
                     None
                 };
                 for d in &destruct_decls {
-                    if !d.name.starts_with('@') && (kind == VarKind::Let || kind == VarKind::Const) && d.name == "let" {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+                    if !d.name.starts_with('@')
+                        && (kind == VarKind::Let || kind == VarKind::Const)
+                        && d.name == "let"
+                    {
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Let,
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                 }
                 declarations.push(VarDeclarator { name: tmp_name, init });
@@ -43,7 +57,11 @@ impl<'a> Parser<'a> {
             } else {
                 let name = self.expect_identifier()?;
                 if (kind == VarKind::Let || kind == VarKind::Const) && name == "let" {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Let, self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Let,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 let init = if self.match_token(&TokenKind::Eq)? {
                     Some(self.parse_expression(1)?)
@@ -66,11 +84,20 @@ impl<'a> Parser<'a> {
         let mut declarations = Vec::new();
         loop {
             let name = self.expect_identifier()?;
-            if name == "let" || name == "using" || (name == "await" && (self.is_module || self.in_async || self.in_static_block)) {
-                return Err(ParseError::UnexpectedToken(TokenKind::Ident(name), self.current.line, self.current.col));
+            if name == "let"
+                || name == "using"
+                || (name == "await" && (self.is_module || self.in_async || self.in_static_block))
+            {
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Ident(name),
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             if !self.match_token(&TokenKind::Eq)? {
-                return Err(ParseError::General("Using declarations must have an initializer".to_string()));
+                return Err(ParseError::General(
+                    "Using declarations must have an initializer".to_string(),
+                ));
             }
             let init = Some(self.parse_expression(1)?);
             declarations.push(VarDeclarator { name, init });

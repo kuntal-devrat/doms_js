@@ -1,7 +1,7 @@
 //! Bytecode instruction set and chunk representation.
 
-use std::sync::Arc;
 use num_bigint::BigInt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDef {
@@ -79,7 +79,7 @@ pub enum OpCode {
     CreateGenerator(u16),
     CreateAsyncGenerator(u16),
     GeneratorStart,
-    Call(u8), // argc
+    Call(u8),         // argc
     CallWithThis(u8), // argc with explicit this_val on stack
     CallDirectEval(u8),
     Construct(u8), // new Ctor(args) with argc
@@ -230,9 +230,7 @@ pub struct FeedbackVector {
 
 impl FeedbackVector {
     pub fn new(capacity: usize) -> Self {
-        Self {
-            slots: vec![FeedbackSlot::Uninitialized; capacity],
-        }
+        Self { slots: vec![FeedbackSlot::Uninitialized; capacity] }
     }
 
     pub fn record_shape(&mut self, slot_idx: usize, shape_id: u32, offset: u32) {
@@ -277,7 +275,8 @@ impl FeedbackVector {
         }
         match &mut self.slots[slot_idx] {
             FeedbackSlot::Uninitialized => {
-                self.slots[slot_idx] = FeedbackSlot::BinaryOp { left: left_mask, right: right_mask };
+                self.slots[slot_idx] =
+                    FeedbackSlot::BinaryOp { left: left_mask, right: right_mask };
             }
             FeedbackSlot::BinaryOp { left, right } => {
                 *left |= left_mask;
@@ -482,4 +481,3 @@ impl BytecodeChunk {
 /// Type-safe jump target label for control-flow patching in the compiler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Label(pub usize);
-

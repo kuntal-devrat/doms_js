@@ -55,48 +55,50 @@ impl JitCompiler {
         }
 
         let exec_chunk = Arc::clone(&chunk_clone);
-        let executable: JitCallable = Arc::new(move |vm: &mut Vm, this_val: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-            let frame_chunk = Arc::clone(&exec_chunk);
-            let target_depth = vm.frames.len();
-            let base_sp = vm.stack.len();
+        let executable: JitCallable = Arc::new(
+            move |vm: &mut Vm, this_val: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
+                let frame_chunk = Arc::clone(&exec_chunk);
+                let target_depth = vm.frames.len();
+                let base_sp = vm.stack.len();
 
-            for arg in args {
-                vm.push(*arg);
-            }
+                for arg in args {
+                    vm.push(*arg);
+                }
 
-            let local_names = Arc::clone(&frame_chunk.local_names);
-            let lexical_local_names = Arc::clone(&frame_chunk.lexical_local_names);
+                let local_names = Arc::clone(&frame_chunk.local_names);
+                let lexical_local_names = Arc::clone(&frame_chunk.lexical_local_names);
 
-            vm.frames.push(crate::interpreter::CallFrame {
-                chunk: frame_chunk,
-                ip: 0,
-                base_sp,
-                this_val,
-                gen_val: None,
-                locals: args.to_vec(),
-                local_names,
-                lexical_local_names,
-                scopes: Vec::new(),
-                upvalues_count: 0,
-                env_obj: None,
-                arguments: None,
-                raw_args: Some(args.to_vec()),
-                is_strict: false,
-                new_target: None,
-                is_function: true,
-                is_method: false,
-                is_arrow: false,
-                has_param_exprs: false,
-                in_param_init: false,
-                is_indirect_eval: false,
-                callee_func: None,
-                callee_val: None,
-                mapped_arguments: None,
-                home_object: None,
-            });
+                vm.frames.push(crate::interpreter::CallFrame {
+                    chunk: frame_chunk,
+                    ip: 0,
+                    base_sp,
+                    this_val,
+                    gen_val: None,
+                    locals: args.to_vec(),
+                    local_names,
+                    lexical_local_names,
+                    scopes: Vec::new(),
+                    upvalues_count: 0,
+                    env_obj: None,
+                    arguments: None,
+                    raw_args: Some(args.to_vec()),
+                    is_strict: false,
+                    new_target: None,
+                    is_function: true,
+                    is_method: false,
+                    is_arrow: false,
+                    has_param_exprs: false,
+                    in_param_init: false,
+                    is_indirect_eval: false,
+                    callee_func: None,
+                    callee_val: None,
+                    mapped_arguments: None,
+                    home_object: None,
+                });
 
-            vm.run_until_depth(target_depth)
-        });
+                vm.run_until_depth(target_depth)
+            },
+        );
 
         Some(JitFunction {
             name: None,

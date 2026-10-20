@@ -16,7 +16,10 @@ mod unicode;
 #[cfg(test)]
 mod tests;
 
-pub use chars::{is_ecma_whitespace, is_identifier_part, is_identifier_start, is_line_terminator, is_reserved_word};
+pub use chars::{
+    is_ecma_whitespace, is_identifier_part, is_identifier_start, is_line_terminator,
+    is_reserved_word,
+};
 pub use token::{LexError, Token, TokenKind};
 
 #[derive(Clone)]

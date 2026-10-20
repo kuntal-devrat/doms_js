@@ -73,18 +73,31 @@ impl Vm {
         if self.module_namespace_objects.contains(&target) {
             let val = self.get_property(target, key);
             if val == JsValue::uninitialized() {
-                return Err(VmError::ReferenceError(format!("Cannot access '{}' before initialization", key)));
+                return Err(VmError::ReferenceError(format!(
+                    "Cannot access '{}' before initialization",
+                    key
+                )));
             }
             return Ok(val);
         }
         Ok(self.get_property_with_receiver(target, key, receiver))
     }
 
-    pub fn set_property_result(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<(), VmError> {
+    pub fn set_property_result(
+        &mut self,
+        target: JsValue,
+        key: &str,
+        value: JsValue,
+    ) -> Result<(), VmError> {
         self.set_property_with_receiver_result(target, key, value, target)
     }
 
-    pub fn set_property_throw(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<(), VmError> {
+    pub fn set_property_throw(
+        &mut self,
+        target: JsValue,
+        key: &str,
+        value: JsValue,
+    ) -> Result<(), VmError> {
         let ok = self.set_property_with_receiver(target, key, value, target)?;
         if !ok {
             return Err(VmError::TypeError(format!(
@@ -263,7 +276,9 @@ impl Vm {
                                 }
                             }
                         }
-                        if let Some(proto_info) = self.shapes.get_property_info(proto_obj.shape_id, key) {
+                        if let Some(proto_info) =
+                            self.shapes.get_property_info(proto_obj.shape_id, key)
+                        {
                             if !proto_info.attributes.writable {
                                 return Ok(false);
                             }
@@ -284,7 +299,8 @@ impl Vm {
             let r_obj = unsafe { &*(r_ptr as *mut JsObject) };
             if matches!(r_obj.kind, ObjectKind::Proxy { .. }) {
                 let prop_key = PropertyKeyVal::String(key.to_string());
-                let existing_desc = get_own_property_descriptor_internal(self, receiver, &prop_key)?;
+                let existing_desc =
+                    get_own_property_descriptor_internal(self, receiver, &prop_key)?;
                 if !existing_desc.is_undefined() {
                     let desc_writ = self.get_property(existing_desc, "writable");
                     let desc_set = self.get_property(existing_desc, "set");
@@ -340,7 +356,8 @@ impl Vm {
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
-                return self.proxy_delete_property(target, &PropertyKeyVal::String(key.to_string()));
+                return self
+                    .proxy_delete_property(target, &PropertyKeyVal::String(key.to_string()));
             }
             if let Some(info) = self.shapes.get_property_info(obj.shape_id, key) {
                 if !info.attributes.configurable {
@@ -355,7 +372,8 @@ impl Vm {
                 }
             }
             if let ObjectKind::StringObject(s) = &obj.kind {
-                if key == "length" || key.parse::<usize>().is_ok_and(|idx| idx < s.chars().count()) {
+                if key == "length" || key.parse::<usize>().is_ok_and(|idx| idx < s.chars().count())
+                {
                     return Ok(false);
                 }
             }
@@ -397,7 +415,11 @@ impl Vm {
         Ok(())
     }
 
-    pub fn delete_property_key(&mut self, target: JsValue, key: &PropertyKeyVal) -> Result<bool, VmError> {
+    pub fn delete_property_key(
+        &mut self,
+        target: JsValue,
+        key: &PropertyKeyVal,
+    ) -> Result<bool, VmError> {
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
@@ -450,7 +472,9 @@ impl Vm {
         let prim = self.to_primitive(val, PreferredType::String)?;
         if prim.is_symbol() {
             Ok(PropertyKeyVal::Symbol(prim))
-        } else if prim.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))) {
+        } else if prim.as_object_ptr().is_some_and(|p| {
+            matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::Symbol(_))
+        }) {
             Ok(PropertyKeyVal::Symbol(prim))
         } else {
             Ok(PropertyKeyVal::String(self.to_string_value(prim)))

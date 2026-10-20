@@ -16,11 +16,7 @@ pub unsafe extern "C" fn doms_call(
     }
     let isolate = unsafe { &mut (*(*ctx).isolate).inner };
     let callee = unsafe { (*func).inner };
-    let this = if this_val.is_null() {
-        JsValue::undefined()
-    } else {
-        unsafe { (*this_val).inner }
-    };
+    let this = if this_val.is_null() { JsValue::undefined() } else { unsafe { (*this_val).inner } };
 
     let mut args = Vec::with_capacity(argc);
     if argc > 0 && !argv.is_null() {
@@ -86,56 +82,56 @@ pub unsafe extern "C" fn doms_set_native_function(
 
     let ctx_raw = ctx as usize;
     let ud_raw = userdata as usize;
-    let closure: doms_vm::object::ClosureNativeFn = std::sync::Arc::new(move |_vm, this_val, args| {
-        let ctx_ptr = ctx_raw as *mut doms_context_t;
-        let mut this_handle = doms_value_t {
-            inner: this_val,
-            ref_count: AtomicUsize::new(1),
-        };
-        let mut arg_handles: Vec<*mut doms_value_t> = args
-            .iter()
-            .map(|a| {
-                Box::into_raw(Box::new(doms_value_t {
-                    inner: *a,
-                    ref_count: AtomicUsize::new(1),
-                }))
-            })
-            .collect();
+    let closure: doms_vm::object::ClosureNativeFn =
+        std::sync::Arc::new(move |_vm, this_val, args| {
+            let ctx_ptr = ctx_raw as *mut doms_context_t;
+            let mut this_handle = doms_value_t { inner: this_val, ref_count: AtomicUsize::new(1) };
+            let mut arg_handles: Vec<*mut doms_value_t> = args
+                .iter()
+                .map(|a| {
+                    Box::into_raw(Box::new(doms_value_t {
+                        inner: *a,
+                        ref_count: AtomicUsize::new(1),
+                    }))
+                })
+                .collect();
 
-        let mut res_handle: *mut doms_value_t = ptr::null_mut();
-        let status = unsafe {
-            (fn_ptr)(
-                ctx_ptr,
-                &mut this_handle as *mut doms_value_t,
-                arg_handles.len(),
-                arg_handles.as_mut_ptr(),
-                &mut res_handle,
-                ud_raw as *mut std::ffi::c_void,
-            )
-        };
+            let mut res_handle: *mut doms_value_t = ptr::null_mut();
+            let status = unsafe {
+                (fn_ptr)(
+                    ctx_ptr,
+                    &mut this_handle as *mut doms_value_t,
+                    arg_handles.len(),
+                    arg_handles.as_mut_ptr(),
+                    &mut res_handle,
+                    ud_raw as *mut std::ffi::c_void,
+                )
+            };
 
-        for h in arg_handles {
-            unsafe {
-                drop(Box::from_raw(h));
+            for h in arg_handles {
+                unsafe {
+                    drop(Box::from_raw(h));
+                }
             }
-        }
 
-        match status {
-            doms_status_t::Ok => {
-                let res_val = if res_handle.is_null() {
-                    JsValue::undefined()
-                } else {
-                    let v = unsafe { (*res_handle).inner };
-                    unsafe {
-                        drop(Box::from_raw(res_handle));
-                    }
-                    v
-                };
-                Ok(res_val)
+            match status {
+                doms_status_t::Ok => {
+                    let res_val = if res_handle.is_null() {
+                        JsValue::undefined()
+                    } else {
+                        let v = unsafe { (*res_handle).inner };
+                        unsafe {
+                            drop(Box::from_raw(res_handle));
+                        }
+                        v
+                    };
+                    Ok(res_val)
+                }
+                _ => {
+                    Err(doms_vm::interpreter::VmError::RuntimeError("Native function error".into()))
+                }
             }
-            _ => Err(doms_vm::interpreter::VmError::RuntimeError("Native function error".into())),
-        }
-    });
+        });
 
     let func_val = isolate.vm.alloc_closure_native_function(fn_name, 0, closure);
     isolate.vm.set_property(target, fn_name, func_val);

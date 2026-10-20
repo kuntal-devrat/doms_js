@@ -62,7 +62,8 @@ impl Vm {
             obj.shape_id = new_shape_id;
             obj.set_slot(info.offset, value);
         } else {
-            let (new_shape_id, offset) = self.shapes.transition_with_attributes(obj.shape_id, "length", attrs);
+            let (new_shape_id, offset) =
+                self.shapes.transition_with_attributes(obj.shape_id, "length", attrs);
             obj.shape_id = new_shape_id;
             obj.set_slot(offset, value);
             obj.add_prop_order("length".to_string());
@@ -82,7 +83,8 @@ impl Vm {
             obj.shape_id = new_shape_id;
             obj.set_slot(info.offset, value);
         } else {
-            let (new_shape_id, offset) = self.shapes.transition_with_attributes(obj.shape_id, "length", attrs);
+            let (new_shape_id, offset) =
+                self.shapes.transition_with_attributes(obj.shape_id, "length", attrs);
             obj.shape_id = new_shape_id;
             obj.set_slot(offset, value);
             obj.add_prop_order("length".to_string());
@@ -139,7 +141,9 @@ impl Vm {
     }
 
     pub fn is_instance_of_iterator_proto(&mut self, val: JsValue) -> bool {
-        let Some(iter_proto) = self.iterator_proto else { return false; };
+        let Some(iter_proto) = self.iterator_proto else {
+            return false;
+        };
         let mut curr = self.get_prototype_of(val);
         while let Some(proto) = curr {
             if proto == iter_proto {
@@ -388,7 +392,12 @@ impl Vm {
         self.has_own_property_key(target, &PropertyKeyVal::String(key.to_string()))
     }
 
-    pub fn create_data_property(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<bool, VmError> {
+    pub fn create_data_property(
+        &mut self,
+        target: JsValue,
+        key: &str,
+        value: JsValue,
+    ) -> Result<bool, VmError> {
         let key_string = key.to_string();
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -441,7 +450,12 @@ impl Vm {
         Ok(true)
     }
 
-    pub fn create_data_property_or_throw(&mut self, target: JsValue, key: &str, value: JsValue) -> Result<(), VmError> {
+    pub fn create_data_property_or_throw(
+        &mut self,
+        target: JsValue,
+        key: &str,
+        value: JsValue,
+    ) -> Result<(), VmError> {
         if !self.create_data_property(target, key, value)? {
             return Err(VmError::TypeError(format!("Cannot create data property '{}'", key)));
         }
@@ -460,28 +474,28 @@ impl Vm {
         let from = self.to_object_value(source)?;
         let keys = crate::builtins::object::names::get_own_property_keys(self, from)?;
         for key in keys {
-            let is_excluded = excluded_keys.iter().any(|excluded| {
-                match &key {
-                    PropertyKeyVal::String(s) => {
-                        let exc_s = self.to_string_value(*excluded);
-                        s == &exc_s
-                    }
-                    PropertyKeyVal::Symbol(sym) => {
-                        excluded.is_symbol() && *excluded == *sym
-                    }
+            let is_excluded = excluded_keys.iter().any(|excluded| match &key {
+                PropertyKeyVal::String(s) => {
+                    let exc_s = self.to_string_value(*excluded);
+                    s == &exc_s
                 }
+                PropertyKeyVal::Symbol(sym) => excluded.is_symbol() && *excluded == *sym,
             });
             if is_excluded {
                 continue;
             }
 
-            let desc = crate::builtins::object::descriptor::get_own_property_descriptor_internal(self, from, &key)?;
+            let desc = crate::builtins::object::descriptor::get_own_property_descriptor_internal(
+                self, from, &key,
+            )?;
             if desc.is_object() {
                 let enum_val = self.get_property(desc, "enumerable");
                 if enum_val.is_truthy() {
                     let val = match &key {
                         PropertyKeyVal::String(s) => self.get_property_result(from, s)?,
-                        PropertyKeyVal::Symbol(sym) => self.get_symbol_property_result(from, *sym)?,
+                        PropertyKeyVal::Symbol(sym) => {
+                            self.get_symbol_property_result(from, *sym)?
+                        }
                     };
                     match &key {
                         PropertyKeyVal::String(s) => {

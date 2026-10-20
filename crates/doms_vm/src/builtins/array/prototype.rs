@@ -47,7 +47,11 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
                 let cur_cb = vm.temp_roots[prev_temp + 1];
                 let cur_this_arg = vm.temp_roots[prev_temp + 2];
                 let cur_el = vm.temp_roots.pop().unwrap();
-                let res = match vm.call(cur_cb, cur_this_arg, &[cur_el, JsValue::from_int32(i as i32), cur_this]) {
+                let res = match vm.call(
+                    cur_cb,
+                    cur_this_arg,
+                    &[cur_el, JsValue::from_int32(i as i32), cur_this],
+                ) {
                     Ok(r) => r,
                     Err(e) => {
                         vm.temp_roots.truncate(prev_temp);
@@ -137,7 +141,11 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
                     && js_obj.accessors.is_none()
                     && js_obj.is_array_length_writable()
                     && !elements.iter().any(|v| v.is_hole())
-                    && vm.shapes.get_property_info(js_obj.shape_id, "length").map(|i| i.attributes.writable).unwrap_or(true)
+                    && vm
+                        .shapes
+                        .get_property_info(js_obj.shape_id, "length")
+                        .map(|i| i.attributes.writable)
+                        .unwrap_or(true)
             } else {
                 false
             }
@@ -186,7 +194,11 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
                     && js_obj.accessors.is_none()
                     && js_obj.is_array_length_writable()
                     && !elements.iter().any(|v| v.is_hole())
-                    && vm.shapes.get_property_info(js_obj.shape_id, "length").map(|i| i.attributes.writable).unwrap_or(true)
+                    && vm
+                        .shapes
+                        .get_property_info(js_obj.shape_id, "length")
+                        .map(|i| i.attributes.writable)
+                        .unwrap_or(true)
             } else {
                 false
             }
@@ -312,30 +324,20 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
     let slice_fn = vm.alloc_native_function("slice", 2, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
         let len = vm.length_of_array_like(obj)?;
-        let start = if let Some(arg) = args.first() {
-            vm.to_integer_or_infinity(*arg)?
-        } else {
-            0.0
-        };
+        let start =
+            if let Some(arg) = args.first() { vm.to_integer_or_infinity(*arg)? } else { 0.0 };
         let start_idx = if start < 0.0 {
             (len as f64 + start).max(0.0) as usize
         } else {
             (start as usize).min(len)
         };
         let end = if let Some(arg) = args.get(1) {
-            if arg.is_undefined() {
-                len as f64
-            } else {
-                vm.to_integer_or_infinity(*arg)?
-            }
+            if arg.is_undefined() { len as f64 } else { vm.to_integer_or_infinity(*arg)? }
         } else {
             len as f64
         };
-        let end_idx = if end < 0.0 {
-            (len as f64 + end).max(0.0) as usize
-        } else {
-            (end as usize).min(len)
-        };
+        let end_idx =
+            if end < 0.0 { (len as f64 + end).max(0.0) as usize } else { (end as usize).min(len) };
         let count = if end_idx > start_idx { end_idx - start_idx } else { 0 };
         let a = vm.array_species_create(obj, count)?;
         if let Some(ptr) = obj.as_object_ptr() {
@@ -382,11 +384,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
 
         let from_index = if let Some(from_arg) = args.get(1) {
             let num = vm.to_number_value(*from_arg)?;
-            if num.is_nan() {
-                0i64
-            } else {
-                num.trunc() as i64
-            }
+            if num.is_nan() { 0i64 } else { num.trunc() as i64 }
         } else {
             0i64
         };
@@ -395,11 +393,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
             return Ok(JsValue::from_int32(-1));
         }
 
-        let mut k = if from_index >= 0 {
-            from_index
-        } else {
-            len + from_index
-        };
+        let mut k = if from_index >= 0 { from_index } else { len + from_index };
         if k < 0 {
             k = 0;
         }
@@ -447,11 +441,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
 
         let from_index = if let Some(from_arg) = args.get(1) {
             let num = vm.to_number_value(*from_arg)?;
-            if num.is_nan() {
-                0i64
-            } else {
-                num.trunc() as i64
-            }
+            if num.is_nan() { 0i64 } else { num.trunc() as i64 }
         } else {
             0i64
         };
@@ -460,11 +450,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
             return Ok(JsValue::from_boolean(false));
         }
 
-        let mut k = if from_index >= 0 {
-            from_index
-        } else {
-            len + from_index
-        };
+        let mut k = if from_index >= 0 { from_index } else { len + from_index };
         if k < 0 {
             k = 0;
         }
@@ -513,11 +499,7 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
             Ok(n) => n.trunc() as i64,
             Err(e) => return Err(e),
         };
-        let k = if relative_index >= 0 {
-            relative_index
-        } else {
-            len + relative_index
-        };
+        let k = if relative_index >= 0 { relative_index } else { len + relative_index };
         if k < 0 || k >= len {
             return Ok(JsValue::undefined());
         }
@@ -535,20 +517,12 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
 
         let from_index = if let Some(from_arg) = args.get(1) {
             let num = vm.to_number_value(*from_arg)?;
-            if num.is_nan() {
-                0i64
-            } else {
-                num.trunc() as i64
-            }
+            if num.is_nan() { 0i64 } else { num.trunc() as i64 }
         } else {
             len - 1
         };
 
-        let mut k = if from_index >= 0 {
-            from_index.min(len - 1)
-        } else {
-            len + from_index
-        };
+        let mut k = if from_index >= 0 { from_index.min(len - 1) } else { len + from_index };
 
         // Fast path for native Array without accessors
         if let Some(ptr) = obj.as_object_ptr() {
@@ -668,10 +642,12 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
             if let ObjectKind::Array(elements) = &mut jsobj.kind {
                 let clamped_start = start_idx.min(elements.len());
                 let clamped_delete = delete_count.min(elements.len() - clamped_start);
-                let removed_elements: Vec<JsValue> = elements.splice(
-                    clamped_start..clamped_start + clamped_delete,
-                    insert_items.iter().copied(),
-                ).collect();
+                let removed_elements: Vec<JsValue> = elements
+                    .splice(
+                        clamped_start..clamped_start + clamped_delete,
+                        insert_items.iter().copied(),
+                    )
+                    .collect();
                 return Ok(vm.alloc_array(removed_elements));
             }
         }
@@ -846,16 +822,9 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
 
         let index_arg = args.first().copied().unwrap_or(JsValue::undefined());
         let raw_num = vm.to_number_value(index_arg)?;
-        let relative_index = if raw_num.is_nan() || raw_num == 0.0 {
-            0i64
-        } else {
-            raw_num.trunc() as i64
-        };
-        let actual_index = if relative_index >= 0 {
-            relative_index
-        } else {
-            len + relative_index
-        };
+        let relative_index =
+            if raw_num.is_nan() || raw_num == 0.0 { 0i64 } else { raw_num.trunc() as i64 };
+        let actual_index = if relative_index >= 0 { relative_index } else { len + relative_index };
 
         if actual_index >= len || actual_index < 0 {
             return Err(VmError::RangeError("Invalid index".into()));

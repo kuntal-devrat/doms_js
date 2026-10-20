@@ -122,46 +122,47 @@ pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<Propert
 }
 
 pub(super) fn register_names_and_symbols(vm: &mut Vm) -> (JsValue, JsValue) {
-    let get_own_prop_names_fn = vm.alloc_native_function("getOwnPropertyNames", 1, |vm, _this, args| {
-        let target = match args.first() {
-            Some(t) if !t.is_nullish() => *t,
-            _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
-        };
-        let target_obj = if target.is_object() {
-            target
-        } else {
-            vm.to_object_value(target)?
-        };
-        let keys = get_own_property_keys(vm, target_obj)?;
-        let mut names = Vec::new();
-        for key in keys {
-            if let PropertyKeyVal::String(s) = key {
-                names.push(vm.alloc_string(s));
+    let get_own_prop_names_fn =
+        vm.alloc_native_function("getOwnPropertyNames", 1, |vm, _this, args| {
+            let target = match args.first() {
+                Some(t) if !t.is_nullish() => *t,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "Cannot convert undefined or null to object".into(),
+                    ));
+                }
+            };
+            let target_obj = if target.is_object() { target } else { vm.to_object_value(target)? };
+            let keys = get_own_property_keys(vm, target_obj)?;
+            let mut names = Vec::new();
+            for key in keys {
+                if let PropertyKeyVal::String(s) = key {
+                    names.push(vm.alloc_string(s));
+                }
             }
-        }
-        Ok(vm.alloc_array(names))
-    });
+            Ok(vm.alloc_array(names))
+        });
 
-    let get_own_prop_symbols_fn = vm.alloc_native_function("getOwnPropertySymbols", 1, |vm, _this, args| {
-        let target = match args.first() {
-            Some(t) if !t.is_nullish() => *t,
-            _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
-        };
-        let target_obj = if target.is_object() {
-            target
-        } else {
-            vm.to_object_value(target)?
-        };
-        let keys = get_own_property_keys(vm, target_obj)?;
-        let mut symbols = Vec::new();
-        for key in keys {
-            if let PropertyKeyVal::Symbol(sym) = key {
-                symbols.push(sym);
+    let get_own_prop_symbols_fn =
+        vm.alloc_native_function("getOwnPropertySymbols", 1, |vm, _this, args| {
+            let target = match args.first() {
+                Some(t) if !t.is_nullish() => *t,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "Cannot convert undefined or null to object".into(),
+                    ));
+                }
+            };
+            let target_obj = if target.is_object() { target } else { vm.to_object_value(target)? };
+            let keys = get_own_property_keys(vm, target_obj)?;
+            let mut symbols = Vec::new();
+            for key in keys {
+                if let PropertyKeyVal::Symbol(sym) = key {
+                    symbols.push(sym);
+                }
             }
-        }
-        Ok(vm.alloc_array(symbols))
-    });
+            Ok(vm.alloc_array(symbols))
+        });
 
     (get_own_prop_names_fn, get_own_prop_symbols_fn)
 }
-

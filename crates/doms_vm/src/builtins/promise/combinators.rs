@@ -6,14 +6,13 @@ use super::*;
 pub(super) fn create_combinator_statics(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
     let all_static = vm.alloc_native_function("all", 1, |vm, this, args| {
         if !vm.is_constructor(this) {
-            return Err(VmError::TypeError(
-                "Promise.all called on non-constructor".into(),
-            ));
+            return Err(VmError::TypeError("Promise.all called on non-constructor".into()));
         }
         let capability = super::new_promise_capability(vm, this)?;
         let resolve_method = vm.get_property(this, "resolve");
         if !vm.is_callable(resolve_method) {
-            let err = vm.alloc_error("TypeError".into(), "Promise resolve method is not callable".into());
+            let err =
+                vm.alloc_error("TypeError".into(), "Promise resolve method is not callable".into());
             let _ = vm.call(capability.reject, JsValue::undefined(), &[err]);
             return Ok(capability.promise);
         }
@@ -108,29 +107,34 @@ pub(super) fn create_combinator_statics(vm: &mut Vm) -> Vec<(&'static str, JsVal
             let resolve_item = vm.alloc_closure_native_function(
                 "",
                 1,
-                Arc::new(move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-                    if ac1.swap(true, std::sync::atomic::Ordering::SeqCst)
-                        || ar1.load(std::sync::atomic::Ordering::SeqCst)
-                    {
-                        return Ok(JsValue::undefined());
-                    }
-                    let v = args.first().copied().unwrap_or(JsValue::undefined());
-                    {
-                        let mut lock = res_store1.lock().unwrap();
-                        if item_idx < lock.len() {
-                            lock[item_idx] = v;
+                Arc::new(
+                    move |vm: &mut Vm,
+                          _this: JsValue,
+                          args: &[JsValue]|
+                          -> Result<JsValue, VmError> {
+                        if ac1.swap(true, std::sync::atomic::Ordering::SeqCst)
+                            || ar1.load(std::sync::atomic::Ordering::SeqCst)
+                        {
+                            return Ok(JsValue::undefined());
                         }
-                    }
-                    if rem1.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
-                        let final_res = res_store1.lock().unwrap().clone();
-                        let arr = vm.alloc_array(final_res);
-                        if let Err(e) = vm.call(cap_resolve, JsValue::undefined(), &[arr]) {
-                            let err_val = vm.vm_error_to_js_value(&e);
-                            let _ = vm.call(cap_reject, JsValue::undefined(), &[err_val]);
+                        let v = args.first().copied().unwrap_or(JsValue::undefined());
+                        {
+                            let mut lock = res_store1.lock().unwrap();
+                            if item_idx < lock.len() {
+                                lock[item_idx] = v;
+                            }
                         }
-                    }
-                    Ok(JsValue::undefined())
-                }),
+                        if rem1.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                            let final_res = res_store1.lock().unwrap().clone();
+                            let arr = vm.alloc_array(final_res);
+                            if let Err(e) = vm.call(cap_resolve, JsValue::undefined(), &[arr]) {
+                                let err_val = vm.vm_error_to_js_value(&e);
+                                let _ = vm.call(cap_reject, JsValue::undefined(), &[err_val]);
+                            }
+                        }
+                        Ok(JsValue::undefined())
+                    },
+                ),
             );
 
             let cur_resolve_method = vm.temp_roots[prev_temp + 3];
@@ -190,14 +194,13 @@ pub(super) fn create_combinator_statics(vm: &mut Vm) -> Vec<(&'static str, JsVal
 
     let race_static = vm.alloc_native_function("race", 1, |vm, this, args| {
         if !vm.is_constructor(this) {
-            return Err(VmError::TypeError(
-                "Promise.race called on non-constructor".into(),
-            ));
+            return Err(VmError::TypeError("Promise.race called on non-constructor".into()));
         }
         let capability = super::new_promise_capability(vm, this)?;
         let resolve_method = vm.get_property(this, "resolve");
         if !vm.is_callable(resolve_method) {
-            let err = vm.alloc_error("TypeError".into(), "Promise resolve method is not callable".into());
+            let err =
+                vm.alloc_error("TypeError".into(), "Promise resolve method is not callable".into());
             let _ = vm.call(capability.reject, JsValue::undefined(), &[err]);
             return Ok(capability.promise);
         }

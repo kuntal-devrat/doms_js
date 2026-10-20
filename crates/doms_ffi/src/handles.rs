@@ -40,4 +40,3 @@ unsafe impl Sync for doms_context_t {}
 
 unsafe impl Send for doms_value_t {}
 unsafe impl Sync for doms_value_t {}
-

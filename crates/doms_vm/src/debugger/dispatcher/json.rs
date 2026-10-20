@@ -3,7 +3,9 @@ use super::*;
 impl CdpDispatcher {
     // JSON parsing and formatting helpers
 
-    pub(super) fn parse_json_rpc(json: &str) -> (Option<String>, Option<String>, HashMap<String, String>) {
+    pub(super) fn parse_json_rpc(
+        json: &str,
+    ) -> (Option<String>, Option<String>, HashMap<String, String>) {
         let mut id = None;
         let mut method = None;
         let mut params = HashMap::new();
@@ -67,9 +69,7 @@ impl CdpDispatcher {
                 return Some(after_colon[..end].to_string());
             }
         } else {
-            let end = after_colon
-                .find([',', '}', ']', '\n', '\r'])
-                .unwrap_or(after_colon.len());
+            let end = after_colon.find([',', '}', ']', '\n', '\r']).unwrap_or(after_colon.len());
             return Some(after_colon[..end].trim().to_string());
         }
 

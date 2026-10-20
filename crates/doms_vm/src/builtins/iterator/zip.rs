@@ -10,7 +10,8 @@ pub fn iterator_zip(vm: &mut Vm, args: &[JsValue]) -> Result<JsValue, VmError> {
     if !iterables_val.is_object() {
         return Err(VmError::TypeError("Iterator.zip requires an iterable of iterables".into()));
     }
-    let sym_iter = vm.symbol_iterator.ok_or_else(|| VmError::TypeError("Symbol.iterator not found".into()))?;
+    let sym_iter =
+        vm.symbol_iterator.ok_or_else(|| VmError::TypeError("Symbol.iterator not found".into()))?;
     let iter_method = vm.get_symbol_property_result(iterables_val, sym_iter)?;
     if iter_method.is_undefined() || iter_method.is_null() || !vm.is_callable(iter_method) {
         return Err(VmError::TypeError("Iterator.zip argument must be iterable".into()));
@@ -41,10 +42,6 @@ pub fn iterator_zip(vm: &mut Vm, args: &[JsValue]) -> Result<JsValue, VmError> {
         vm,
         outer_iter,
         outer_next,
-        IteratorHelperKind::Zip {
-            others,
-            mode: ZipMode::Shortest,
-            padding: None,
-        },
+        IteratorHelperKind::Zip { others, mode: ZipMode::Shortest, padding: None },
     ))
 }

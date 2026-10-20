@@ -1,9 +1,13 @@
-use super::{is_strict_reserved_word, ParseError, Parser};
+use super::{ParseError, Parser, is_strict_reserved_word};
 use crate::ast::*;
 use crate::lexer::TokenKind;
 
 impl<'a> Parser<'a> {
-    pub(crate) fn skip_balanced(&mut self, open: TokenKind, close: TokenKind) -> Result<(), ParseError> {
+    pub(crate) fn skip_balanced(
+        &mut self,
+        open: TokenKind,
+        close: TokenKind,
+    ) -> Result<(), ParseError> {
         self.expect(open.clone())?;
         let mut depth = 1;
         while depth > 0 && !self.check(&TokenKind::Eof) {
@@ -30,7 +34,9 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    pub(crate) fn parse_formal_parameters(&mut self) -> Result<(Vec<String>, Vec<Statement>), ParseError> {
+    pub(crate) fn parse_formal_parameters(
+        &mut self,
+    ) -> Result<(Vec<String>, Vec<Statement>), ParseError> {
         let prev_in_param = self.in_param;
         self.in_param = true;
         self.expect(TokenKind::LParen)?;
@@ -126,7 +132,12 @@ impl<'a> Parser<'a> {
         }
         let mut insert_idx = 0;
         for stmt in body.iter() {
-            if let Statement::Expression(Expression::Literal(Literal::String { value, has_escape, .. })) = stmt {
+            if let Statement::Expression(Expression::Literal(Literal::String {
+                value,
+                has_escape,
+                ..
+            })) = stmt
+            {
                 if value == "use strict" && !has_escape {
                     insert_idx += 1;
                     continue;
@@ -147,7 +158,8 @@ impl<'a> Parser<'a> {
             self.expect_identifier()?
         };
         let (params, defaults) = self.parse_formal_parameters()?;
-        let mut body = self.parse_function_body(&params, if name.is_empty() { None } else { Some(&name) })?;
+        let mut body =
+            self.parse_function_body(&params, if name.is_empty() { None } else { Some(&name) })?;
         Self::apply_parameter_defaults(&mut body, defaults);
         Ok((name, params, body))
     }
@@ -166,17 +178,29 @@ impl<'a> Parser<'a> {
     ) -> Result<(), ParseError> {
         if let Some(n) = name {
             if is_strict_reserved_word(n) || n == "eval" || n == "arguments" {
-                return Err(ParseError::UnexpectedToken(TokenKind::Ident(n.to_string()), line, col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Ident(n.to_string()),
+                    line,
+                    col,
+                ));
             }
         }
         let mut seen = std::collections::HashSet::new();
         for p in params {
             let clean = p.trim_start_matches("...");
             if is_strict_reserved_word(clean) || clean == "eval" || clean == "arguments" {
-                return Err(ParseError::UnexpectedToken(TokenKind::Ident(clean.to_string()), line, col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Ident(clean.to_string()),
+                    line,
+                    col,
+                ));
             }
             if !seen.insert(clean) {
-                return Err(ParseError::UnexpectedToken(TokenKind::Ident(clean.to_string()), line, col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Ident(clean.to_string()),
+                    line,
+                    col,
+                ));
             }
         }
         Ok(())
@@ -196,25 +220,66 @@ impl<'a> Parser<'a> {
         self.in_non_arrow_function = true;
         self.in_static_block = false;
         if prev_strict {
-            Self::validate_strict_params_and_name(params, name, self.current.line, self.current.col)?;
+            Self::validate_strict_params_and_name(
+                params,
+                name,
+                self.current.line,
+                self.current.col,
+            )?;
         }
         let mut body = Vec::new();
         let mut in_directive_prologue = true;
         while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
             let stmt = self.parse_statement()?;
             if in_directive_prologue {
-                if let Statement::Expression(Expression::Literal(Literal::String { ref value, has_escape, has_legacy_escape })) = stmt {
+                if let Statement::Expression(Expression::Literal(Literal::String {
+                    ref value,
+                    has_escape,
+                    has_legacy_escape,
+                })) = stmt
+                {
                     if has_legacy_escape && self.is_strict {
-                        return Err(ParseError::UnexpectedToken(TokenKind::StringLit { value: value.clone(), has_escape, has_legacy_escape, has_unpaired_surrogate: false }, self.current.line, self.current.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::StringLit {
+                                value: value.clone(),
+                                has_escape,
+                                has_legacy_escape,
+                                has_unpaired_surrogate: false,
+                            },
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                     if value == "use strict" && !has_escape {
                         if !self.is_strict {
                             self.is_strict = true;
                             self.lexer.is_strict = true;
-                            if body.iter().any(|s| matches!(s, Statement::Expression(Expression::Literal(Literal::String { has_legacy_escape: true, .. })))) {
-                                return Err(ParseError::UnexpectedToken(TokenKind::StringLit { value: value.clone(), has_escape, has_legacy_escape, has_unpaired_surrogate: false }, self.current.line, self.current.col));
+                            if body.iter().any(|s| {
+                                matches!(
+                                    s,
+                                    Statement::Expression(Expression::Literal(Literal::String {
+                                        has_legacy_escape: true,
+                                        ..
+                                    }))
+                                )
+                            }) {
+                                return Err(ParseError::UnexpectedToken(
+                                    TokenKind::StringLit {
+                                        value: value.clone(),
+                                        has_escape,
+                                        has_legacy_escape,
+                                        has_unpaired_surrogate: false,
+                                    },
+                                    self.current.line,
+                                    self.current.col,
+                                ));
                             }
-                            Self::validate_strict_params_and_name(params, name, self.current.line, self.current.col)?;
+                            Self::validate_strict_params_and_name(
+                                params,
+                                name,
+                                self.current.line,
+                                self.current.col,
+                            )?;
                         }
                     }
                 } else {
@@ -275,10 +340,15 @@ impl<'a> Parser<'a> {
             self.in_generator = true;
         }
         let name = if let TokenKind::Ident(id) = &self.current.kind {
-            if self.is_strict && (is_strict_reserved_word(id) || id == "eval" || id == "arguments") {
+            if self.is_strict && (is_strict_reserved_word(id) || id == "eval" || id == "arguments")
+            {
                 self.in_generator = prev_gen;
                 self.in_static_block = prev_in_static;
-                return Err(ParseError::UnexpectedToken(TokenKind::Ident(id.clone()), self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Ident(id.clone()),
+                    self.current.line,
+                    self.current.col,
+                ));
             }
             let n = id.clone();
             self.advance()?;

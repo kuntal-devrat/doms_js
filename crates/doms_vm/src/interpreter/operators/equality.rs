@@ -7,7 +7,6 @@ impl Vm {
         crate::object::js_strict_equal(a, b)
     }
 
-
     pub fn same_value(&self, a: JsValue, b: JsValue) -> bool {
         if a.is_number() && b.is_number() {
             let na = a.to_number().unwrap();
@@ -48,8 +47,16 @@ impl Vm {
 
         let a_bi = self.as_bigint_val(a);
         let b_bi = self.as_bigint_val(b);
-        let a_is_str = a.is_string() || (a.is_object() && a.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))));
-        let b_is_str = b.is_string() || (b.is_object() && b.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))));
+        let a_is_str = a.is_string()
+            || (a.is_object()
+                && a.as_object_ptr().is_some_and(|p| {
+                    matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))
+                }));
+        let b_is_str = b.is_string()
+            || (b.is_object()
+                && b.as_object_ptr().is_some_and(|p| {
+                    matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::String(_))
+                }));
 
         if a.is_number() && b_is_str {
             let nb = self.to_number_value(b)?;

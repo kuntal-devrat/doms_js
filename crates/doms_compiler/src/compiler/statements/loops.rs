@@ -3,7 +3,11 @@ use crate::bytecode::{Constant, OpCode};
 use crate::compiler::{CompileError, TargetScope};
 use doms_parser::ast::*;
 
-fn collect_for_lexical_names(var_kind: &Option<VarKind>, left: &str, body: &Statement) -> Vec<String> {
+fn collect_for_lexical_names(
+    var_kind: &Option<VarKind>,
+    left: &str,
+    body: &Statement,
+) -> Vec<String> {
     if !matches!(var_kind, Some(VarKind::Let) | Some(VarKind::Const)) {
         return Vec::new();
     }
@@ -49,8 +53,24 @@ impl Compiler {
 
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
-        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
-        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
+        self.break_targets.push(TargetScope {
+            labels: loop_labels.clone(),
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: bd,
+            catch_depth: self.catch_depth,
+        });
+        self.continue_targets.push(TargetScope {
+            labels: loop_labels,
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: self.break_targets.len(),
+            catch_depth: self.catch_depth,
+        });
 
         self.compile_statement(body, false)?;
 
@@ -105,8 +125,24 @@ impl Compiler {
 
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
-        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
-        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
+        self.break_targets.push(TargetScope {
+            labels: loop_labels.clone(),
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: bd,
+            catch_depth: self.catch_depth,
+        });
+        self.continue_targets.push(TargetScope {
+            labels: loop_labels,
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: self.break_targets.len(),
+            catch_depth: self.catch_depth,
+        });
 
         self.compile_statement(body, false)?;
 
@@ -149,8 +185,24 @@ impl Compiler {
         let loop_start = self.chunk.instructions.len() as i32;
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
-        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
-        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
+        self.break_targets.push(TargetScope {
+            labels: loop_labels.clone(),
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: bd,
+            catch_depth: self.catch_depth,
+        });
+        self.continue_targets.push(TargetScope {
+            labels: loop_labels,
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: self.break_targets.len(),
+            catch_depth: self.catch_depth,
+        });
 
         self.compile_statement(body, false)?;
 
@@ -183,7 +235,8 @@ impl Compiler {
             self.chunk.emit(OpCode::LoadUndefined, 0);
         }
         self.symbols.enter_scope();
-        let is_lex = matches!(var_kind, Some(VarKind::Let) | Some(VarKind::Const)) && !left.starts_with('@');
+        let is_lex =
+            matches!(var_kind, Some(VarKind::Let) | Some(VarKind::Const)) && !left.starts_with('@');
         let local_slot = if left.starts_with('@') {
             if self.symbols.resolve_local(left).is_none() {
                 self.symbols.define_local(left.to_string());
@@ -221,7 +274,8 @@ impl Compiler {
             self.emit_pop_scope();
         }
         self.chunk.emit(OpCode::GetKeys, 0);
-        let keys_slot = self.symbols.define_local(format!("@keys_{}", self.chunk.instructions.len()));
+        let keys_slot =
+            self.symbols.define_local(format!("@keys_{}", self.chunk.instructions.len()));
         self.chunk.emit(OpCode::SetLocal(keys_slot), 0);
         self.chunk.emit(OpCode::Pop, 0);
 
@@ -268,8 +322,24 @@ impl Compiler {
 
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
-        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
-        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
+        self.break_targets.push(TargetScope {
+            labels: loop_labels.clone(),
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: bd,
+            catch_depth: self.catch_depth,
+        });
+        self.continue_targets.push(TargetScope {
+            labels: loop_labels,
+            jumps: Vec::new(),
+            scope_depth: self.block_scope_depth,
+            iter_slot: None,
+            is_async_iter: false,
+            break_depth: self.break_targets.len(),
+            catch_depth: self.catch_depth,
+        });
 
         self.compile_statement(body, false)?;
 
@@ -316,7 +386,8 @@ impl Compiler {
             self.chunk.emit(OpCode::LoadUndefined, 0);
         }
         self.symbols.enter_scope();
-        let is_lex = matches!(var_kind, Some(VarKind::Let) | Some(VarKind::Const)) && !left.starts_with('@');
+        let is_lex =
+            matches!(var_kind, Some(VarKind::Let) | Some(VarKind::Const)) && !left.starts_with('@');
         let local_slot = if left.starts_with('@') {
             if self.symbols.resolve_local(left).is_none() {
                 self.symbols.define_local(left.to_string());
@@ -358,7 +429,8 @@ impl Compiler {
         } else {
             self.chunk.emit(OpCode::GetIterator, 0);
         }
-        let iter_slot = self.symbols.define_local(format!("@iter_{}", self.chunk.instructions.len()));
+        let iter_slot =
+            self.symbols.define_local(format!("@iter_{}", self.chunk.instructions.len()));
         self.chunk.emit(OpCode::SetLocal(iter_slot), 0);
         self.chunk.emit(OpCode::Pop, 0);
 
@@ -394,7 +466,8 @@ impl Compiler {
         let catch_jump_idx = self.chunk.emit(OpCode::PushCatch(0), 0);
 
         if is_lex {
-            let val_slot = self.symbols.define_local(format!("@val_{}", self.chunk.instructions.len()));
+            let val_slot =
+                self.symbols.define_local(format!("@val_{}", self.chunk.instructions.len()));
             self.chunk.emit(OpCode::SetLocal(val_slot), 0);
             self.chunk.emit(OpCode::Pop, 0);
 

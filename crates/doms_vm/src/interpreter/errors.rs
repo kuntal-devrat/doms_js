@@ -20,7 +20,12 @@ impl Vm {
             self.temp_roots.push(val);
             let msg_val = self.alloc_string(msg);
             let cur_val = self.temp_roots[prev_temp];
-            self.define_builtin_property(cur_val, "message", msg_val, crate::shape::PropertyAttributes::BUILTIN);
+            self.define_builtin_property(
+                cur_val,
+                "message",
+                msg_val,
+                crate::shape::PropertyAttributes::BUILTIN,
+            );
             self.temp_roots.pop();
             self.temp_roots.truncate(prev_temp);
             cur_val
@@ -50,9 +55,15 @@ impl Vm {
         }
     }
 
-    pub fn handle_exception_at_depth(&mut self, err: VmError, min_frame_idx: usize) -> Result<(), VmError> {
+    pub fn handle_exception_at_depth(
+        &mut self,
+        err: VmError,
+        min_frame_idx: usize,
+    ) -> Result<(), VmError> {
         if let VmError::RuntimeError(ref msg) = err {
-            if msg.contains("Execution step limit exceeded") || msg.contains("Execution timeout exceeded") {
+            if msg.contains("Execution step limit exceeded")
+                || msg.contains("Execution timeout exceeded")
+            {
                 return Err(err);
             }
         }

@@ -22,7 +22,15 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function_full(None, params.to_vec(), body, self.is_strict, false, true, false)?;
+        let def = Self::compile_function_full(
+            None,
+            params.to_vec(),
+            body,
+            self.is_strict,
+            false,
+            true,
+            false,
+        )?;
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
         Ok(())
@@ -34,7 +42,15 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function_full(name.clone(), params.to_vec(), body, self.is_strict, false, false, true)?;
+        let def = Self::compile_function_full(
+            name.clone(),
+            params.to_vec(),
+            body,
+            self.is_strict,
+            false,
+            false,
+            true,
+        )?;
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
         Ok(())
@@ -58,7 +74,15 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function_full(name.clone(), params.to_vec(), body, self.is_strict, true, false, false)?;
+        let def = Self::compile_function_full(
+            name.clone(),
+            params.to_vec(),
+            body,
+            self.is_strict,
+            true,
+            false,
+            false,
+        )?;
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateGenerator(const_idx), 0);
         Ok(())
@@ -70,16 +94,21 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function_full(name.clone(), params.to_vec(), body, self.is_strict, true, false, false)?;
+        let def = Self::compile_function_full(
+            name.clone(),
+            params.to_vec(),
+            body,
+            self.is_strict,
+            true,
+            false,
+            false,
+        )?;
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateAsyncGenerator(const_idx), 0);
         Ok(())
     }
 
-    pub(crate) fn compile_sequence(
-        &mut self,
-        exprs: &[Expression],
-    ) -> Result<(), CompileError> {
+    pub(crate) fn compile_sequence(&mut self, exprs: &[Expression]) -> Result<(), CompileError> {
         let len = exprs.len();
         for (i, e) in exprs.iter().enumerate() {
             self.compile_expression(e)?;

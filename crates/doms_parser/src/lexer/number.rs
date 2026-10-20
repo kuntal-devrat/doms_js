@@ -2,8 +2,8 @@
 
 use num_bigint::BigInt;
 
-use super::token::{LexError, TokenKind};
 use super::Lexer;
+use super::token::{LexError, TokenKind};
 
 impl<'a> Lexer<'a> {
     pub(super) fn read_number(&mut self, line: usize, col: usize) -> Result<TokenKind, LexError> {
@@ -43,9 +43,8 @@ impl<'a> Lexer<'a> {
                         let bi = BigInt::parse_bytes(hex_str.as_bytes(), 16).unwrap_or_default();
                         return Ok(TokenKind::BigInt(bi));
                     }
-                    let num = u64::from_str_radix(&hex_str, 16)
-                        .map(|v| v as f64)
-                        .unwrap_or(f64::NAN);
+                    let num =
+                        u64::from_str_radix(&hex_str, 16).map(|v| v as f64).unwrap_or(f64::NAN);
                     return Ok(TokenKind::Number(num));
                 }
                 Some('b') | Some('B') => {
@@ -79,9 +78,8 @@ impl<'a> Lexer<'a> {
                         let bi = BigInt::parse_bytes(bin_str.as_bytes(), 2).unwrap_or_default();
                         return Ok(TokenKind::BigInt(bi));
                     }
-                    let num = u64::from_str_radix(&bin_str, 2)
-                        .map(|v| v as f64)
-                        .unwrap_or(f64::NAN);
+                    let num =
+                        u64::from_str_radix(&bin_str, 2).map(|v| v as f64).unwrap_or(f64::NAN);
                     return Ok(TokenKind::Number(num));
                 }
                 Some('o') | Some('O') => {
@@ -115,9 +113,8 @@ impl<'a> Lexer<'a> {
                         let bi = BigInt::parse_bytes(oct_str.as_bytes(), 8).unwrap_or_default();
                         return Ok(TokenKind::BigInt(bi));
                     }
-                    let num = u64::from_str_radix(&oct_str, 8)
-                        .map(|v| v as f64)
-                        .unwrap_or(f64::NAN);
+                    let num =
+                        u64::from_str_radix(&oct_str, 8).map(|v| v as f64).unwrap_or(f64::NAN);
                     return Ok(TokenKind::Number(num));
                 }
                 _ => {}

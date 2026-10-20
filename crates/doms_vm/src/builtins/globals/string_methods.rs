@@ -5,7 +5,9 @@ use super::*;
 #[inline]
 pub(crate) fn this_string(vm: &mut Vm, this: JsValue) -> Result<String, VmError> {
     if this.is_nullish() {
-        return Err(VmError::TypeError("String.prototype method called on null or undefined".into()));
+        return Err(VmError::TypeError(
+            "String.prototype method called on null or undefined".into(),
+        ));
     }
     vm.to_string_spec(this)
 }

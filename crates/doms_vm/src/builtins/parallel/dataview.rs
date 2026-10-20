@@ -112,24 +112,28 @@ pub(super) fn register_dataview(vm: &mut Vm) {
                 ObjectKind::ArrayBuffer(b) | ObjectKind::SharedArrayBuffer(b) => {
                     (Arc::clone(b), b.byte_length())
                 }
-                _ => return Err(VmError::TypeError("DataView requires an ArrayBuffer or SharedArrayBuffer".into())),
+                _ => {
+                    return Err(VmError::TypeError(
+                        "DataView requires an ArrayBuffer or SharedArrayBuffer".into(),
+                    ));
+                }
             }
         } else {
-            return Err(VmError::TypeError("DataView requires an ArrayBuffer or SharedArrayBuffer".into()));
+            return Err(VmError::TypeError(
+                "DataView requires an ArrayBuffer or SharedArrayBuffer".into(),
+            ));
         };
 
-        let byte_offset = if let Some(off_val) = args.get(1) {
-            to_index(vm, *off_val)?
-        } else {
-            0
-        };
+        let byte_offset = if let Some(off_val) = args.get(1) { to_index(vm, *off_val)? } else { 0 };
 
         if sab.is_detached() {
             return Err(VmError::TypeError("ArrayBuffer is detached".into()));
         }
 
         if byte_offset > buf_len {
-            return Err(VmError::RangeError("Start offset is outside the bounds of the buffer".into()));
+            return Err(VmError::RangeError(
+                "Start offset is outside the bounds of the buffer".into(),
+            ));
         }
 
         let byte_length = match args.get(2) {
@@ -162,11 +166,10 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         vm.set_symbol_property(dv_proto, sym_tag, tag_val);
         if let Some(ptr) = dv_proto.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            obj.set_symbol_attributes(sym_tag, PropertyAttributes {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            });
+            obj.set_symbol_attributes(
+                sym_tag,
+                PropertyAttributes { writable: false, enumerable: false, configurable: true },
+            );
         }
     }
 
@@ -178,7 +181,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
                 return Ok(*buffer_val);
             }
         }
-        Err(VmError::TypeError("get DataView.prototype.buffer called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "get DataView.prototype.buffer called on incompatible receiver".into(),
+        ))
     });
 
     let byte_length_getter = vm.alloc_native_function("get byteLength", 0, |_vm, this, _args| {
@@ -196,7 +201,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
                 });
             }
         }
-        Err(VmError::TypeError("get DataView.prototype.byteLength called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "get DataView.prototype.byteLength called on incompatible receiver".into(),
+        ))
     });
 
     let byte_offset_getter = vm.alloc_native_function("get byteOffset", 0, |_vm, this, _args| {
@@ -214,7 +221,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
                 });
             }
         }
-        Err(VmError::TypeError("get DataView.prototype.byteOffset called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "get DataView.prototype.byteOffset called on incompatible receiver".into(),
+        ))
     });
 
     if let Some(ptr) = dv_proto.as_object_ptr() {
@@ -311,7 +320,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let le = args.get(1).map(|v| v.is_truthy()).unwrap_or(false);
         let (buf, pos) = get_view_bounds(vm, this, off_arg, 4)?;
         let mut b = [0u8; 4];
-        for i in 0..4 { b[i] = buf.get(pos + i).unwrap_or(0); }
+        for i in 0..4 {
+            b[i] = buf.get(pos + i).unwrap_or(0);
+        }
         let v = if le { i32::from_le_bytes(b) } else { i32::from_be_bytes(b) };
         Ok(JsValue::from_int32(v))
     });
@@ -320,7 +331,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let le = args.get(1).map(|v| v.is_truthy()).unwrap_or(false);
         let (buf, pos) = get_view_bounds(vm, this, off_arg, 4)?;
         let mut b = [0u8; 4];
-        for i in 0..4 { b[i] = buf.get(pos + i).unwrap_or(0); }
+        for i in 0..4 {
+            b[i] = buf.get(pos + i).unwrap_or(0);
+        }
         let v = if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) };
         Ok(JsValue::from_double(v as f64))
     });
@@ -333,7 +346,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let (buf, pos) = set_view_bounds(vm, this, JsValue::from_double(get_index as f64), 4)?;
         let int_val = val as i32;
         let bytes = if le { int_val.to_le_bytes() } else { int_val.to_be_bytes() };
-        for (i, &b) in bytes.iter().enumerate() { buf.set(pos + i, b); }
+        for (i, &b) in bytes.iter().enumerate() {
+            buf.set(pos + i, b);
+        }
         Ok(JsValue::undefined())
     });
     let dv_set_u32 = vm.alloc_native_function("setUint32", 2, |vm, this, args| {
@@ -345,7 +360,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let (buf, pos) = set_view_bounds(vm, this, JsValue::from_double(get_index as f64), 4)?;
         let int_val = val as u32;
         let bytes = if le { int_val.to_le_bytes() } else { int_val.to_be_bytes() };
-        for (i, &b) in bytes.iter().enumerate() { buf.set(pos + i, b); }
+        for (i, &b) in bytes.iter().enumerate() {
+            buf.set(pos + i, b);
+        }
         Ok(JsValue::undefined())
     });
 
@@ -354,7 +371,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let le = args.get(1).map(|v| v.is_truthy()).unwrap_or(false);
         let (buf, pos) = get_view_bounds(vm, this, off_arg, 4)?;
         let mut b = [0u8; 4];
-        for i in 0..4 { b[i] = buf.get(pos + i).unwrap_or(0); }
+        for i in 0..4 {
+            b[i] = buf.get(pos + i).unwrap_or(0);
+        }
         let v = if le { f32::from_le_bytes(b) } else { f32::from_be_bytes(b) };
         Ok(JsValue::from_double(v as f64))
     });
@@ -367,7 +386,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let (buf, pos) = set_view_bounds(vm, this, JsValue::from_double(get_index as f64), 4)?;
         let f_val = val as f32;
         let bytes = if le { f_val.to_le_bytes() } else { f_val.to_be_bytes() };
-        for (i, &b) in bytes.iter().enumerate() { buf.set(pos + i, b); }
+        for (i, &b) in bytes.iter().enumerate() {
+            buf.set(pos + i, b);
+        }
         Ok(JsValue::undefined())
     });
 
@@ -376,7 +397,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let le = args.get(1).map(|v| v.is_truthy()).unwrap_or(false);
         let (buf, pos) = get_view_bounds(vm, this, off_arg, 8)?;
         let mut b = [0u8; 8];
-        for i in 0..8 { b[i] = buf.get(pos + i).unwrap_or(0); }
+        for i in 0..8 {
+            b[i] = buf.get(pos + i).unwrap_or(0);
+        }
         let v = if le { f64::from_le_bytes(b) } else { f64::from_be_bytes(b) };
         Ok(JsValue::from_double(v))
     });
@@ -388,7 +411,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let val = vm.to_number_value(val_arg)?;
         let (buf, pos) = set_view_bounds(vm, this, JsValue::from_double(get_index as f64), 8)?;
         let bytes = if le { val.to_le_bytes() } else { val.to_be_bytes() };
-        for (i, &b) in bytes.iter().enumerate() { buf.set(pos + i, b); }
+        for (i, &b) in bytes.iter().enumerate() {
+            buf.set(pos + i, b);
+        }
         Ok(JsValue::undefined())
     });
 
@@ -397,7 +422,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let le = args.get(1).map(|v| v.is_truthy()).unwrap_or(false);
         let (buf, pos) = get_view_bounds(vm, this, off_arg, 8)?;
         let mut b = [0u8; 8];
-        for i in 0..8 { b[i] = buf.get(pos + i).unwrap_or(0); }
+        for i in 0..8 {
+            b[i] = buf.get(pos + i).unwrap_or(0);
+        }
         let v = if le { i64::from_le_bytes(b) } else { i64::from_be_bytes(b) };
         Ok(vm.alloc_bigint(BigInt::from(v)))
     });
@@ -409,8 +436,11 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let bi = vm.to_bigint_op(val_arg)?;
         let val_u64 = bigint_to_u64(&bi);
         let (buf, pos) = set_view_bounds(vm, this, JsValue::from_double(get_index as f64), 8)?;
-        let bytes = if le { (val_u64 as i64).to_le_bytes() } else { (val_u64 as i64).to_be_bytes() };
-        for (i, &b) in bytes.iter().enumerate() { buf.set(pos + i, b); }
+        let bytes =
+            if le { (val_u64 as i64).to_le_bytes() } else { (val_u64 as i64).to_be_bytes() };
+        for (i, &b) in bytes.iter().enumerate() {
+            buf.set(pos + i, b);
+        }
         Ok(JsValue::undefined())
     });
     let dv_get_bu64 = vm.alloc_native_function("getBigUint64", 1, |vm, this, args| {
@@ -418,7 +448,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let le = args.get(1).map(|v| v.is_truthy()).unwrap_or(false);
         let (buf, pos) = get_view_bounds(vm, this, off_arg, 8)?;
         let mut b = [0u8; 8];
-        for i in 0..8 { b[i] = buf.get(pos + i).unwrap_or(0); }
+        for i in 0..8 {
+            b[i] = buf.get(pos + i).unwrap_or(0);
+        }
         let v = if le { u64::from_le_bytes(b) } else { u64::from_be_bytes(b) };
         Ok(vm.alloc_bigint(BigInt::from(v)))
     });
@@ -431,7 +463,9 @@ pub(super) fn register_dataview(vm: &mut Vm) {
         let val_u64 = bigint_to_u64(&bi);
         let (buf, pos) = set_view_bounds(vm, this, JsValue::from_double(get_index as f64), 8)?;
         let bytes = if le { val_u64.to_le_bytes() } else { val_u64.to_be_bytes() };
-        for (i, &b) in bytes.iter().enumerate() { buf.set(pos + i, b); }
+        for (i, &b) in bytes.iter().enumerate() {
+            buf.set(pos + i, b);
+        }
         Ok(JsValue::undefined())
     });
 

@@ -25,9 +25,6 @@ impl Test262Runner {
             }
         }
 
-        Self {
-            config,
-            harness_cache: Arc::new(harness_cache),
-        }
+        Self { config, harness_cache: Arc::new(harness_cache) }
     }
 }

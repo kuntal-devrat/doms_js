@@ -12,8 +12,12 @@ impl Compiler {
         finally_block: &Option<Box<Statement>>,
     ) -> Result<(), CompileError> {
         if let Some(finally_stmt) = finally_block {
-            let kind_slot = self.symbols.define_local(format!("@finally_kind_{}", self.chunk.instructions.len()));
-            let val_slot = self.symbols.define_local(format!("@finally_val_{}", self.chunk.instructions.len()));
+            let kind_slot = self
+                .symbols
+                .define_local(format!("@finally_kind_{}", self.chunk.instructions.len()));
+            let val_slot = self
+                .symbols
+                .define_local(format!("@finally_val_{}", self.chunk.instructions.len()));
 
             let fin_entry = crate::compiler::FinallyEntry {
                 stmt: *finally_stmt.clone(),
@@ -81,7 +85,9 @@ impl Compiler {
 
             // Normal completion: kind = 0
             let saved_cptn_slot = if !self.is_in_function && !self.internal_statements {
-                let slot = self.symbols.define_local(format!("@finally_cptn_{}", self.chunk.instructions.len()));
+                let slot = self
+                    .symbols
+                    .define_local(format!("@finally_cptn_{}", self.chunk.instructions.len()));
                 self.chunk.emit(OpCode::SetLocal(slot), 0);
                 self.chunk.emit(OpCode::Pop, 0);
                 self.chunk.emit(OpCode::LoadUndefined, 0);
@@ -166,10 +172,7 @@ impl Compiler {
         Ok(())
     }
 
-    pub(crate) fn compile_throw(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<(), CompileError> {
+    pub(crate) fn compile_throw(&mut self, expr: &Expression) -> Result<(), CompileError> {
         self.compile_expression(expr)?;
         self.chunk.emit(OpCode::Throw, 0);
         Ok(())

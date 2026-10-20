@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 mod construct;
 mod invoke;
 mod spread;

@@ -89,7 +89,9 @@ impl Vm {
                 }
             }
             if self.oom {
-                return Err(VmError::RangeError("Out of memory: allocation limit reached".to_string()));
+                return Err(VmError::RangeError(
+                    "Out of memory: allocation limit reached".to_string(),
+                ));
             }
             if let Some(max) = self.max_instructions {
                 if self.instruction_count > max {
@@ -326,7 +328,8 @@ impl Vm {
                                                 self.stack.truncate(stack_len - 2);
                                                 continue;
                                             } else if uidx == elements.len()
-                                                && (jsobj.prototype.is_none() || jsobj.prototype == self.array_proto)
+                                                && (jsobj.prototype.is_none()
+                                                    || jsobj.prototype == self.array_proto)
                                                 && is_extensible
                                             {
                                                 elements.push(val);
@@ -367,7 +370,11 @@ impl Vm {
                 OpCode::DefinePrivateField(name_idx) => {
                     let name = match &chunk.constants[name_idx as usize] {
                         Constant::String(s) => s.clone(),
-                        _ => return Err(VmError::TypeError("Private field name must be string".into())),
+                        _ => {
+                            return Err(VmError::TypeError(
+                                "Private field name must be string".into(),
+                            ));
+                        }
                     };
                     let val = self.pop()?;
                     let obj = self.pop()?;
@@ -376,13 +383,20 @@ impl Vm {
                         jsobj.insert_private_element(name, val);
                         self.push(val);
                     } else {
-                        return Err(VmError::TypeError(format!("Cannot install private field {} on non-object", name)));
+                        return Err(VmError::TypeError(format!(
+                            "Cannot install private field {} on non-object",
+                            name
+                        )));
                     }
                 }
                 OpCode::DefinePrivateGetter(name_idx) => {
                     let name = match &chunk.constants[name_idx as usize] {
                         Constant::String(s) => s.clone(),
-                        _ => return Err(VmError::TypeError("Private getter name must be string".into())),
+                        _ => {
+                            return Err(VmError::TypeError(
+                                "Private getter name must be string".into(),
+                            ));
+                        }
                     };
                     let getter = self.pop()?;
                     let obj = self.pop()?;
@@ -391,13 +405,20 @@ impl Vm {
                         jsobj.insert_private_getter(name, getter);
                         self.push(getter);
                     } else {
-                        return Err(VmError::TypeError(format!("Cannot install private getter {} on non-object", name)));
+                        return Err(VmError::TypeError(format!(
+                            "Cannot install private getter {} on non-object",
+                            name
+                        )));
                     }
                 }
                 OpCode::DefinePrivateSetter(name_idx) => {
                     let name = match &chunk.constants[name_idx as usize] {
                         Constant::String(s) => s.clone(),
-                        _ => return Err(VmError::TypeError("Private setter name must be string".into())),
+                        _ => {
+                            return Err(VmError::TypeError(
+                                "Private setter name must be string".into(),
+                            ));
+                        }
                     };
                     let setter = self.pop()?;
                     let obj = self.pop()?;
@@ -406,7 +427,10 @@ impl Vm {
                         jsobj.insert_private_setter(name, setter);
                         self.push(setter);
                     } else {
-                        return Err(VmError::TypeError(format!("Cannot install private setter {} on non-object", name)));
+                        return Err(VmError::TypeError(format!(
+                            "Cannot install private setter {} on non-object",
+                            name
+                        )));
                     }
                 }
 
@@ -444,7 +468,11 @@ impl Vm {
                 }
 
                 OpCode::GetNewTarget => {
-                    let target = self.frames.last().and_then(|f| f.new_target).unwrap_or(JsValue::undefined());
+                    let target = self
+                        .frames
+                        .last()
+                        .and_then(|f| f.new_target)
+                        .unwrap_or(JsValue::undefined());
                     self.push(target);
                 }
 
@@ -600,11 +628,18 @@ impl Vm {
                 OpCode::PrivateIn(name_idx) => {
                     let name = match &chunk.constants[name_idx as usize] {
                         Constant::String(s) => s.clone(),
-                        _ => return Err(VmError::TypeError("Private field name must be string".into())),
+                        _ => {
+                            return Err(VmError::TypeError(
+                                "Private field name must be string".into(),
+                            ));
+                        }
                     };
                     let rhs = self.pop()?;
                     if !rhs.is_js_object() {
-                        return Err(VmError::TypeError("Cannot use 'in' operator to search for private field in non-object".into()));
+                        return Err(VmError::TypeError(
+                            "Cannot use 'in' operator to search for private field in non-object"
+                                .into(),
+                        ));
                     }
                     let has = if let Some(ptr) = rhs.as_object_ptr() {
                         let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -706,7 +741,8 @@ impl Vm {
 
                 OpCode::GetLocal(slot) => {
                     let frame = self.frames.last().unwrap();
-                    let val = frame.locals.get(slot as usize).copied().unwrap_or(JsValue::undefined());
+                    let val =
+                        frame.locals.get(slot as usize).copied().unwrap_or(JsValue::undefined());
                     self.push(val);
                 }
                 OpCode::SetLocal(slot) => {
@@ -810,7 +846,10 @@ impl Vm {
         // entered while the embedder asked for preemption or fuel metering.
         // Falling back to the interpreter keeps interrupts, deadlines and
         // instruction budgets exact.
-        if self.interrupt_flag.is_some() || self.deadline.is_some() || self.max_instructions.is_some() {
+        if self.interrupt_flag.is_some()
+            || self.deadline.is_some()
+            || self.max_instructions.is_some()
+        {
             return Ok(OsrOutcome::NotTriggered);
         }
         let count = self.loop_hotness.entry((chunk.id, target_ip)).or_insert(0);
@@ -846,7 +885,8 @@ impl Vm {
                     (frame.locals.as_mut_ptr() as *mut u64, frame.locals.len())
                 };
 
-                let cur_this = self.frames.last().map(|f| f.this_val.0).unwrap_or(crate::value::TAG_UNDEFINED);
+                let cur_this =
+                    self.frames.last().map(|f| f.this_val.0).unwrap_or(crate::value::TAG_UNDEFINED);
                 let res = unsafe { (func_ptr)(locals_ptr, locals_len, cur_this) };
 
                 crate::jit::NURSERY_PTRS.with(|cell| {
@@ -893,4 +933,3 @@ impl Vm {
         Ok(OsrOutcome::NotTriggered)
     }
 }
-

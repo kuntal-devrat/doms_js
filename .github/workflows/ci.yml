@@ -85,7 +85,7 @@ jobs:
       - name: Download Test262
         run: |
           if [ ! -d "tests/test262/test262" ]; then
-            git clone --depth 1 https://github.com/nicodes-js/test262.git tests/test262/test262
+            git clone --depth 1 https://github.com/tc39/test262.git tests/test262/test262
           fi
       - name: Run Test262 Subset
         run: |

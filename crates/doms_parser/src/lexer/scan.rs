@@ -1,9 +1,9 @@
 //! Main scan loop: token dispatch, recording, and tokenize_all.
 
+use super::Lexer;
 use super::chars::is_identifier_start;
 use super::context::{can_precede_slash_operator, is_expr_brace_context};
 use super::token::{LexError, Token, TokenKind};
-use super::Lexer;
 
 impl<'a> Lexer<'a> {
     #[inline(always)]
@@ -43,28 +43,18 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        if ch == '/' && !can_precede_slash_operator(&self.prev_token_kind, self.last_rbrace_was_expr) {
+        if ch == '/'
+            && !can_precede_slash_operator(&self.prev_token_kind, self.last_rbrace_was_expr)
+        {
             let kind = self.read_regexp(line, col)?;
             let kind = self.record_token(kind);
-            return Ok(Token {
-                kind,
-                line,
-                col,
-                has_preceding_line_terminator,
-                has_escape: false,
-            });
+            return Ok(Token { kind, line, col, has_preceding_line_terminator, has_escape: false });
         }
 
         if is_identifier_start(ch) || ch == '\\' {
             let (kind, has_escape) = self.read_identifier_or_keyword(line, col)?;
             let kind = self.record_token(kind);
-            return Ok(Token {
-                kind,
-                line,
-                col,
-                has_preceding_line_terminator,
-                has_escape,
-            });
+            return Ok(Token { kind, line, col, has_preceding_line_terminator, has_escape });
         }
 
         if ch == '#' {
@@ -117,49 +107,25 @@ impl<'a> Lexer<'a> {
         if ch.is_ascii_digit() {
             let kind = self.read_number(line, col)?;
             let kind = self.record_token(kind);
-            return Ok(Token {
-                kind,
-                line,
-                col,
-                has_preceding_line_terminator,
-                has_escape: false,
-            });
+            return Ok(Token { kind, line, col, has_preceding_line_terminator, has_escape: false });
         }
 
         if ch == '"' || ch == '\'' {
             let kind = self.read_string(ch, line, col)?;
             let kind = self.record_token(kind);
-            return Ok(Token {
-                kind,
-                line,
-                col,
-                has_preceding_line_terminator,
-                has_escape: false,
-            });
+            return Ok(Token { kind, line, col, has_preceding_line_terminator, has_escape: false });
         }
 
         if ch == '`' {
             let kind = self.read_template_literal(line, col)?;
             let kind = self.record_token(kind);
-            return Ok(Token {
-                kind,
-                line,
-                col,
-                has_preceding_line_terminator,
-                has_escape: false,
-            });
+            return Ok(Token { kind, line, col, has_preceding_line_terminator, has_escape: false });
         }
 
         let kind = self.read_punctuation_or_operator(ch, line, col)?;
 
         let kind = self.record_token(kind);
-        Ok(Token {
-            kind,
-            line,
-            col,
-            has_preceding_line_terminator,
-            has_escape: false,
-        })
+        Ok(Token { kind, line, col, has_preceding_line_terminator, has_escape: false })
     }
 
     pub fn tokenize_all(&mut self) -> Result<Vec<Token>, LexError> {

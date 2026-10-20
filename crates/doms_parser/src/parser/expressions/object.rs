@@ -40,11 +40,7 @@ impl<'a> Parser<'a> {
                 self.in_derived_constructor = prev_ctor;
                 props.push(ObjectProperty::Getter(
                     key,
-                    Expression::FunctionExpr {
-                        name: None,
-                        params: vec![],
-                        body,
-                    },
+                    Expression::FunctionExpr { name: None, params: vec![], body },
                 ));
                 if self.check(&TokenKind::Comma) {
                     self.advance()?;
@@ -72,7 +68,9 @@ impl<'a> Parser<'a> {
                     self.in_method = prev_method;
                     self.in_derived_constructor = prev_ctor;
                     self.in_static_block = prev_in_static;
-                    return Err(ParseError::General("Setter must have exactly one formal parameter".to_string()));
+                    return Err(ParseError::General(
+                        "Setter must have exactly one formal parameter".to_string(),
+                    ));
                 }
                 let mut body = self.parse_function_body(&params, None)?;
                 self.in_method = prev_method;
@@ -81,11 +79,7 @@ impl<'a> Parser<'a> {
                 Self::apply_parameter_defaults(&mut body, defaults);
                 props.push(ObjectProperty::Setter(
                     key,
-                    Expression::FunctionExpr {
-                        name: None,
-                        params,
-                        body,
-                    },
+                    Expression::FunctionExpr { name: None, params, body },
                 ));
                 if self.check(&TokenKind::Comma) {
                     self.advance()?;
@@ -114,11 +108,7 @@ impl<'a> Parser<'a> {
                 };
                 props.push(ObjectProperty::KeyValue(
                     key,
-                    Expression::GeneratorExpr {
-                        name: fn_name,
-                        params,
-                        body,
-                    },
+                    Expression::GeneratorExpr { name: fn_name, params, body },
                 ));
                 if !self.match_token(&TokenKind::Comma)? || self.check(&TokenKind::RBrace) {
                     break;
@@ -175,13 +165,16 @@ impl<'a> Parser<'a> {
             } else if self.match_token(&TokenKind::Eq)? {
                 let default_expr = self.parse_expression(1)?;
                 match &key {
-                    PropertyKey::Literal(id) => Expression::Assignment {
-                        target: id.clone(),
-                        value: Box::new(default_expr),
-                    },
+                    PropertyKey::Literal(id) => {
+                        Expression::Assignment { target: id.clone(), value: Box::new(default_expr) }
+                    }
                     _ => {
                         self.allow_in = prev_in;
-                        return Err(ParseError::UnexpectedToken(TokenKind::Eq, self.current.line, self.current.col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Eq,
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                 }
             } else if self.check(&TokenKind::LParen) {
@@ -202,11 +195,7 @@ impl<'a> Parser<'a> {
                     PropertyKey::Literal(s) => Some(s.clone()),
                     PropertyKey::Computed(_) => None,
                 };
-                Expression::MethodExpr {
-                    name: fn_name,
-                    params,
-                    body,
-                }
+                Expression::MethodExpr { name: fn_name, params, body }
             } else if is_ident {
                 match &key {
                     PropertyKey::Literal(id) => Expression::Identifier(id.clone()),
@@ -214,7 +203,11 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 self.allow_in = prev_in;
-                return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+                return Err(ParseError::UnexpectedToken(
+                    self.current.kind.clone(),
+                    self.current.line,
+                    self.current.col,
+                ));
             };
 
             props.push(ObjectProperty::KeyValue(key, val));

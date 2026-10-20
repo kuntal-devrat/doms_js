@@ -1,11 +1,15 @@
 //! Identifier and keyword scanning.
 
+use super::Lexer;
 use super::chars::{is_identifier_part, is_identifier_start};
 use super::token::{LexError, TokenKind};
-use super::Lexer;
 
 impl<'a> Lexer<'a> {
-    pub(super) fn read_identifier_or_keyword(&mut self, line: usize, col: usize) -> Result<(TokenKind, bool), LexError> {
+    pub(super) fn read_identifier_or_keyword(
+        &mut self,
+        line: usize,
+        col: usize,
+    ) -> Result<(TokenKind, bool), LexError> {
         let mut s = String::new();
         let mut has_escape = false;
         while let Some(c) = self.peek() {
@@ -64,11 +68,8 @@ impl<'a> Lexer<'a> {
                             .ok_or_else(|| LexError::UnexpectedChar('\\', line, col))?
                     };
 
-                    let valid = if s.is_empty() {
-                        is_identifier_start(ch)
-                    } else {
-                        is_identifier_part(ch)
-                    };
+                    let valid =
+                        if s.is_empty() { is_identifier_start(ch) } else { is_identifier_part(ch) };
 
                     if !valid {
                         return Err(LexError::UnexpectedChar(ch, line, col));

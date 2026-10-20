@@ -8,20 +8,20 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | [`vm`] | The [`Vm`] state itself, its constructor and stack helpers |
-//! | [`types`] | [`VmError`], [`CallFrame`] and other support types |
-//! | [`run`] | Execution entry points and the main dispatch loop |
-//! | [`gc`] / [`alloc`] | Object tracking, tracing GC and allocation helpers |
-//! | [`properties`] / [`property_access`] / [`get_property`] | Property model |
-//! | [`symbols`] / [`for_in`] | Symbol keys and key enumeration |
-//! | [`calls`] | Calls, construction, closures and identifier lookup |
-//! | [`operators`] | Abstract operations (equality, coercion, comparison) |
-//! | [`opcodes`] | Bodies of the largest dispatch-loop arms, grouped by area |
-//! | [`values`] / [`elements`] | Value conversion and indexed element access |
-//! | [`promises`] / [`microtasks`] | Promise machinery and the event loop |
-//! | [`errors`] | Mapping interpreter errors onto JavaScript error objects |
-//! | [`modules`] | `eval` and global declaration instantiation |
-//! | [`methods`] | Fast-path prototype method dispatch (Array, String, Map, …) |
+//! | `vm` | The [`Vm`] state itself, its constructor and stack helpers |
+//! | `types` | [`VmError`], [`CallFrame`] and other support types |
+//! | `run` | Execution entry points and the main dispatch loop |
+//! | `gc` / `alloc` | Object tracking, tracing GC and allocation helpers |
+//! | `properties` / `property_access` / `get_property` | Property model |
+//! | `symbols` / `for_in` | Symbol keys and key enumeration |
+//! | `calls` | Calls, construction, closures and identifier lookup |
+//! | `operators` | Abstract operations (equality, coercion, comparison) |
+//! | `opcodes` | Bodies of the largest dispatch-loop arms, grouped by area |
+//! | `values` / `elements` | Value conversion and indexed element access |
+//! | `promises` / `microtasks` | Promise machinery and the event loop |
+//! | `errors` | Mapping interpreter errors onto JavaScript error objects |
+//! | `modules` | `eval` and global declaration instantiation |
+//! | `methods` | Fast-path prototype method dispatch (Array, String, Map, …) |
 //!
 //! Each submodule contributes `impl Vm` blocks; there is no behavioural
 //! difference between a method living in one file or another.
@@ -29,8 +29,8 @@
 use crate::builtins::register_builtins;
 use crate::inline_cache::InlineCacheSlot;
 use crate::object::{
-    JsFunction, JsGenerator, JsObject, JsTypedArray, MapIterationKind, NativeFn, NativeFunction, ObjectKind,
-    PromiseState, SavedCatchHandler, SetIterationKind, TypedArrayKind,
+    JsFunction, JsGenerator, JsObject, JsTypedArray, MapIterationKind, NativeFn, NativeFunction,
+    ObjectKind, PromiseState, SavedCatchHandler, SetIterationKind, TypedArrayKind,
 };
 use crate::shape::ShapeRegistry;
 use crate::value::JsValue;

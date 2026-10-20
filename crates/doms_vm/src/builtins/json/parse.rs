@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 pub(super) struct JsonParser<'a> {
     pub(super) chars: Vec<char>,
     pub(super) pos: usize,
@@ -11,11 +10,7 @@ pub(super) struct JsonParser<'a> {
 
 impl<'a> JsonParser<'a> {
     pub(super) fn new(text: &'a str) -> Self {
-        Self {
-            chars: text.chars().collect(),
-            pos: 0,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { chars: text.chars().collect(), pos: 0, _phantom: std::marker::PhantomData }
     }
 
     pub(super) fn skip_whitespace(&mut self) {
@@ -43,7 +38,9 @@ impl<'a> JsonParser<'a> {
 
     pub(super) fn parse_value(&mut self, vm: &mut Vm) -> Result<JsValue, VmError> {
         self.skip_whitespace();
-        let c = self.peek().ok_or_else(|| VmError::SyntaxError("Unexpected end of JSON input".into()))?;
+        let c = self
+            .peek()
+            .ok_or_else(|| VmError::SyntaxError("Unexpected end of JSON input".into()))?;
         match c {
             'n' => self.parse_null(),
             't' => self.parse_true(),
@@ -57,7 +54,9 @@ impl<'a> JsonParser<'a> {
     }
 
     fn parse_null(&mut self) -> Result<JsValue, VmError> {
-        if self.pos + 4 <= self.chars.len() && &self.chars[self.pos..self.pos + 4] == &['n', 'u', 'l', 'l'] {
+        if self.pos + 4 <= self.chars.len()
+            && &self.chars[self.pos..self.pos + 4] == &['n', 'u', 'l', 'l']
+        {
             self.pos += 4;
             Ok(JsValue::null())
         } else {
@@ -66,7 +65,9 @@ impl<'a> JsonParser<'a> {
     }
 
     fn parse_true(&mut self) -> Result<JsValue, VmError> {
-        if self.pos + 4 <= self.chars.len() && &self.chars[self.pos..self.pos + 4] == &['t', 'r', 'u', 'e'] {
+        if self.pos + 4 <= self.chars.len()
+            && &self.chars[self.pos..self.pos + 4] == &['t', 'r', 'u', 'e']
+        {
             self.pos += 4;
             Ok(JsValue::from_boolean(true))
         } else {
@@ -75,7 +76,9 @@ impl<'a> JsonParser<'a> {
     }
 
     fn parse_false(&mut self) -> Result<JsValue, VmError> {
-        if self.pos + 5 <= self.chars.len() && &self.chars[self.pos..self.pos + 5] == &['f', 'a', 'l', 's', 'e'] {
+        if self.pos + 5 <= self.chars.len()
+            && &self.chars[self.pos..self.pos + 5] == &['f', 'a', 'l', 's', 'e']
+        {
             self.pos += 5;
             Ok(JsValue::from_boolean(false))
         } else {
@@ -93,7 +96,9 @@ impl<'a> JsonParser<'a> {
             match c {
                 '"' => return Ok(s),
                 '\\' => {
-                    let esc = self.advance().ok_or_else(|| VmError::SyntaxError("Unterminated escape sequence".into()))?;
+                    let esc = self.advance().ok_or_else(|| {
+                        VmError::SyntaxError("Unterminated escape sequence".into())
+                    })?;
                     match esc {
                         '"' => s.push('"'),
                         '\\' => s.push('\\'),
@@ -106,28 +111,40 @@ impl<'a> JsonParser<'a> {
                         'u' => {
                             let mut hex = String::new();
                             for _ in 0..4 {
-                                let hc = self.advance().ok_or_else(|| VmError::SyntaxError("Invalid unicode escape".into()))?;
+                                let hc = self.advance().ok_or_else(|| {
+                                    VmError::SyntaxError("Invalid unicode escape".into())
+                                })?;
                                 if !hc.is_ascii_hexdigit() {
-                                    return Err(VmError::SyntaxError("Invalid hex digit in unicode escape".into()));
+                                    return Err(VmError::SyntaxError(
+                                        "Invalid hex digit in unicode escape".into(),
+                                    ));
                                 }
                                 hex.push(hc);
                             }
-                            let code = u32::from_str_radix(&hex, 16)
-                                .map_err(|_| VmError::SyntaxError("Invalid unicode escape value".into()))?;
+                            let code = u32::from_str_radix(&hex, 16).map_err(|_| {
+                                VmError::SyntaxError("Invalid unicode escape value".into())
+                            })?;
                             if (0xD800..=0xDBFF).contains(&code) {
                                 // High surrogate: check for low surrogate
-                                if self.pos + 6 <= self.chars.len() && self.chars[self.pos] == '\\' && self.chars[self.pos + 1] == 'u' {
+                                if self.pos + 6 <= self.chars.len()
+                                    && self.chars[self.pos] == '\\'
+                                    && self.chars[self.pos + 1] == 'u'
+                                {
                                     let mut low_hex = String::new();
                                     for idx in 0..4 {
                                         let hc = self.chars[self.pos + 2 + idx];
-                                        if !hc.is_ascii_hexdigit() { break; }
+                                        if !hc.is_ascii_hexdigit() {
+                                            break;
+                                        }
                                         low_hex.push(hc);
                                     }
                                     if low_hex.len() == 4 {
                                         if let Ok(low_code) = u32::from_str_radix(&low_hex, 16) {
                                             if (0xDC00..=0xDFFF).contains(&low_code) {
                                                 self.pos += 6;
-                                                let full_code = 0x10000 + ((code - 0xD800) << 10) + (low_code - 0xDC00);
+                                                let full_code = 0x10000
+                                                    + ((code - 0xD800) << 10)
+                                                    + (low_code - 0xDC00);
                                                 if let Some(ch) = char::from_u32(full_code) {
                                                     s.push(ch);
                                                     continue;
@@ -143,11 +160,18 @@ impl<'a> JsonParser<'a> {
                                 s.push('\u{FFFD}');
                             }
                         }
-                        _ => return Err(VmError::SyntaxError(format!("Invalid escape character '{}'", esc))),
+                        _ => {
+                            return Err(VmError::SyntaxError(format!(
+                                "Invalid escape character '{}'",
+                                esc
+                            )));
+                        }
                     }
                 }
                 c if (c as u32) < 0x20 => {
-                    return Err(VmError::SyntaxError("Unescaped control character in JSON string".into()));
+                    return Err(VmError::SyntaxError(
+                        "Unescaped control character in JSON string".into(),
+                    ));
                 }
                 other => s.push(other),
             }
@@ -166,7 +190,9 @@ impl<'a> JsonParser<'a> {
             self.advance();
         }
 
-        let first = self.advance().ok_or_else(|| VmError::SyntaxError("Expected digits for number".into()))?;
+        let first = self
+            .advance()
+            .ok_or_else(|| VmError::SyntaxError("Expected digits for number".into()))?;
         if !first.is_ascii_digit() {
             return Err(VmError::SyntaxError("Expected digit".into()));
         }
@@ -174,7 +200,9 @@ impl<'a> JsonParser<'a> {
         if first == '0' {
             if let Some(next) = self.peek() {
                 if next.is_ascii_digit() {
-                    return Err(VmError::SyntaxError("Leading zeros are not allowed in JSON numbers".into()));
+                    return Err(VmError::SyntaxError(
+                        "Leading zeros are not allowed in JSON numbers".into(),
+                    ));
                 }
             }
         } else {
@@ -200,7 +228,9 @@ impl<'a> JsonParser<'a> {
                 }
             }
             if !has_digit {
-                return Err(VmError::SyntaxError("Decimal point must be followed by digits".into()));
+                return Err(VmError::SyntaxError(
+                    "Decimal point must be followed by digits".into(),
+                ));
             }
         }
 
@@ -225,7 +255,9 @@ impl<'a> JsonParser<'a> {
         }
 
         let num_str: String = self.chars[start..self.pos].iter().collect();
-        let val = num_str.parse::<f64>().map_err(|_| VmError::SyntaxError("Failed to parse number".into()))?;
+        let val = num_str
+            .parse::<f64>()
+            .map_err(|_| VmError::SyntaxError("Failed to parse number".into()))?;
         Ok(JsValue::from_double(val))
     }
 
@@ -273,12 +305,16 @@ impl<'a> JsonParser<'a> {
         loop {
             self.skip_whitespace();
             if self.peek() != Some('"') {
-                return Err(VmError::SyntaxError("Property name must be double-quoted in JSON object".into()));
+                return Err(VmError::SyntaxError(
+                    "Property name must be double-quoted in JSON object".into(),
+                ));
             }
             let key = self.parse_string_raw()?;
             self.skip_whitespace();
             if self.advance() != Some(':') {
-                return Err(VmError::SyntaxError("Expected ':' after property name in JSON object".into()));
+                return Err(VmError::SyntaxError(
+                    "Expected ':' after property name in JSON object".into(),
+                ));
             }
             let val = self.parse_value(vm)?;
             vm.create_data_property_or_throw(obj, &key, val)?;

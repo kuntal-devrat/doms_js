@@ -28,34 +28,38 @@ pub(super) fn register_json(vm: &mut Vm) {
         } else {
             None
         };
-        let replacer_arr: Option<Vec<String>> = if cur_replacer.is_object() && !vm.is_callable(cur_replacer) {
-            if vm.is_array_result(cur_replacer)? {
-                let len_val = vm.get_property_result(cur_replacer, "length")?;
-                let len = vm.to_number_value(len_val).unwrap_or(0.0).max(0.0) as usize;
-                let mut keys = Vec::new();
-                for i in 0..len {
-                    let mut elem = vm.get_property_result(cur_replacer, &i.to_string())?;
-                    if let Some(ptr) = elem.as_object_ptr() {
-                        let obj = unsafe { &*(ptr as *mut JsObject) };
-                        if matches!(obj.kind, ObjectKind::NumberObject(_) | ObjectKind::StringObject(_)) {
-                            let s = vm.to_string_spec(elem)?;
-                            elem = vm.alloc_string(s);
+        let replacer_arr: Option<Vec<String>> =
+            if cur_replacer.is_object() && !vm.is_callable(cur_replacer) {
+                if vm.is_array_result(cur_replacer)? {
+                    let len_val = vm.get_property_result(cur_replacer, "length")?;
+                    let len = vm.to_number_value(len_val).unwrap_or(0.0).max(0.0) as usize;
+                    let mut keys = Vec::new();
+                    for i in 0..len {
+                        let mut elem = vm.get_property_result(cur_replacer, &i.to_string())?;
+                        if let Some(ptr) = elem.as_object_ptr() {
+                            let obj = unsafe { &*(ptr as *mut JsObject) };
+                            if matches!(
+                                obj.kind,
+                                ObjectKind::NumberObject(_) | ObjectKind::StringObject(_)
+                            ) {
+                                let s = vm.to_string_spec(elem)?;
+                                elem = vm.alloc_string(s);
+                            }
+                        }
+                        if elem.is_string() || elem.is_number() {
+                            let k = vm.to_string_value(elem);
+                            if !keys.contains(&k) {
+                                keys.push(k);
+                            }
                         }
                     }
-                    if elem.is_string() || elem.is_number() {
-                        let k = vm.to_string_value(elem);
-                        if !keys.contains(&k) {
-                            keys.push(k);
-                        }
-                    }
+                    Some(keys)
+                } else {
+                    None
                 }
-                Some(keys)
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         let mut cur_space = vm.temp_roots[prev_temp + 2];
         if let Some(ptr) = cur_space.as_object_ptr() {
@@ -144,11 +148,10 @@ pub(super) fn register_json(vm: &mut Vm) {
         vm.set_symbol_property(json_obj, tag_sym, tag_val);
         if let Some(ptr) = json_obj.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            obj.set_symbol_attributes(tag_sym, PropertyAttributes {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            });
+            obj.set_symbol_attributes(
+                tag_sym,
+                PropertyAttributes { writable: false, enumerable: false, configurable: true },
+            );
         }
     }
 

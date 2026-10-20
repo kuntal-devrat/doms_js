@@ -44,9 +44,7 @@ fn main() {
     println!("[Browser Engine] Initializing Tab 2 (Background Isolate)...");
     let mut tab2_isolate = engine.create_isolate();
     let mut tab2_ctx = tab2_isolate.create_context();
-    tab2_ctx
-        .eval("var tabName = 'Background Analytics Tab';")
-        .expect("Tab 2 setup");
+    tab2_ctx.eval("var tabName = 'Background Analytics Tab';").expect("Tab 2 setup");
 
     // 3. Parallel Worker with SharedArrayBuffer & Atomics
     println!("[Browser Engine] Spawning Render Worker with 1KB SharedArrayBuffer Framebuffer...");

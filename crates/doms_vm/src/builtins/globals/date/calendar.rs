@@ -2,7 +2,8 @@
 
 use super::*;
 
-pub(super) const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+pub(super) const MONTHS: [&str; 12] =
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 pub(super) const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 pub(super) fn ms_to_utc(ms: f64) -> Option<(i32, i32, i32, i32, i32, i32, i32, i32)> {
     if ms.is_nan() || ms.is_infinite() {
@@ -33,7 +34,15 @@ pub(super) fn ms_to_utc(ms: f64) -> Option<(i32, i32, i32, i32, i32, i32, i32, i
     Some((year, month, d as i32, weekday, hour, min, sec, ms_part))
 }
 
-pub(super) fn utc_to_ms(year: i32, month: i32, day: i32, hour: i32, min: i32, sec: i32, ms: i32) -> f64 {
+pub(super) fn utc_to_ms(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    min: i32,
+    sec: i32,
+    ms: i32,
+) -> f64 {
     let y = if month <= 1 { year - 1 } else { year } as i64;
     let m = (if month <= 1 { month + 10 } else { month - 2 }) as i64;
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -41,7 +50,11 @@ pub(super) fn utc_to_ms(year: i32, month: i32, day: i32, hour: i32, min: i32, se
     let doy = (153 * m + 2) / 5 + (day as i64 - 1);
     let doe = (yoe as i64) * 365 + (yoe as i64) / 4 - (yoe as i64) / 100 + doy;
     let days = era * 146097 + doe - 719468;
-    (days * 86_400_000 + (hour as i64) * 3_600_000 + (min as i64) * 60_000 + (sec as i64) * 1000 + (ms as i64)) as f64
+    (days * 86_400_000
+        + (hour as i64) * 3_600_000
+        + (min as i64) * 60_000
+        + (sec as i64) * 1000
+        + (ms as i64)) as f64
 }
 
 pub(super) fn parse_iso_date(s: &str) -> Option<(i32, i32, i32)> {

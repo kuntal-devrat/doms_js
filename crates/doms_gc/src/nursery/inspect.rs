@@ -78,11 +78,7 @@ impl Nursery {
     /// Returns the utilization ratio (0.0 to 1.0).
     #[inline]
     pub fn utilization(&self) -> f64 {
-        if self.space_size == 0 {
-            0.0
-        } else {
-            self.used_bytes() as f64 / self.space_size as f64
-        }
+        if self.space_size == 0 { 0.0 } else { self.used_bytes() as f64 / self.space_size as f64 }
     }
 
     /// Reset the nursery, discarding all objects.

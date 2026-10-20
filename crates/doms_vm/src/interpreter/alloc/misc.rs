@@ -4,21 +4,35 @@ use super::*;
 
 impl Vm {
     pub fn alloc_bigint(&mut self, val: BigInt) -> JsValue {
-        let proto = self.globals.get("BigInt").copied().and_then(|c| {
-            let p = self.get_property(c, "prototype");
-            if p.is_object() { Some(p) } else { None }
-        }).or(self.object_proto);
+        let proto = self
+            .globals
+            .get("BigInt")
+            .copied()
+            .and_then(|c| {
+                let p = self.get_property(c, "prototype");
+                if p.is_object() { Some(p) } else { None }
+            })
+            .or(self.object_proto);
         let obj = JsObject::new_bigint(ShapeRegistry::ROOT_SHAPE_ID, proto, val);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
 
     pub fn alloc_bigint_object(&mut self, val: BigInt) -> JsValue {
-        let proto = self.globals.get("BigInt").copied().and_then(|c| {
-            let p = self.get_property(c, "prototype");
-            if p.is_object() { Some(p) } else { None }
-        }).or(self.object_proto);
-        let obj = JsObject::new_with_kind(ShapeRegistry::ROOT_SHAPE_ID, proto, ObjectKind::BigIntObject(val));
+        let proto = self
+            .globals
+            .get("BigInt")
+            .copied()
+            .and_then(|c| {
+                let p = self.get_property(c, "prototype");
+                if p.is_object() { Some(p) } else { None }
+            })
+            .or(self.object_proto);
+        let obj = JsObject::new_with_kind(
+            ShapeRegistry::ROOT_SHAPE_ID,
+            proto,
+            ObjectKind::BigIntObject(val),
+        );
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }

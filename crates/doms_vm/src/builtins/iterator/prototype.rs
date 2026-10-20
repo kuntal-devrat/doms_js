@@ -1,7 +1,7 @@
 //! %IteratorPrototype% methods and accessors.
 
 use super::helper::{self, iterator_close_normal};
-use crate::builtins::promise::iterator::{iterator_close, IteratorRecord};
+use crate::builtins::promise::iterator::{IteratorRecord, iterator_close};
 use crate::interpreter::{PropertyKeyVal, Vm, VmError};
 use crate::object::{IteratorHelperKind, JsObject, ObjectKind};
 use crate::value::JsValue;
@@ -49,7 +49,10 @@ pub fn setter_that_ignores_prototype_properties(
         return Err(VmError::TypeError("Setter called on non-object".into()));
     }
     if this == home {
-        return Err(VmError::TypeError(format!("Cannot set property '{}' on prototype directly", prop)));
+        return Err(VmError::TypeError(format!(
+            "Cannot set property '{}' on prototype directly",
+            prop
+        )));
     }
     let has_own = vm.has_own_property(this, prop);
     if !has_own {
@@ -85,13 +88,18 @@ pub fn setter_that_ignores_prototype_symbol_properties(
     Ok(JsValue::undefined())
 }
 
-fn validate_take_drop_limit(vm: &mut Vm, this: JsValue, arg: Option<JsValue>) -> Result<f64, VmError> {
+fn validate_take_drop_limit(
+    vm: &mut Vm,
+    this: JsValue,
+    arg: Option<JsValue>,
+) -> Result<f64, VmError> {
     let limit_val = arg.unwrap_or(JsValue::undefined());
     let num_res = vm.to_number_value(limit_val);
     let num = match num_res {
         Ok(n) => n,
         Err(e) => {
-            let rec = IteratorRecord { iterator: this, next_method: JsValue::undefined(), done: false };
+            let rec =
+                IteratorRecord { iterator: this, next_method: JsValue::undefined(), done: false };
             let _ = helper::iterator_close_normal(vm, &rec);
             return Err(e);
         }
@@ -112,13 +120,19 @@ fn validate_take_drop_limit(vm: &mut Vm, this: JsValue, arg: Option<JsValue>) ->
 
 pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, iter_ctor: JsValue) {
     // 1. constructor accessor
-    let ctor_getter = vm.alloc_closure_native_function("get constructor", 0, std::sync::Arc::new(move |_vm, _this, _args| {
-        Ok(iter_ctor)
-    }));
-    let ctor_setter = vm.alloc_closure_native_function("set constructor", 1, std::sync::Arc::new(move |vm, this, args| {
-        let v = args.first().copied().unwrap_or(JsValue::undefined());
-        setter_that_ignores_prototype_properties(vm, iter_proto, this, "constructor", v)
-    }));
+    let ctor_getter = vm.alloc_closure_native_function(
+        "get constructor",
+        0,
+        std::sync::Arc::new(move |_vm, _this, _args| Ok(iter_ctor)),
+    );
+    let ctor_setter = vm.alloc_closure_native_function(
+        "set constructor",
+        1,
+        std::sync::Arc::new(move |vm, this, args| {
+            let v = args.first().copied().unwrap_or(JsValue::undefined());
+            setter_that_ignores_prototype_properties(vm, iter_proto, this, "constructor", v)
+        }),
+    );
     if let Some(ptr) = iter_proto.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         obj.define_accessor("constructor".to_string(), Some(ctor_getter), Some(ctor_setter));
@@ -127,13 +141,18 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
 
     // 2. [Symbol.toStringTag] accessor
     if let Some(sym_tag) = vm.symbol_to_string_tag {
-        let tag_getter = vm.alloc_native_function("get [Symbol.toStringTag]", 0, |vm, _this, _args| {
-            Ok(vm.alloc_string("Iterator".into()))
-        });
-        let tag_setter = vm.alloc_closure_native_function("set [Symbol.toStringTag]", 1, std::sync::Arc::new(move |vm, this, args| {
-            let v = args.first().copied().unwrap_or(JsValue::undefined());
-            setter_that_ignores_prototype_symbol_properties(vm, iter_proto, this, sym_tag, v)
-        }));
+        let tag_getter =
+            vm.alloc_native_function("get [Symbol.toStringTag]", 0, |vm, _this, _args| {
+                Ok(vm.alloc_string("Iterator".into()))
+            });
+        let tag_setter = vm.alloc_closure_native_function(
+            "set [Symbol.toStringTag]",
+            1,
+            std::sync::Arc::new(move |vm, this, args| {
+                let v = args.first().copied().unwrap_or(JsValue::undefined());
+                setter_that_ignores_prototype_symbol_properties(vm, iter_proto, this, sym_tag, v)
+            }),
+        );
         if let Some(ptr) = iter_proto.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             obj.define_symbol_accessor(sym_tag, Some(tag_getter), Some(tag_setter));
@@ -144,9 +163,8 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
 
     // 3. [Symbol.iterator]()
     if let Some(sym_iter) = vm.symbol_iterator {
-        let iter_self_fn = vm.alloc_native_function("[Symbol.iterator]", 0, |_vm, this, _args| {
-            Ok(this)
-        });
+        let iter_self_fn =
+            vm.alloc_native_function("[Symbol.iterator]", 0, |_vm, this, _args| Ok(this));
         vm.set_symbol_property(iter_proto, sym_iter, iter_self_fn);
         let key_name = format!("[Symbol:{:x}]", sym_iter.raw_bits());
         vm.set_property_non_enumerable(iter_proto, key_name);
@@ -176,7 +194,9 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
     // 5. forEach(fn)
     let for_each_fn = vm.alloc_native_function("forEach", 1, |vm, this, args| {
         if !this.is_object() {
-            return Err(VmError::TypeError("Iterator.prototype.forEach called on non-object".into()));
+            return Err(VmError::TypeError(
+                "Iterator.prototype.forEach called on non-object".into(),
+            ));
         }
         let callback = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(callback) {
@@ -194,7 +214,11 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
                 break;
             }
             let val = vm.get_property_result(step, "value")?;
-            let call_res = vm.call(callback, JsValue::undefined(), &[val, JsValue::from_int32(counter as i32)]);
+            let call_res = vm.call(
+                callback,
+                JsValue::undefined(),
+                &[val, JsValue::from_int32(counter as i32)],
+            );
             if let Err(e) = call_res {
                 let rec = IteratorRecord { iterator: target, next_method, done: false };
                 return Err(iterator_close(vm, &rec, Some(e)));
@@ -227,7 +251,11 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
                 return Ok(JsValue::from_boolean(false));
             }
             let val = vm.get_property_result(step, "value")?;
-            let call_res = vm.call(predicate, JsValue::undefined(), &[val, JsValue::from_int32(counter as i32)]);
+            let call_res = vm.call(
+                predicate,
+                JsValue::undefined(),
+                &[val, JsValue::from_int32(counter as i32)],
+            );
             let res_val = match call_res {
                 Ok(v) => v,
                 Err(e) => {
@@ -267,7 +295,11 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
                 return Ok(JsValue::from_boolean(true));
             }
             let val = vm.get_property_result(step, "value")?;
-            let call_res = vm.call(predicate, JsValue::undefined(), &[val, JsValue::from_int32(counter as i32)]);
+            let call_res = vm.call(
+                predicate,
+                JsValue::undefined(),
+                &[val, JsValue::from_int32(counter as i32)],
+            );
             let res_val = match call_res {
                 Ok(v) => v,
                 Err(e) => {
@@ -307,7 +339,11 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
                 return Ok(JsValue::undefined());
             }
             let val = vm.get_property_result(step, "value")?;
-            let call_res = vm.call(predicate, JsValue::undefined(), &[val, JsValue::from_int32(counter as i32)]);
+            let call_res = vm.call(
+                predicate,
+                JsValue::undefined(),
+                &[val, JsValue::from_int32(counter as i32)],
+            );
             let res_val = match call_res {
                 Ok(v) => v,
                 Err(e) => {
@@ -329,7 +365,9 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
     // 9. reduce(reducer [, initialValue])
     let reduce_fn = vm.alloc_native_function("reduce", 1, |vm, this, args| {
         if !this.is_object() {
-            return Err(VmError::TypeError("Iterator.prototype.reduce called on non-object".into()));
+            return Err(VmError::TypeError(
+                "Iterator.prototype.reduce called on non-object".into(),
+            ));
         }
         let reducer = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(reducer) {
@@ -344,7 +382,9 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
                 return Err(VmError::TypeError("Iterator step must be an object".into()));
             }
             if vm.get_property_result(step, "done")?.is_truthy() {
-                return Err(VmError::TypeError("Reduce of empty iterator with no initial value".into()));
+                return Err(VmError::TypeError(
+                    "Reduce of empty iterator with no initial value".into(),
+                ));
             }
             (vm.get_property_result(step, "value")?, 1usize)
         };
@@ -359,7 +399,11 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
                 return Ok(accumulator);
             }
             let val = vm.get_property_result(step, "value")?;
-            let call_res = vm.call(reducer, JsValue::undefined(), &[accumulator, val, JsValue::from_int32(counter as i32)]);
+            let call_res = vm.call(
+                reducer,
+                JsValue::undefined(),
+                &[accumulator, val, JsValue::from_int32(counter as i32)],
+            );
             accumulator = match call_res {
                 Ok(v) => v,
                 Err(e) => {
@@ -391,7 +435,9 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
     // 11. filter(predicate)
     let filter_fn = vm.alloc_native_function("filter", 1, |vm, this, args| {
         if !this.is_object() {
-            return Err(VmError::TypeError("Iterator.prototype.filter called on non-object".into()));
+            return Err(VmError::TypeError(
+                "Iterator.prototype.filter called on non-object".into(),
+            ));
         }
         let predicate = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(predicate) {
@@ -410,7 +456,12 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         }
         let limit = validate_take_drop_limit(vm, this, args.first().copied())?;
         let (target, next_method) = get_iterator_direct(vm, this)?;
-        Ok(alloc_iterator_helper(vm, target, next_method, IteratorHelperKind::Take { remaining: limit }))
+        Ok(alloc_iterator_helper(
+            vm,
+            target,
+            next_method,
+            IteratorHelperKind::Take { remaining: limit },
+        ))
     });
     vm.set_property(iter_proto, "take", take_fn);
     vm.set_property_non_enumerable(iter_proto, "take".to_string());
@@ -422,7 +473,12 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
         }
         let limit = validate_take_drop_limit(vm, this, args.first().copied())?;
         let (target, next_method) = get_iterator_direct(vm, this)?;
-        Ok(alloc_iterator_helper(vm, target, next_method, IteratorHelperKind::Drop { remaining: limit }))
+        Ok(alloc_iterator_helper(
+            vm,
+            target,
+            next_method,
+            IteratorHelperKind::Drop { remaining: limit },
+        ))
     });
     vm.set_property(iter_proto, "drop", drop_fn);
     vm.set_property_non_enumerable(iter_proto, "drop".to_string());
@@ -430,14 +486,21 @@ pub fn register_iterator_prototype_methods(vm: &mut Vm, iter_proto: JsValue, ite
     // 14. flatMap(mapper)
     let flat_map_fn = vm.alloc_native_function("flatMap", 1, |vm, this, args| {
         if !this.is_object() {
-            return Err(VmError::TypeError("Iterator.prototype.flatMap called on non-object".into()));
+            return Err(VmError::TypeError(
+                "Iterator.prototype.flatMap called on non-object".into(),
+            ));
         }
         let mapper = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(mapper) {
             return Err(VmError::TypeError("flatMap mapper is not callable".into()));
         }
         let (target, next_method) = get_iterator_direct(vm, this)?;
-        Ok(alloc_iterator_helper(vm, target, next_method, IteratorHelperKind::FlatMap { mapper, inner_iter: None, inner_next: None }))
+        Ok(alloc_iterator_helper(
+            vm,
+            target,
+            next_method,
+            IteratorHelperKind::FlatMap { mapper, inner_iter: None, inner_next: None },
+        ))
     });
     vm.set_property(iter_proto, "flatMap", flat_map_fn);
     vm.set_property_non_enumerable(iter_proto, "flatMap".to_string());

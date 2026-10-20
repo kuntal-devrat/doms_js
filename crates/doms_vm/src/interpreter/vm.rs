@@ -265,7 +265,11 @@ impl Vm {
 
     /// Look up property info (offset + attributes) on an object's shape.
     #[inline]
-    pub fn get_own_property_info(&self, target: JsValue, key: &str) -> Option<crate::shape::PropertyInfo> {
+    pub fn get_own_property_info(
+        &self,
+        target: JsValue,
+        key: &str,
+    ) -> Option<crate::shape::PropertyInfo> {
         if let Some(ptr) = target.as_object_ptr() {
             if self.is_valid_heap_object(ptr) {
                 let obj = unsafe { &*(ptr as *const JsObject) };
@@ -413,11 +417,13 @@ impl Vm {
             if self.is_valid_heap_object(ptr) {
                 let obj = unsafe { &mut *(ptr as *mut JsObject) };
                 if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
-                    let new_shape_id = self.shapes.transition_redefine(obj.shape_id, key, attributes);
+                    let new_shape_id =
+                        self.shapes.transition_redefine(obj.shape_id, key, attributes);
                     obj.shape_id = new_shape_id;
                     obj.set_slot(offset, value);
                 } else {
-                    let (new_shape_id, offset) = self.shapes.transition_with_attributes(obj.shape_id, key, attributes);
+                    let (new_shape_id, offset) =
+                        self.shapes.transition_with_attributes(obj.shape_id, key, attributes);
                     obj.shape_id = new_shape_id;
                     obj.set_slot(offset, value);
                     obj.add_prop_order(key.to_string());
@@ -427,12 +433,7 @@ impl Vm {
     }
 
     /// Define a builtin method on a prototype or namespace: { writable: true, enumerable: false, configurable: true }.
-    pub fn define_builtin_method(
-        &mut self,
-        target: JsValue,
-        key: &str,
-        func: JsValue,
-    ) {
+    pub fn define_builtin_method(&mut self, target: JsValue, key: &str, func: JsValue) {
         self.define_builtin_property(
             target,
             key,
@@ -446,12 +447,7 @@ impl Vm {
     }
 
     /// Define a builtin constant (e.g. Math.PI): { writable: false, enumerable: false, configurable: false }.
-    pub fn define_builtin_constant(
-        &mut self,
-        target: JsValue,
-        key: &str,
-        value: JsValue,
-    ) {
+    pub fn define_builtin_constant(&mut self, target: JsValue, key: &str, value: JsValue) {
         self.define_builtin_property(
             target,
             key,
@@ -475,7 +471,6 @@ impl Vm {
     pub fn peek(&self) -> Result<&JsValue, VmError> {
         self.stack.last().ok_or(VmError::StackUnderflow)
     }
-
 }
 
 impl Drop for Vm {

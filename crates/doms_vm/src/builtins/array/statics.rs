@@ -25,7 +25,9 @@ pub(super) fn register_statics(vm: &mut Vm, array_constructor: JsValue) {
         let this_arg = args.get(2).copied().unwrap_or(JsValue::undefined());
         let has_map = !map_fn.is_undefined();
         if has_map && !vm.is_callable(map_fn) {
-            return Err(VmError::TypeError("Array.from: when provided, mapFn must be callable".into()));
+            return Err(VmError::TypeError(
+                "Array.from: when provided, mapFn must be callable".into(),
+            ));
         }
 
         let is_ctor = vm.is_constructor(this);
@@ -39,7 +41,8 @@ pub(super) fn register_statics(vm: &mut Vm, array_constructor: JsValue) {
 
         let cur_items = vm.temp_roots[prev_temp + 1];
         if let Some(sym_iter) = vm.symbol_iterator {
-            let iter_method = vm.get_symbol_property_result(cur_items, sym_iter).unwrap_or(JsValue::undefined());
+            let iter_method =
+                vm.get_symbol_property_result(cur_items, sym_iter).unwrap_or(JsValue::undefined());
             if vm.is_callable(iter_method) {
                 let cur_items = vm.temp_roots[prev_temp + 1];
                 let iterator = match vm.call(iter_method, cur_items, &[]) {
@@ -107,7 +110,8 @@ pub(super) fn register_statics(vm: &mut Vm, array_constructor: JsValue) {
                 let cur_this = vm.temp_roots[prev_temp];
                 vm.temp_roots.truncate(prev_temp);
                 if is_ctor {
-                    let target = vm.construct(cur_this, &[JsValue::from_int32(elements.len() as i32)])?;
+                    let target =
+                        vm.construct(cur_this, &[JsValue::from_int32(elements.len() as i32)])?;
                     for (i, el) in elements.into_iter().enumerate() {
                         vm.set_element(target, i, el);
                     }
@@ -150,7 +154,8 @@ pub(super) fn register_statics(vm: &mut Vm, array_constructor: JsValue) {
         let cur_this = vm.temp_roots[prev_temp];
         vm.temp_roots.truncate(prev_temp);
         if is_ctor {
-            let target = vm.construct(cur_this, &[JsValue::from_int32(result_elements.len() as i32)])?;
+            let target =
+                vm.construct(cur_this, &[JsValue::from_int32(result_elements.len() as i32)])?;
             for (i, el) in result_elements.into_iter().enumerate() {
                 vm.set_element(target, i, el);
             }

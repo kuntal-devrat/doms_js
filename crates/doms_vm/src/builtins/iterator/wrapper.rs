@@ -9,7 +9,8 @@ pub fn register_wrap_for_valid_iterator_proto(vm: &mut Vm, iter_proto: JsValue) 
     let next_fn = vm.alloc_native_function("next", 0, |vm, this, args| {
         if let Some(ptr) = this.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if let ObjectKind::WrapForValidIterator { iterator, next_method, done } = &mut obj.kind {
+            if let ObjectKind::WrapForValidIterator { iterator, next_method, done } = &mut obj.kind
+            {
                 if *done {
                     return vm.alloc_iter_result(JsValue::undefined(), true);
                 }
@@ -24,7 +25,9 @@ pub fn register_wrap_for_valid_iterator_proto(vm: &mut Vm, iter_proto: JsValue) 
                     Ok(val) => {
                         if !val.is_object() {
                             *done = true;
-                            return Err(VmError::TypeError("Iterator result must be an object".into()));
+                            return Err(VmError::TypeError(
+                                "Iterator result must be an object".into(),
+                            ));
                         }
                         return Ok(val);
                     }
@@ -35,7 +38,9 @@ pub fn register_wrap_for_valid_iterator_proto(vm: &mut Vm, iter_proto: JsValue) 
                 }
             }
         }
-        Err(VmError::TypeError("%WrapForValidIteratorPrototype%.next requires [[Iterated]] internal slot".into()))
+        Err(VmError::TypeError(
+            "%WrapForValidIteratorPrototype%.next requires [[Iterated]] internal slot".into(),
+        ))
     });
     vm.set_property(wrap_proto, "next", next_fn);
     vm.set_property_non_enumerable(wrap_proto, "next".to_string());
@@ -60,12 +65,16 @@ pub fn register_wrap_for_valid_iterator_proto(vm: &mut Vm, iter_proto: JsValue) 
                 }
                 let res = vm.call(ret_method, cur_iter, args)?;
                 if !res.is_object() {
-                    return Err(VmError::TypeError("Iterator return method must return an object".into()));
+                    return Err(VmError::TypeError(
+                        "Iterator return method must return an object".into(),
+                    ));
                 }
                 return Ok(res);
             }
         }
-        Err(VmError::TypeError("%WrapForValidIteratorPrototype%.return requires [[Iterated]] internal slot".into()))
+        Err(VmError::TypeError(
+            "%WrapForValidIteratorPrototype%.return requires [[Iterated]] internal slot".into(),
+        ))
     });
     vm.set_property(wrap_proto, "return", return_fn);
     vm.set_property_non_enumerable(wrap_proto, "return".to_string());

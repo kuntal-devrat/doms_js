@@ -18,7 +18,14 @@ fn resolve_module_export(
 
     for stmt in &prog.body {
         match stmt {
-            doms_parser::ast::Statement::Export { is_default, decl, specifiers, source, is_all, all_as } => {
+            doms_parser::ast::Statement::Export {
+                is_default,
+                decl,
+                specifiers,
+                source,
+                is_all,
+                all_as,
+            } => {
                 if *is_default && name == "default" {
                     found = true;
                 }
@@ -37,9 +44,13 @@ fn resolve_module_export(
                             }
                         }
                         doms_parser::ast::Statement::FunctionDecl { name: fn_name, .. }
-                        | doms_parser::ast::Statement::AsyncFunctionDecl { name: fn_name, .. }
+                        | doms_parser::ast::Statement::AsyncFunctionDecl {
+                            name: fn_name, ..
+                        }
                         | doms_parser::ast::Statement::GeneratorDecl { name: fn_name, .. }
-                        | doms_parser::ast::Statement::AsyncGeneratorDecl { name: fn_name, .. } => {
+                        | doms_parser::ast::Statement::AsyncGeneratorDecl {
+                            name: fn_name, ..
+                        } => {
                             if fn_name == name {
                                 found = true;
                             }
@@ -53,19 +64,31 @@ fn resolve_module_export(
                         if exp == name {
                             let mut imported_from = None;
                             for s in &prog.body {
-                                if let doms_parser::ast::Statement::Import { specifiers: imp_specs, source: imp_src, is_all, .. } = s {
+                                if let doms_parser::ast::Statement::Import {
+                                    specifiers: imp_specs,
+                                    source: imp_src,
+                                    is_all,
+                                    ..
+                                } = s
+                                {
                                     for (imp_orig, imp_alias) in imp_specs {
                                         let local_name = imp_alias.as_deref().unwrap_or(imp_orig);
                                         if local_name == orig {
-                                            let sub_path = canonical.parent().unwrap().join(imp_src);
+                                            let sub_path =
+                                                canonical.parent().unwrap().join(imp_src);
                                             if *is_all {
                                                 let canonical_sub = match sub_path.canonicalize() {
                                                     Ok(p) => p,
                                                     Err(_) => sub_path,
                                                 };
-                                                imported_from = Some(Ok(Some((canonical_sub, "*".to_string()))));
+                                                imported_from = Some(Ok(Some((
+                                                    canonical_sub,
+                                                    "*".to_string(),
+                                                ))));
                                             } else {
-                                                imported_from = Some(resolve_module_export(&sub_path, imp_orig, visited));
+                                                imported_from = Some(resolve_module_export(
+                                                    &sub_path, imp_orig, visited,
+                                                ));
                                             }
                                             break;
                                         }
@@ -132,7 +155,10 @@ fn resolve_module_export(
     Ok(None)
 }
 
-pub(crate) fn validate_module_resolution(program: &doms_parser::ast::Program, base_dir: Option<&Path>) -> Result<(), String> {
+pub(crate) fn validate_module_resolution(
+    program: &doms_parser::ast::Program,
+    base_dir: Option<&Path>,
+) -> Result<(), String> {
     let base = match base_dir {
         Some(b) => b,
         None => return Ok(()),
@@ -146,27 +172,46 @@ pub(crate) fn validate_module_resolution(program: &doms_parser::ast::Program, ba
                 let mod_prog = doms_parser::parse_module(&content).map_err(|e| e.to_string())?;
                 if *is_all {
                     for s in &mod_prog.body {
-                        if let doms_parser::ast::Statement::Export { specifiers, source: Some(src), is_all: false, .. } = s {
+                        if let doms_parser::ast::Statement::Export {
+                            specifiers,
+                            source: Some(src),
+                            is_all: false,
+                            ..
+                        } = s
+                        {
                             for (name, _) in specifiers {
                                 let src_path = mod_path.parent().unwrap().join(src);
                                 let mut visited = std::collections::HashSet::new();
                                 if resolve_module_export(&src_path, name, &mut visited)?.is_none() {
-                                    return Err(format!("Unresolvable star namespace export '{}'", name));
+                                    return Err(format!(
+                                        "Unresolvable star namespace export '{}'",
+                                        name
+                                    ));
                                 }
                             }
                         }
                     }
                 } else {
                     for (i, (name, _)) in specifiers.iter().enumerate() {
-                        let exp_name = if *is_default && i == 0 { "default" } else { name.as_str() };
+                        let exp_name =
+                            if *is_default && i == 0 { "default" } else { name.as_str() };
                         let mut visited = std::collections::HashSet::new();
                         if resolve_module_export(&mod_path, exp_name, &mut visited)?.is_none() {
-                            return Err(format!("Named import '{}' not found in '{}'", exp_name, source));
+                            return Err(format!(
+                                "Named import '{}' not found in '{}'",
+                                exp_name, source
+                            ));
                         }
                     }
                 }
             }
-            doms_parser::ast::Statement::Export { specifiers, source: Some(source), is_all, all_as, .. } => {
+            doms_parser::ast::Statement::Export {
+                specifiers,
+                source: Some(source),
+                is_all,
+                all_as,
+                ..
+            } => {
                 let mod_path = base.join(source);
                 let content = fs::read_to_string(&mod_path).map_err(|e| e.to_string())?;
                 let _mod_prog = doms_parser::parse_module(&content).map_err(|e| e.to_string())?;
@@ -174,7 +219,10 @@ pub(crate) fn validate_module_resolution(program: &doms_parser::ast::Program, ba
                     for (name, _) in specifiers {
                         let mut visited = std::collections::HashSet::new();
                         if resolve_module_export(&mod_path, name, &mut visited)?.is_none() {
-                            return Err(format!("Indirect export '{}' not found in '{}'", name, source));
+                            return Err(format!(
+                                "Indirect export '{}' not found in '{}'",
+                                name, source
+                            ));
                         }
                     }
                 }

@@ -154,14 +154,8 @@ fn build_iterator_rest_expr(
     body.push(Statement::VarDecl {
         kind: VarKind::Let,
         declarations: vec![
-            VarDeclarator {
-                name: "a".to_string(),
-                init: Some(Expression::Array(vec![])),
-            },
-            VarDeclarator {
-                name: "s".to_string(),
-                init: None,
-            },
+            VarDeclarator { name: "a".to_string(), init: Some(Expression::Array(vec![])) },
+            VarDeclarator { name: "s".to_string(), init: None },
         ],
     });
 
@@ -214,10 +208,7 @@ fn build_iterator_rest_expr(
     body.push(Statement::Return(Some(Expression::Identifier("a".to_string()))));
 
     let rest_call = Expression::Call {
-        callee: Box::new(Expression::ArrowExpr {
-            params: vec!["iter".to_string()],
-            body,
-        }),
+        callee: Box::new(Expression::ArrowExpr { params: vec!["iter".to_string()], body }),
         args: vec![Expression::Identifier(iter_name.to_string())],
     };
 
@@ -271,10 +262,7 @@ impl<'a> Parser<'a> {
                 } else {
                     build_iterator_step_expr(&iter_name)
                 };
-                declarations.push(VarDeclarator {
-                    name: step_name.clone(),
-                    init: Some(step_init),
-                });
+                declarations.push(VarDeclarator { name: step_name.clone(), init: Some(step_init) });
                 prev_step = Some(step_name);
                 continue;
             }
@@ -322,10 +310,7 @@ impl<'a> Parser<'a> {
             } else {
                 build_iterator_step_expr(&iter_name)
             };
-            declarations.push(VarDeclarator {
-                name: step_name.clone(),
-                init: Some(step_init),
-            });
+            declarations.push(VarDeclarator { name: step_name.clone(), init: Some(step_init) });
             prev_step = Some(step_name.clone());
 
             let elem_init = Expression::Conditional {
@@ -354,7 +339,8 @@ impl<'a> Parser<'a> {
                 let final_init = if let Some(def_expr) = def {
                     let val_var = format!("@val_{}", self.destruct_counter);
                     self.destruct_counter += 1;
-                    declarations.push(VarDeclarator { name: val_var.clone(), init: Some(elem_init) });
+                    declarations
+                        .push(VarDeclarator { name: val_var.clone(), init: Some(elem_init) });
                     Expression::Conditional {
                         condition: Box::new(Expression::Binary {
                             op: BinaryOp::StrictEq,
@@ -383,7 +369,8 @@ impl<'a> Parser<'a> {
                 let final_init = if let Some(def_expr) = def {
                     let val_var = format!("@val_{}", self.destruct_counter);
                     self.destruct_counter += 1;
-                    declarations.push(VarDeclarator { name: val_var.clone(), init: Some(elem_init) });
+                    declarations
+                        .push(VarDeclarator { name: val_var.clone(), init: Some(elem_init) });
                     Expression::Conditional {
                         condition: Box::new(Expression::Binary {
                             op: BinaryOp::StrictEq,
@@ -408,7 +395,8 @@ impl<'a> Parser<'a> {
                 let final_init = if let Some(def_expr) = def {
                     let val_var = format!("@val_{}", self.destruct_counter);
                     self.destruct_counter += 1;
-                    declarations.push(VarDeclarator { name: val_var.clone(), init: Some(elem_init) });
+                    declarations
+                        .push(VarDeclarator { name: val_var.clone(), init: Some(elem_init) });
                     Expression::Conditional {
                         condition: Box::new(Expression::Binary {
                             op: BinaryOp::StrictEq,
@@ -448,10 +436,7 @@ impl<'a> Parser<'a> {
             };
             let close_name = format!("@close_{}", self.destruct_counter);
             self.destruct_counter += 1;
-            declarations.push(VarDeclarator {
-                name: close_name,
-                init: Some(close_expr),
-            });
+            declarations.push(VarDeclarator { name: close_name, init: Some(close_expr) });
         }
 
         Ok(())
@@ -497,13 +482,14 @@ impl<'a> Parser<'a> {
                     declarations.extend(nested_decls);
                 } else {
                     let id = self.expect_identifier()?;
-                    declarations.push(VarDeclarator {
-                        name: id,
-                        init: Some(rest_init),
-                    });
+                    declarations.push(VarDeclarator { name: id, init: Some(rest_init) });
                 }
                 if self.check(&TokenKind::Comma) {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Comma, self.current.line, self.current.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Comma,
+                        self.current.line,
+                        self.current.col,
+                    ));
                 }
                 break;
             }
@@ -526,10 +512,8 @@ impl<'a> Parser<'a> {
                         has_legacy_escape: false,
                     })),
                 };
-                declarations.push(VarDeclarator {
-                    name: key_var.clone(),
-                    init: Some(key_to_string_expr),
-                });
+                declarations
+                    .push(VarDeclarator { name: key_var.clone(), init: Some(key_to_string_expr) });
                 excluded_keys.push(Expression::Identifier(key_var.clone()));
                 Expression::Index {
                     object: Box::new(Expression::Identifier(tmp_name.to_string())),
@@ -563,7 +547,8 @@ impl<'a> Parser<'a> {
                 let prop_init = if let Some(def_expr) = def {
                     let val_var = format!("@val_{}", self.destruct_counter);
                     self.destruct_counter += 1;
-                    declarations.push(VarDeclarator { name: val_var.clone(), init: Some(base_prop) });
+                    declarations
+                        .push(VarDeclarator { name: val_var.clone(), init: Some(base_prop) });
                     Expression::Conditional {
                         condition: Box::new(Expression::Binary {
                             op: BinaryOp::StrictEq,
@@ -592,7 +577,8 @@ impl<'a> Parser<'a> {
                 let prop_init = if let Some(def_expr) = def {
                     let val_var = format!("@val_{}", self.destruct_counter);
                     self.destruct_counter += 1;
-                    declarations.push(VarDeclarator { name: val_var.clone(), init: Some(base_prop) });
+                    declarations
+                        .push(VarDeclarator { name: val_var.clone(), init: Some(base_prop) });
                     Expression::Conditional {
                         condition: Box::new(Expression::Binary {
                             op: BinaryOp::StrictEq,
@@ -612,7 +598,11 @@ impl<'a> Parser<'a> {
                     self.expect_identifier()?
                 } else {
                     if !is_ident {
-                        return Err(ParseError::UnexpectedToken(self.current.kind.clone(), self.current.line, self.current.col));
+                        return Err(ParseError::UnexpectedToken(
+                            self.current.kind.clone(),
+                            self.current.line,
+                            self.current.col,
+                        ));
                     }
                     key_str.unwrap()
                 };
@@ -624,7 +614,8 @@ impl<'a> Parser<'a> {
                 let prop_init = if let Some(def_expr) = def {
                     let val_var = format!("@val_{}", self.destruct_counter);
                     self.destruct_counter += 1;
-                    declarations.push(VarDeclarator { name: val_var.clone(), init: Some(base_prop) });
+                    declarations
+                        .push(VarDeclarator { name: val_var.clone(), init: Some(base_prop) });
                     Expression::Conditional {
                         condition: Box::new(Expression::Binary {
                             op: BinaryOp::StrictEq,
@@ -725,10 +716,12 @@ impl<'a> Parser<'a> {
                                         object: Box::new(Expression::Identifier(p.clone())),
                                         property: "done".to_string(),
                                     }),
-                                    then_expr: Box::new(Expression::Object(vec![ObjectProperty::KeyValue(
-                                        PropertyKey::Literal("done".to_string()),
-                                        Expression::Literal(Literal::Boolean(true)),
-                                    )])),
+                                    then_expr: Box::new(Expression::Object(vec![
+                                        ObjectProperty::KeyValue(
+                                            PropertyKey::Literal("done".to_string()),
+                                            Expression::Literal(Literal::Boolean(true)),
+                                        ),
+                                    ])),
                                     else_expr: Box::new(build_iterator_step_expr(&iter_name)),
                                 }
                             } else {
@@ -781,8 +774,14 @@ impl<'a> Parser<'a> {
                                     try_stmts.push(Statement::VarDecl {
                                         kind: VarKind::Let,
                                         declarations: vec![
-                                            VarDeclarator { name: base_var.clone(), init: Some(Expression::Literal(Literal::Undefined)) },
-                                            VarDeclarator { name: key_var.clone(), init: Some(Expression::Literal(Literal::Undefined)) },
+                                            VarDeclarator {
+                                                name: base_var.clone(),
+                                                init: Some(Expression::Literal(Literal::Undefined)),
+                                            },
+                                            VarDeclarator {
+                                                name: key_var.clone(),
+                                                init: Some(Expression::Literal(Literal::Undefined)),
+                                            },
                                         ],
                                     });
                                     try_stmts.push(Statement::Expression(Expression::Assignment {
@@ -800,7 +799,11 @@ impl<'a> Parser<'a> {
                                 }
                                 other => other.clone(),
                             };
-                            let rest_rhs = build_iterator_rest_expr(&iter_name, prev_step.as_deref(), Some(&step_active_var));
+                            let rest_rhs = build_iterator_rest_expr(
+                                &iter_name,
+                                prev_step.as_deref(),
+                                Some(&step_active_var),
+                            );
                             let rest_val_var = format!("@rest_val_{}", self.destruct_counter);
                             self.destruct_counter += 1;
                             try_stmts.push(Statement::VarDecl {
@@ -814,7 +817,11 @@ impl<'a> Parser<'a> {
                                 target: done_var.clone(),
                                 value: Box::new(Expression::Literal(Literal::Boolean(true))),
                             }));
-                            self.desugar_assignment_destructuring(&target_inner, Expression::Identifier(rest_val_var), &mut try_stmts);
+                            self.desugar_assignment_destructuring(
+                                &target_inner,
+                                Expression::Identifier(rest_val_var),
+                                &mut try_stmts,
+                            );
                             break;
                         }
                         _ => {
@@ -822,12 +829,20 @@ impl<'a> Parser<'a> {
                                 Expression::Assignment { target, value: def } => {
                                     (Expression::Identifier(target.clone()), Some(def.clone()))
                                 }
-                                Expression::MemberAssignment { object, property, value: def } => {
-                                    (Expression::Member { object: object.clone(), property: property.clone() }, Some(def.clone()))
-                                }
-                                Expression::IndexAssignment { object, index, value: def } => {
-                                    (Expression::Index { object: object.clone(), index: index.clone() }, Some(def.clone()))
-                                }
+                                Expression::MemberAssignment { object, property, value: def } => (
+                                    Expression::Member {
+                                        object: object.clone(),
+                                        property: property.clone(),
+                                    },
+                                    Some(def.clone()),
+                                ),
+                                Expression::IndexAssignment { object, index, value: def } => (
+                                    Expression::Index {
+                                        object: object.clone(),
+                                        index: index.clone(),
+                                    },
+                                    Some(def.clone()),
+                                ),
                                 Expression::DestructuringAssignment { pattern, value: def } => {
                                     ((**pattern).clone(), Some(def.clone()))
                                 }
@@ -862,8 +877,14 @@ impl<'a> Parser<'a> {
                                     try_stmts.push(Statement::VarDecl {
                                         kind: VarKind::Let,
                                         declarations: vec![
-                                            VarDeclarator { name: base_var.clone(), init: Some(Expression::Literal(Literal::Undefined)) },
-                                            VarDeclarator { name: key_var.clone(), init: Some(Expression::Literal(Literal::Undefined)) },
+                                            VarDeclarator {
+                                                name: base_var.clone(),
+                                                init: Some(Expression::Literal(Literal::Undefined)),
+                                            },
+                                            VarDeclarator {
+                                                name: key_var.clone(),
+                                                init: Some(Expression::Literal(Literal::Undefined)),
+                                            },
                                         ],
                                     });
                                     try_stmts.push(Statement::Expression(Expression::Assignment {
@@ -890,10 +911,12 @@ impl<'a> Parser<'a> {
                                         object: Box::new(Expression::Identifier(p.clone())),
                                         property: "done".to_string(),
                                     }),
-                                    then_expr: Box::new(Expression::Object(vec![ObjectProperty::KeyValue(
-                                        PropertyKey::Literal("done".to_string()),
-                                        Expression::Literal(Literal::Boolean(true)),
-                                    )])),
+                                    then_expr: Box::new(Expression::Object(vec![
+                                        ObjectProperty::KeyValue(
+                                            PropertyKey::Literal("done".to_string()),
+                                            Expression::Literal(Literal::Boolean(true)),
+                                        ),
+                                    ])),
                                     else_expr: Box::new(build_iterator_step_expr(&iter_name)),
                                 }
                             } else {
@@ -931,7 +954,8 @@ impl<'a> Parser<'a> {
                             let final_elem_rhs = if let Some(def) = maybe_def {
                                 let val_var = format!("@val_{}", self.destruct_counter);
                                 self.destruct_counter += 1;
-                                let def_var = if let Expression::Identifier(ref name) = target_expr {
+                                let def_var = if let Expression::Identifier(ref name) = target_expr
+                                {
                                     format!("@name:{}:{}", name, self.destruct_counter)
                                 } else {
                                     format!("@def_{}", self.destruct_counter)
@@ -956,10 +980,12 @@ impl<'a> Parser<'a> {
                                         left: Box::new(Expression::Identifier(val_var.clone())),
                                         right: Box::new(Expression::Literal(Literal::Undefined)),
                                     },
-                                    then_branch: Box::new(Statement::Expression(Expression::Assignment {
-                                        target: def_var.clone(),
-                                        value: def,
-                                    })),
+                                    then_branch: Box::new(Statement::Expression(
+                                        Expression::Assignment {
+                                            target: def_var.clone(),
+                                            value: def,
+                                        },
+                                    )),
                                     else_branch: None,
                                 });
                                 Expression::Conditional {
@@ -975,7 +1001,11 @@ impl<'a> Parser<'a> {
                                 elem_rhs
                             };
 
-                            self.desugar_assignment_destructuring(&target_expr, final_elem_rhs, &mut try_stmts);
+                            self.desugar_assignment_destructuring(
+                                &target_expr,
+                                final_elem_rhs,
+                                &mut try_stmts,
+                            );
                         }
                     }
                 }
@@ -992,9 +1022,12 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                let close_call_normal = Statement::Expression(build_iterator_close_expr(&iter_name));
+                let close_call_normal =
+                    Statement::Expression(build_iterator_close_expr(&iter_name));
                 let close_call_error = Statement::TryCatch {
-                    try_block: Box::new(Statement::Block(vec![Statement::Expression(build_iterator_close_expr(&iter_name))])),
+                    try_block: Box::new(Statement::Block(vec![Statement::Expression(
+                        build_iterator_close_expr(&iter_name),
+                    )])),
                     catch_param: Some("_".to_string()),
                     catch_block: Some(Box::new(Statement::Block(vec![]))),
                     finally_block: None,
@@ -1038,10 +1071,7 @@ impl<'a> Parser<'a> {
                 self.destruct_counter += 1;
                 out.push(Statement::VarDecl {
                     kind: VarKind::Let,
-                    declarations: vec![VarDeclarator {
-                        name: tmp_var.clone(),
-                        init: Some(rhs),
-                    }],
+                    declarations: vec![VarDeclarator { name: tmp_var.clone(), init: Some(rhs) }],
                 });
                 let mut excluded_keys: Vec<Expression> = Vec::new();
                 for prop in properties {
@@ -1078,8 +1108,12 @@ impl<'a> Parser<'a> {
                                     });
                                     (
                                         Expression::Index {
-                                            object: Box::new(Expression::Identifier(tmp_var.clone())),
-                                            index: Box::new(Expression::Identifier(key_var.clone())),
+                                            object: Box::new(Expression::Identifier(
+                                                tmp_var.clone(),
+                                            )),
+                                            index: Box::new(Expression::Identifier(
+                                                key_var.clone(),
+                                            )),
                                         },
                                         Expression::Identifier(key_var),
                                     )
@@ -1101,7 +1135,9 @@ impl<'a> Parser<'a> {
                                         condition: Box::new(Expression::Binary {
                                             op: BinaryOp::StrictEq,
                                             left: Box::new(Expression::Identifier(val_var.clone())),
-                                            right: Box::new(Expression::Literal(Literal::Undefined)),
+                                            right: Box::new(Expression::Literal(
+                                                Literal::Undefined,
+                                            )),
                                         }),
                                         then_expr: def.clone(),
                                         else_expr: Box::new(Expression::Identifier(val_var)),
@@ -1126,13 +1162,18 @@ impl<'a> Parser<'a> {
                                         condition: Box::new(Expression::Binary {
                                             op: BinaryOp::StrictEq,
                                             left: Box::new(Expression::Identifier(val_var.clone())),
-                                            right: Box::new(Expression::Literal(Literal::Undefined)),
+                                            right: Box::new(Expression::Literal(
+                                                Literal::Undefined,
+                                            )),
                                         }),
                                         then_expr: def.clone(),
                                         else_expr: Box::new(Expression::Identifier(val_var)),
                                     };
                                     self.desugar_assignment_destructuring(
-                                        &Expression::Member { object: object.clone(), property: property.clone() },
+                                        &Expression::Member {
+                                            object: object.clone(),
+                                            property: property.clone(),
+                                        },
                                         cond_expr,
                                         out,
                                     );
@@ -1151,13 +1192,18 @@ impl<'a> Parser<'a> {
                                         condition: Box::new(Expression::Binary {
                                             op: BinaryOp::StrictEq,
                                             left: Box::new(Expression::Identifier(val_var.clone())),
-                                            right: Box::new(Expression::Literal(Literal::Undefined)),
+                                            right: Box::new(Expression::Literal(
+                                                Literal::Undefined,
+                                            )),
                                         }),
                                         then_expr: def.clone(),
                                         else_expr: Box::new(Expression::Identifier(val_var)),
                                     };
                                     self.desugar_assignment_destructuring(
-                                        &Expression::Index { object: object.clone(), index: index.clone() },
+                                        &Expression::Index {
+                                            object: object.clone(),
+                                            index: index.clone(),
+                                        },
                                         cond_expr,
                                         out,
                                     );
@@ -1176,16 +1222,14 @@ impl<'a> Parser<'a> {
                                         condition: Box::new(Expression::Binary {
                                             op: BinaryOp::StrictEq,
                                             left: Box::new(Expression::Identifier(val_var.clone())),
-                                            right: Box::new(Expression::Literal(Literal::Undefined)),
+                                            right: Box::new(Expression::Literal(
+                                                Literal::Undefined,
+                                            )),
                                         }),
                                         then_expr: def.clone(),
                                         else_expr: Box::new(Expression::Identifier(val_var)),
                                     };
-                                    self.desugar_assignment_destructuring(
-                                        pattern,
-                                        cond_expr,
-                                        out,
-                                    );
+                                    self.desugar_assignment_destructuring(pattern, cond_expr, out);
                                 }
                                 _ => {
                                     self.desugar_assignment_destructuring(value, prop_rhs, out);

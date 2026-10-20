@@ -1,8 +1,8 @@
 //! `Intl.ListFormat` implementation.
 
-use super::*;
-use super::setup_prototype_and_constructor;
 use super::locale::canonicalize_locale_list;
+use super::setup_prototype_and_constructor;
+use super::*;
 
 pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
     let lf_proto = vm.alloc_object();
@@ -39,7 +39,9 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
     let lf_format_fn = vm.alloc_native_function("format", 1, |vm, this, args| {
         let list_val = args.first().copied().unwrap_or(JsValue::undefined());
         if !list_val.is_object() {
-            return Err(VmError::TypeError("Intl.ListFormat.prototype.format requires an iterable".into()));
+            return Err(VmError::TypeError(
+                "Intl.ListFormat.prototype.format requires an iterable".into(),
+            ));
         }
         let len_val = vm.get_property(list_val, "length");
         let len = len_val.as_int32().unwrap_or(0).max(0) as usize;
@@ -70,7 +72,9 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
     let lf_format_to_parts_fn = vm.alloc_native_function("formatToParts", 1, |vm, this, args| {
         let list_val = args.first().copied().unwrap_or(JsValue::undefined());
         if !list_val.is_object() {
-            return Err(VmError::TypeError("Intl.ListFormat.prototype.formatToParts requires an iterable".into()));
+            return Err(VmError::TypeError(
+                "Intl.ListFormat.prototype.formatToParts requires an iterable".into(),
+            ));
         }
         let len_val = vm.get_property(list_val, "length");
         let len = len_val.as_int32().unwrap_or(0).max(0) as usize;
@@ -86,7 +90,7 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
 
         let mut parts = Vec::new();
         match strings.len() {
-            0 => {},
+            0 => {}
             1 => {
                 let obj = vm.alloc_object();
                 let type_val = vm.alloc_string("element".to_string());
@@ -94,7 +98,7 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
                 let val_val = vm.alloc_string(strings[0].clone());
                 vm.set_property(obj, "value", val_val);
                 parts.push(obj);
-            },
+            }
             2 => {
                 let obj1 = vm.alloc_object();
                 let type_val1 = vm.alloc_string("element".to_string());
@@ -116,7 +120,7 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
                 let val_val2 = vm.alloc_string(strings[1].clone());
                 vm.set_property(obj2, "value", val_val2);
                 parts.push(obj2);
-            },
+            }
             _ => {
                 for (i, s) in strings.iter().enumerate() {
                     let obj = vm.alloc_object();
@@ -168,15 +172,22 @@ pub(super) fn register_list_format(vm: &mut Vm, intl_obj: JsValue) {
     vm.set_property(lf_proto, "resolvedOptions", lf_resolved_opts);
     vm.set_property_non_enumerable(lf_proto, "resolvedOptions".to_string());
 
-    let supported_locales_fn5 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
-        let loc = args.first().copied().unwrap_or(JsValue::undefined());
-        let canons = canonicalize_locale_list(vm, loc)?;
-        let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
-        Ok(vm.alloc_array(items))
-    });
+    let supported_locales_fn5 =
+        vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
+            let loc = args.first().copied().unwrap_or(JsValue::undefined());
+            let canons = canonicalize_locale_list(vm, loc)?;
+            let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
+            Ok(vm.alloc_array(items))
+        });
     vm.set_property(lf_ctor, "supportedLocalesOf", supported_locales_fn5);
     vm.set_property_non_enumerable(lf_ctor, "supportedLocalesOf".to_string());
 
-    setup_prototype_and_constructor(vm, lf_ctor, lf_proto, "Intl.ListFormat", "ListFormat", intl_obj);
-
+    setup_prototype_and_constructor(
+        vm,
+        lf_ctor,
+        lf_proto,
+        "Intl.ListFormat",
+        "ListFormat",
+        intl_obj,
+    );
 }

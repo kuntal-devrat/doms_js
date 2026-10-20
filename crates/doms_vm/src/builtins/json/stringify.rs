@@ -120,7 +120,12 @@ pub(super) fn json_stringify_walk(
     }
 
     // 10. If Type(value) is BigInt, throw a TypeError exception.
-    if value.is_bigint() || (value.is_object() && value.as_object_ptr().is_some_and(|p| matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::BigIntObject(_)))) {
+    if value.is_bigint()
+        || (value.is_object()
+            && value.as_object_ptr().is_some_and(|p| {
+                matches!(unsafe { &(*(p as *mut JsObject)).kind }, ObjectKind::BigIntObject(_))
+            }))
+    {
         vm.temp_roots.truncate(prev_temp);
         return Err(VmError::TypeError("Do not know how to serialize a BigInt".into()));
     }
@@ -144,7 +149,8 @@ pub(super) fn json_stringify_walk(
             let len_val = vm.get_property_result(value, "length")?;
             let len = vm.to_number_value(len_val).unwrap_or(0.0).max(0.0) as usize;
             let mut items = Vec::with_capacity(len.min(1000));
-            let next_indent = if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
+            let next_indent =
+                if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
             for i in 0..len {
                 let cur_value = vm.temp_roots[prev_temp + 1];
                 let s = json_stringify_walk(
@@ -191,7 +197,8 @@ pub(super) fn json_stringify_walk(
             };
 
             let mut pairs = Vec::new();
-            let next_indent = if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
+            let next_indent =
+                if !gap.is_empty() { format!("{}{}", indent, gap) } else { String::new() };
             for k in keys {
                 let cur_value = vm.temp_roots[prev_temp + 1];
                 let s_opt = json_stringify_walk(

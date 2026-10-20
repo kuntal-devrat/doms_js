@@ -77,16 +77,15 @@ impl Nursery {
                 live_bytes += sz;
                 live_count += 1;
                 if let Some(off) = current_free_offset.take() {
-                    self.free_chunks.push(FreeChunk {
-                        offset: off,
-                        size: current_free_size,
-                    });
+                    self.free_chunks.push(FreeChunk { offset: off, size: current_free_size });
                     current_free_size = 0;
                 }
             } else {
                 header.set_free();
                 let payload = unsafe { scan.add(HEADER_SIZE) };
-                unsafe { ptr::write_bytes(payload, 0, sz - HEADER_SIZE); }
+                unsafe {
+                    ptr::write_bytes(payload, 0, sz - HEADER_SIZE);
+                }
                 if current_free_offset.is_none() {
                     current_free_offset = Some(offset);
                 }
@@ -96,10 +95,7 @@ impl Nursery {
         }
 
         if let Some(off) = current_free_offset {
-            self.free_chunks.push(FreeChunk {
-                offset: off,
-                size: current_free_size,
-            });
+            self.free_chunks.push(FreeChunk { offset: off, size: current_free_size });
         }
 
         if live_count == 0 {

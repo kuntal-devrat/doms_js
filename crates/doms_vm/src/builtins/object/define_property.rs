@@ -1,13 +1,17 @@
 //! `Object.defineProperty`.
 
-use super::*;
 use super::descriptor::get_own_property_descriptor_internal;
+use super::*;
 
 pub(super) fn register_define_property(vm: &mut Vm) -> JsValue {
     vm.alloc_native_function("defineProperty", 3, |vm, _this, args| {
         let target = match args.first() {
             Some(t) if t.is_js_object() => *t,
-            _ => return Err(VmError::TypeError("Object.defineProperty called on non-object".into())),
+            _ => {
+                return Err(VmError::TypeError(
+                    "Object.defineProperty called on non-object".into(),
+                ));
+            }
         };
         let prop_key = match args.get(1) {
             Some(p) => vm.to_property_key(*p)?,
@@ -30,16 +34,20 @@ pub fn define_property_internal(
 ) -> Result<JsValue, VmError> {
     // 1. ToPropertyDescriptor(desc) per ECMAScript 6.2.6.5
     let has_enum = vm.has_property(desc, "enumerable")?;
-    let enum_val = if has_enum { vm.get_property_result(desc, "enumerable")?.is_truthy() } else { false };
+    let enum_val =
+        if has_enum { vm.get_property_result(desc, "enumerable")?.is_truthy() } else { false };
 
     let has_conf = vm.has_property(desc, "configurable")?;
-    let conf_val = if has_conf { vm.get_property_result(desc, "configurable")?.is_truthy() } else { false };
+    let conf_val =
+        if has_conf { vm.get_property_result(desc, "configurable")?.is_truthy() } else { false };
 
     let has_val = vm.has_property(desc, "value")?;
-    let val_val = if has_val { vm.get_property_result(desc, "value")? } else { JsValue::undefined() };
+    let val_val =
+        if has_val { vm.get_property_result(desc, "value")? } else { JsValue::undefined() };
 
     let has_writ = vm.has_property(desc, "writable")?;
-    let writ_val = if has_writ { vm.get_property_result(desc, "writable")?.is_truthy() } else { false };
+    let writ_val =
+        if has_writ { vm.get_property_result(desc, "writable")?.is_truthy() } else { false };
 
     let has_get = vm.has_property(desc, "get")?;
     let get_val = if has_get { vm.get_property_result(desc, "get")? } else { JsValue::undefined() };
@@ -73,7 +81,9 @@ pub fn define_property_internal(
         if success {
             return Ok(target);
         } else {
-            return Err(VmError::TypeError("Cannot redefine property on module namespace object".into()));
+            return Err(VmError::TypeError(
+                "Cannot redefine property on module namespace object".into(),
+            ));
         }
     }
 
@@ -91,13 +101,19 @@ pub fn define_property_internal(
             if let PropertyKeyVal::String(s) = &prop_key {
                 if s == "length" {
                     if has_get || has_set {
-                        return Err(VmError::TypeError("Cannot make array length an accessor".into()));
+                        return Err(VmError::TypeError(
+                            "Cannot make array length an accessor".into(),
+                        ));
                     }
                     if has_conf && vm.get_property(desc, "configurable").is_truthy() {
-                        return Err(VmError::TypeError("Cannot make array length configurable".into()));
+                        return Err(VmError::TypeError(
+                            "Cannot make array length configurable".into(),
+                        ));
                     }
                     if has_enum && vm.get_property(desc, "enumerable").is_truthy() {
-                        return Err(VmError::TypeError("Cannot make array length enumerable".into()));
+                        return Err(VmError::TypeError(
+                            "Cannot make array length enumerable".into(),
+                        ));
                     }
                     if has_val {
                         let val = vm.get_property(desc, "value");
@@ -107,7 +123,9 @@ pub fn define_property_internal(
                             return Err(VmError::RangeError("Invalid array length".into()));
                         }
                         if !is_length_writable {
-                            return Err(VmError::TypeError("Cannot change length of array with non-writable length".into()));
+                            return Err(VmError::TypeError(
+                                "Cannot change length of array with non-writable length".into(),
+                            ));
                         }
                         let new_len = u32_len as usize;
                         let mut non_conf_conflict: Option<usize> = None;
@@ -117,7 +135,11 @@ pub fn define_property_internal(
                                 if new_len < 100_000 {
                                     elements.resize(new_len, JsValue::hole());
                                 } else {
-                                    vm.set_own_property(target, "length", JsValue::from_double(num));
+                                    vm.set_own_property(
+                                        target,
+                                        "length",
+                                        JsValue::from_double(num),
+                                    );
                                 }
                             } else {
                                 for i in (new_len..old_len).rev() {
@@ -137,7 +159,9 @@ pub fn define_property_internal(
                             if has_writ && !vm.get_property(desc, "writable").is_truthy() {
                                 obj.set_array_length_non_writable();
                             }
-                            return Err(VmError::TypeError("Cannot delete non-configurable array element".into()));
+                            return Err(VmError::TypeError(
+                                "Cannot delete non-configurable array element".into(),
+                            ));
                         }
                     }
                     if has_writ {
@@ -145,7 +169,9 @@ pub fn define_property_internal(
                         if !w {
                             obj.set_array_length_non_writable();
                         } else if !is_length_writable {
-                            return Err(VmError::TypeError("Cannot make non-writable length writable".into()));
+                            return Err(VmError::TypeError(
+                                "Cannot make non-writable length writable".into(),
+                            ));
                         }
                     }
                     return Ok(target);
@@ -158,7 +184,9 @@ pub fn define_property_internal(
                             0
                         };
                         if idx >= old_len && !is_length_writable {
-                            return Err(VmError::TypeError("Cannot add property to array with non-writable length".into()));
+                            return Err(VmError::TypeError(
+                                "Cannot add property to array with non-writable length".into(),
+                            ));
                         }
                     }
                 }
@@ -171,7 +199,10 @@ pub fn define_property_internal(
 
     if !current_exists {
         if !vm.is_extensible_object(target) {
-            return Err(VmError::TypeError(format!("Cannot define property {}, object is not extensible", key_name)));
+            return Err(VmError::TypeError(format!(
+                "Cannot define property {}, object is not extensible",
+                key_name
+            )));
         }
     } else {
         let curr_conf = vm.get_property(current, "configurable").is_truthy();
@@ -181,27 +212,38 @@ pub fn define_property_internal(
 
         if !curr_conf {
             if has_conf && vm.get_property(desc, "configurable").is_truthy() {
-                return Err(VmError::TypeError("Cannot redefine property: configurable is false".into()));
+                return Err(VmError::TypeError(
+                    "Cannot redefine property: configurable is false".into(),
+                ));
             }
             if has_enum && vm.get_property(desc, "enumerable").is_truthy() != curr_enum {
-                return Err(VmError::TypeError("Cannot redefine enumerable on non-configurable property".into()));
+                return Err(VmError::TypeError(
+                    "Cannot redefine enumerable on non-configurable property".into(),
+                ));
             }
             let is_accessor_desc = has_get || has_set;
             let is_data_desc = has_val || has_writ;
             if (is_accessor_desc && !curr_is_accessor) || (is_data_desc && curr_is_accessor) {
-                return Err(VmError::TypeError("Cannot switch between data and accessor property on non-configurable property".into()));
+                return Err(VmError::TypeError(
+                    "Cannot switch between data and accessor property on non-configurable property"
+                        .into(),
+                ));
             }
             if curr_is_accessor {
                 if has_get {
                     let curr_get = vm.get_property(current, "get");
                     if !vm.same_value(get_val, curr_get) {
-                        return Err(VmError::TypeError("Cannot change getter on non-configurable property".into()));
+                        return Err(VmError::TypeError(
+                            "Cannot change getter on non-configurable property".into(),
+                        ));
                     }
                 }
                 if has_set {
                     let curr_set = vm.get_property(current, "set");
                     if !vm.same_value(set_val, curr_set) {
-                        return Err(VmError::TypeError("Cannot change setter on non-configurable property".into()));
+                        return Err(VmError::TypeError(
+                            "Cannot change setter on non-configurable property".into(),
+                        ));
                     }
                 }
             } else {
@@ -214,7 +256,10 @@ pub fn define_property_internal(
                         let new_val = vm.get_property(desc, "value");
                         let curr_val = vm.get_property(current, "value");
                         if !vm.same_value(new_val, curr_val) {
-                            return Err(VmError::TypeError("Cannot change value of non-writable non-configurable property".into()));
+                            return Err(VmError::TypeError(
+                                "Cannot change value of non-writable non-configurable property"
+                                    .into(),
+                            ));
                         }
                     }
                 }
@@ -222,7 +267,13 @@ pub fn define_property_internal(
         }
     }
 
-    let is_accessor = has_get || has_set || (current_exists && (vm.has_property(current, "get").unwrap_or(false) || vm.has_property(current, "set").unwrap_or(false)) && !has_val && !has_writ);
+    let is_accessor = has_get
+        || has_set
+        || (current_exists
+            && (vm.has_property(current, "get").unwrap_or(false)
+                || vm.has_property(current, "set").unwrap_or(false))
+            && !has_val
+            && !has_writ);
 
     match &prop_key {
         PropertyKeyVal::Symbol(sym) => {
@@ -233,7 +284,9 @@ pub fn define_property_internal(
                     if let Some(syms) = &mut obj.symbol_properties {
                         syms.remove(&sym);
                     }
-                    let accs = obj.symbol_accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+                    let accs = obj
+                        .symbol_accessors
+                        .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
                     let entry = accs.entry(sym).or_insert_with(Accessor::default);
                     if has_get {
                         entry.getter = if get_val.is_undefined() { None } else { Some(get_val) };
@@ -241,8 +294,16 @@ pub fn define_property_internal(
                     if has_set {
                         entry.setter = if set_val.is_undefined() { None } else { Some(set_val) };
                     }
-                    if has_enum { entry.enumerable = enum_val; } else if !current_exists { entry.enumerable = false; }
-                    if has_conf { entry.configurable = conf_val; } else if !current_exists { entry.configurable = false; }
+                    if has_enum {
+                        entry.enumerable = enum_val;
+                    } else if !current_exists {
+                        entry.enumerable = false;
+                    }
+                    if has_conf {
+                        entry.configurable = conf_val;
+                    } else if !current_exists {
+                        entry.configurable = false;
+                    }
                     let order = obj.symbol_order.get_or_insert_with(Vec::new);
                     if !order.contains(&sym) {
                         order.push(sym);
@@ -250,25 +311,54 @@ pub fn define_property_internal(
                 }
             } else {
                 if has_val || !current_exists {
-                    let val = if has_val { vm.get_property(desc, "value") } else { JsValue::undefined() };
+                    let val =
+                        if has_val { vm.get_property(desc, "value") } else { JsValue::undefined() };
                     if let Some(ptr) = target.as_object_ptr() {
                         let obj = unsafe { &mut *(ptr as *mut JsObject) };
                         if let Some(accs) = &mut obj.symbol_accessors {
                             accs.remove(&sym);
                         }
                         obj.insert_symbol_property(sym, val);
-                        let curr_attrs = obj.symbol_attributes.as_ref().and_then(|m| m.get(&sym)).copied().unwrap_or(PropertyAttributes::DEFAULT);
+                        let curr_attrs = obj
+                            .symbol_attributes
+                            .as_ref()
+                            .and_then(|m| m.get(&sym))
+                            .copied()
+                            .unwrap_or(PropertyAttributes::DEFAULT);
                         let attrs = PropertyAttributes {
-                            writable: if has_writ { writ_val } else if !current_exists { false } else { curr_attrs.writable },
-                            enumerable: if has_enum { enum_val } else if !current_exists { false } else { curr_attrs.enumerable },
-                            configurable: if has_conf { conf_val } else if !current_exists { false } else { curr_attrs.configurable },
+                            writable: if has_writ {
+                                writ_val
+                            } else if !current_exists {
+                                false
+                            } else {
+                                curr_attrs.writable
+                            },
+                            enumerable: if has_enum {
+                                enum_val
+                            } else if !current_exists {
+                                false
+                            } else {
+                                curr_attrs.enumerable
+                            },
+                            configurable: if has_conf {
+                                conf_val
+                            } else if !current_exists {
+                                false
+                            } else {
+                                curr_attrs.configurable
+                            },
                         };
                         obj.set_symbol_attributes(sym, attrs);
                     }
                 } else if has_writ || has_enum || has_conf {
                     if let Some(ptr) = target.as_object_ptr() {
                         let obj = unsafe { &mut *(ptr as *mut JsObject) };
-                        let curr_attrs = obj.symbol_attributes.as_ref().and_then(|m| m.get(&sym)).copied().unwrap_or(PropertyAttributes::DEFAULT);
+                        let curr_attrs = obj
+                            .symbol_attributes
+                            .as_ref()
+                            .and_then(|m| m.get(&sym))
+                            .copied()
+                            .unwrap_or(PropertyAttributes::DEFAULT);
                         let attrs = PropertyAttributes {
                             writable: if has_writ { writ_val } else { curr_attrs.writable },
                             enumerable: if has_enum { enum_val } else { curr_attrs.enumerable },
@@ -296,7 +386,9 @@ pub fn define_property_internal(
                     let obj = unsafe { &mut *(ptr as *mut JsObject) };
                     let new_shape_id = vm.shapes.remove_property(obj.shape_id, prop_name);
                     obj.shape_id = new_shape_id;
-                    let accs = obj.accessors.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+                    let accs = obj
+                        .accessors
+                        .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
                     let entry = accs.entry(prop_name.clone()).or_insert_with(Accessor::default);
                     if has_get {
                         entry.getter = if get_val.is_undefined() { None } else { Some(get_val) };
@@ -304,8 +396,16 @@ pub fn define_property_internal(
                     if has_set {
                         entry.setter = if set_val.is_undefined() { None } else { Some(set_val) };
                     }
-                    if has_enum { entry.enumerable = enum_val; } else if !current_exists { entry.enumerable = false; }
-                    if has_conf { entry.configurable = conf_val; } else if !current_exists { entry.configurable = false; }
+                    if has_enum {
+                        entry.enumerable = enum_val;
+                    } else if !current_exists {
+                        entry.enumerable = false;
+                    }
+                    if has_conf {
+                        entry.configurable = conf_val;
+                    } else if !current_exists {
+                        entry.configurable = false;
+                    }
                     let order = obj.accessor_order.get_or_insert_with(Vec::new);
                     if !order.contains(prop_name) {
                         order.push(prop_name.clone());
@@ -319,9 +419,27 @@ pub fn define_property_internal(
                     None
                 };
                 let attrs = crate::shape::PropertyAttributes {
-                    writable: if has_writ { writ_val } else if let Some(ref info) = current_info { info.attributes.writable } else { false },
-                    enumerable: if has_enum { enum_val } else if let Some(ref info) = current_info { info.attributes.enumerable } else { false },
-                    configurable: if has_conf { conf_val } else if let Some(ref info) = current_info { info.attributes.configurable } else { false },
+                    writable: if has_writ {
+                        writ_val
+                    } else if let Some(ref info) = current_info {
+                        info.attributes.writable
+                    } else {
+                        false
+                    },
+                    enumerable: if has_enum {
+                        enum_val
+                    } else if let Some(ref info) = current_info {
+                        info.attributes.enumerable
+                    } else {
+                        false
+                    },
+                    configurable: if has_conf {
+                        conf_val
+                    } else if let Some(ref info) = current_info {
+                        info.attributes.configurable
+                    } else {
+                        false
+                    },
                 };
                 let val = if has_val {
                     val_val
@@ -366,7 +484,11 @@ pub fn define_property_internal(
                                     if idx < 100_000 {
                                         elements.resize(idx + 1, JsValue::hole());
                                     } else {
-                                        vm.set_own_property(target, "length", JsValue::from_double((idx as f64) + 1.0));
+                                        vm.set_own_property(
+                                            target,
+                                            "length",
+                                            JsValue::from_double((idx as f64) + 1.0),
+                                        );
                                     }
                                 }
                                 if idx < elements.len() {
@@ -376,11 +498,13 @@ pub fn define_property_internal(
                         }
                     }
                     if let Some(offset) = vm.shapes.lookup_offset(obj.shape_id, prop_name) {
-                        let new_shape_id = vm.shapes.transition_redefine(obj.shape_id, prop_name, attrs);
+                        let new_shape_id =
+                            vm.shapes.transition_redefine(obj.shape_id, prop_name, attrs);
                         obj.shape_id = new_shape_id;
                         obj.set_slot(offset, val);
                     } else {
-                        let (new_shape_id, offset) = vm.shapes.transition_with_attributes(obj.shape_id, prop_name, attrs);
+                        let (new_shape_id, offset) =
+                            vm.shapes.transition_with_attributes(obj.shape_id, prop_name, attrs);
                         obj.shape_id = new_shape_id;
                         obj.set_slot(offset, val);
                         obj.add_prop_order(prop_name.clone());
@@ -413,7 +537,11 @@ pub fn define_property_internal(
                             if idx < 100_000 {
                                 elements.resize(idx + 1, JsValue::hole());
                             } else {
-                                vm.set_own_property(target, "length", JsValue::from_double((idx as f64) + 1.0));
+                                vm.set_own_property(
+                                    target,
+                                    "length",
+                                    JsValue::from_double((idx as f64) + 1.0),
+                                );
                             }
                         }
                     }

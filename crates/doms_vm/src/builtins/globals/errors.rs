@@ -30,7 +30,16 @@ pub(super) fn register_error_types(vm: &mut Vm) {
         }
     });
 
-    let error_types = ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
+    let error_types = [
+        "Error",
+        "TypeError",
+        "RangeError",
+        "ReferenceError",
+        "SyntaxError",
+        "URIError",
+        "EvalError",
+        "AggregateError",
+    ];
     let mut error_proto = JsValue::undefined();
     let mut error_ctor = JsValue::undefined();
     for err_type in error_types {
@@ -55,83 +64,99 @@ pub(super) fn register_error_types(vm: &mut Vm) {
 
         let err_name_c = err_name.clone();
         let length = if err_type == "AggregateError" { 2 } else { 1 };
-        let ctor = vm.alloc_closure_native_function(err_type, length, Arc::new(move |vm, _this, args| {
-            let (msg_arg, opts_arg) = if err_name_c == "AggregateError" {
-                (args.get(1).copied(), args.get(2).copied())
-            } else {
-                (args.first().copied(), args.get(1).copied())
-            };
-            let msg = if let Some(arg) = msg_arg {
-                if !arg.is_undefined() {
-                    if arg.is_symbol() {
-                        return Err(VmError::TypeError("Cannot convert a Symbol value to a string".into()));
+        let ctor = vm.alloc_closure_native_function(
+            err_type,
+            length,
+            Arc::new(move |vm, _this, args| {
+                let (msg_arg, opts_arg) = if err_name_c == "AggregateError" {
+                    (args.get(1).copied(), args.get(2).copied())
+                } else {
+                    (args.first().copied(), args.get(1).copied())
+                };
+                let msg = if let Some(arg) = msg_arg {
+                    if !arg.is_undefined() {
+                        if arg.is_symbol() {
+                            return Err(VmError::TypeError(
+                                "Cannot convert a Symbol value to a string".into(),
+                            ));
+                        }
+                        let prim =
+                            vm.to_primitive(arg, crate::interpreter::PreferredType::String)?;
+                        if prim.is_symbol() {
+                            return Err(VmError::TypeError(
+                                "Cannot convert a Symbol value to a string".into(),
+                            ));
+                        }
+                        Some(vm.to_string_value(prim))
+                    } else {
+                        None
                     }
-                    let prim = vm.to_primitive(arg, crate::interpreter::PreferredType::String)?;
-                    if prim.is_symbol() {
-                        return Err(VmError::TypeError("Cannot convert a Symbol value to a string".into()));
-                    }
-                    Some(vm.to_string_value(prim))
                 } else {
                     None
-                }
-            } else {
-                None
-            };
-            let err_val = vm.alloc_error_opt(err_name_c.clone(), msg);
-            if err_name_c == "AggregateError" {
-                let mut elements = Vec::new();
-                if let Some(errs_arg) = args.first().copied() {
-                    if let Some(ptr) = errs_arg.as_object_ptr() {
-                        let obj = unsafe { &*(ptr as *mut JsObject) };
-                        if let ObjectKind::Array(arr) = &obj.kind {
-                            elements = arr.clone();
-                        } else {
-                            // Try iterating via Symbol.iterator
-                            let iter_res = (|| -> Result<Vec<JsValue>, VmError> {
-                                let sym_iter = vm.symbol_iterator.ok_or_else(|| VmError::TypeError("No Symbol.iterator".into()))?;
-                                let method = vm.get_symbol_property_result(errs_arg, sym_iter)?;
-                                if !vm.is_callable(method) {
-                                    return Err(VmError::TypeError("Symbol.iterator is not callable".into()));
-                                }
-                                let it = vm.call(method, errs_arg, &[])?;
-                                let next_fn = vm.get_property(it, "next");
-                                let mut res = Vec::new();
-                                loop {
-                                    let step = vm.call(next_fn, it, &[])?;
-                                    let done = vm.get_property(step, "done");
-                                    if done.is_truthy() {
-                                        break;
+                };
+                let err_val = vm.alloc_error_opt(err_name_c.clone(), msg);
+                if err_name_c == "AggregateError" {
+                    let mut elements = Vec::new();
+                    if let Some(errs_arg) = args.first().copied() {
+                        if let Some(ptr) = errs_arg.as_object_ptr() {
+                            let obj = unsafe { &*(ptr as *mut JsObject) };
+                            if let ObjectKind::Array(arr) = &obj.kind {
+                                elements = arr.clone();
+                            } else {
+                                // Try iterating via Symbol.iterator
+                                let iter_res = (|| -> Result<Vec<JsValue>, VmError> {
+                                    let sym_iter = vm.symbol_iterator.ok_or_else(|| {
+                                        VmError::TypeError("No Symbol.iterator".into())
+                                    })?;
+                                    let method =
+                                        vm.get_symbol_property_result(errs_arg, sym_iter)?;
+                                    if !vm.is_callable(method) {
+                                        return Err(VmError::TypeError(
+                                            "Symbol.iterator is not callable".into(),
+                                        ));
                                     }
-                                    let val = vm.get_property(step, "value");
-                                    res.push(val);
+                                    let it = vm.call(method, errs_arg, &[])?;
+                                    let next_fn = vm.get_property(it, "next");
+                                    let mut res = Vec::new();
+                                    loop {
+                                        let step = vm.call(next_fn, it, &[])?;
+                                        let done = vm.get_property(step, "done");
+                                        if done.is_truthy() {
+                                            break;
+                                        }
+                                        let val = vm.get_property(step, "value");
+                                        res.push(val);
+                                    }
+                                    Ok(res)
+                                })();
+                                match iter_res {
+                                    Ok(items) => elements = items,
+                                    Err(e) => return Err(e),
                                 }
-                                Ok(res)
-                            })();
-                            match iter_res {
-                                Ok(items) => elements = items,
-                                Err(e) => return Err(e),
                             }
+                        } else {
+                            return Err(VmError::TypeError(
+                                "AggregateError errors argument is not iterable".into(),
+                            ));
                         }
-                    } else {
-                        return Err(VmError::TypeError("AggregateError errors argument is not iterable".into()));
+                    }
+                    let errors_arr = vm.alloc_array(elements);
+                    vm.set_property(err_val, "errors", errors_arr);
+                    vm.set_property_non_enumerable(err_val, "errors".to_string());
+                }
+                if let Some(opts) = opts_arg {
+                    if opts.is_object() {
+                        let has_cause = vm.has_property(opts, "cause")?;
+                        if has_cause {
+                            let cause = vm.get_property_result(opts, "cause")?;
+                            vm.set_property(err_val, "cause", cause);
+                            vm.set_property_non_enumerable(err_val, "cause".to_string());
+                        }
                     }
                 }
-                let errors_arr = vm.alloc_array(elements);
-                vm.set_property(err_val, "errors", errors_arr);
-                vm.set_property_non_enumerable(err_val, "errors".to_string());
-            }
-            if let Some(opts) = opts_arg {
-                if opts.is_object() {
-                    let has_cause = vm.has_property(opts, "cause")?;
-                    if has_cause {
-                        let cause = vm.get_property_result(opts, "cause")?;
-                        vm.set_property(err_val, "cause", cause);
-                        vm.set_property_non_enumerable(err_val, "cause".to_string());
-                    }
-                }
-            }
-            Ok(err_val)
-        }));
+                Ok(err_val)
+            }),
+        );
 
         if err_type == "Error" {
             error_ctor = ctor;

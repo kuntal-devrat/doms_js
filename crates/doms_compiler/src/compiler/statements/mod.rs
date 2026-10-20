@@ -12,7 +12,11 @@ mod exceptions;
 mod loops;
 
 impl Compiler {
-    pub(crate) fn compile_statement(&mut self, stmt: &Statement, is_last: bool) -> Result<(), CompileError> {
+    pub(crate) fn compile_statement(
+        &mut self,
+        stmt: &Statement,
+        is_last: bool,
+    ) -> Result<(), CompileError> {
         match stmt {
             Statement::Expression(expr) => {
                 if !self.is_in_function && !self.internal_statements {
@@ -68,7 +72,9 @@ impl Compiler {
             Statement::Return(opt_expr) => {
                 let ret_slot = if let Some(expr) = opt_expr {
                     self.compile_expression(expr)?;
-                    let slot = self.symbols.define_local(format!("@ret_{}", self.chunk.instructions.len()));
+                    let slot = self
+                        .symbols
+                        .define_local(format!("@ret_{}", self.chunk.instructions.len()));
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                     Some(slot)
@@ -115,16 +121,24 @@ impl Compiler {
                 self.chunk.emit(OpCode::Return, 0);
             }
             Statement::FunctionDecl { name, params, body } => {
-                let def = Self::compile_function(Some(name.clone()), params.clone(), body, self.is_strict)?;
+                let def = Self::compile_function(
+                    Some(name.clone()),
+                    params.clone(),
+                    body,
+                    self.is_strict,
+                )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
-                if (self.is_in_function && self.symbols.scope_depth > 0) || self.symbols.scope_depth > 1 {
-                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(name) {
-                        local.is_declared = true;
-                        local.slot
-                    } else {
-                        self.symbols.define_local(name.clone())
-                    };
+                if (self.is_in_function && self.symbols.scope_depth > 0)
+                    || self.symbols.scope_depth > 1
+                {
+                    let slot =
+                        if let Some(local) = self.symbols.get_local_in_current_scope_mut(name) {
+                            local.is_declared = true;
+                            local.slot
+                        } else {
+                            self.symbols.define_local(name.clone())
+                        };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 } else {
@@ -134,16 +148,24 @@ impl Compiler {
                 }
             }
             Statement::AsyncFunctionDecl { name, params, body } => {
-                let def = Self::compile_function(Some(name.clone()), params.clone(), body, self.is_strict)?;
+                let def = Self::compile_function(
+                    Some(name.clone()),
+                    params.clone(),
+                    body,
+                    self.is_strict,
+                )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateAsyncFunction(const_idx), 0);
-                if (self.is_in_function && self.symbols.scope_depth > 0) || self.symbols.scope_depth > 1 {
-                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(name) {
-                        local.is_declared = true;
-                        local.slot
-                    } else {
-                        self.symbols.define_local(name.clone())
-                    };
+                if (self.is_in_function && self.symbols.scope_depth > 0)
+                    || self.symbols.scope_depth > 1
+                {
+                    let slot =
+                        if let Some(local) = self.symbols.get_local_in_current_scope_mut(name) {
+                            local.is_declared = true;
+                            local.slot
+                        } else {
+                            self.symbols.define_local(name.clone())
+                        };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 } else {
@@ -153,16 +175,27 @@ impl Compiler {
                 }
             }
             Statement::GeneratorDecl { name, params, body } => {
-                let def = Self::compile_function_full(Some(name.clone()), params.clone(), body, self.is_strict, true, false, false)?;
+                let def = Self::compile_function_full(
+                    Some(name.clone()),
+                    params.clone(),
+                    body,
+                    self.is_strict,
+                    true,
+                    false,
+                    false,
+                )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateGenerator(const_idx), 0);
-                if (self.is_in_function && self.symbols.scope_depth > 0) || self.symbols.scope_depth > 1 {
-                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(name) {
-                        local.is_declared = true;
-                        local.slot
-                    } else {
-                        self.symbols.define_local(name.clone())
-                    };
+                if (self.is_in_function && self.symbols.scope_depth > 0)
+                    || self.symbols.scope_depth > 1
+                {
+                    let slot =
+                        if let Some(local) = self.symbols.get_local_in_current_scope_mut(name) {
+                            local.is_declared = true;
+                            local.slot
+                        } else {
+                            self.symbols.define_local(name.clone())
+                        };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 } else {
@@ -172,16 +205,27 @@ impl Compiler {
                 }
             }
             Statement::AsyncGeneratorDecl { name, params, body } => {
-                let def = Self::compile_function_full(Some(name.clone()), params.clone(), body, self.is_strict, true, false, false)?;
+                let def = Self::compile_function_full(
+                    Some(name.clone()),
+                    params.clone(),
+                    body,
+                    self.is_strict,
+                    true,
+                    false,
+                    false,
+                )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateAsyncGenerator(const_idx), 0);
-                if (self.is_in_function && self.symbols.scope_depth > 0) || self.symbols.scope_depth > 1 {
-                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(name) {
-                        local.is_declared = true;
-                        local.slot
-                    } else {
-                        self.symbols.define_local(name.clone())
-                    };
+                if (self.is_in_function && self.symbols.scope_depth > 0)
+                    || self.symbols.scope_depth > 1
+                {
+                    let slot =
+                        if let Some(local) = self.symbols.get_local_in_current_scope_mut(name) {
+                            local.is_declared = true;
+                            local.slot
+                        } else {
+                            self.symbols.define_local(name.clone())
+                        };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 } else {
@@ -193,14 +237,7 @@ impl Compiler {
             Statement::Import { specifiers, source, .. } => {
                 self.compile_import(specifiers, source)?;
             }
-            Statement::Export {
-                decl,
-                is_default,
-                specifiers,
-                source,
-                is_all,
-                all_as,
-            } => {
+            Statement::Export { decl, is_default, specifiers, source, is_all, all_as } => {
                 self.compile_export(decl, *is_default, specifiers, source, *is_all, all_as)?;
             }
             Statement::ClassDecl(class_def) => {

@@ -21,9 +21,7 @@ static FUTEX_TABLE: Mutex<Option<HashMap<usize, Arc<(Mutex<usize>, Condvar)>>>> 
 fn get_futex(slot: usize) -> Arc<(Mutex<usize>, Condvar)> {
     let mut table = FUTEX_TABLE.lock().unwrap();
     let map = table.get_or_insert_with(HashMap::new);
-    map.entry(slot)
-        .or_insert_with(|| Arc::new((Mutex::new(0), Condvar::new())))
-        .clone()
+    map.entry(slot).or_insert_with(|| Arc::new((Mutex::new(0), Condvar::new()))).clone()
 }
 
 pub struct Atomics;
@@ -126,11 +124,7 @@ impl Atomics {
             Some(t) => {
                 let (g, wait_res) = futex.1.wait_timeout(waiters, t).unwrap();
                 waiters = g;
-                if wait_res.timed_out() {
-                    Ok("timed-out")
-                } else {
-                    Ok("ok")
-                }
+                if wait_res.timed_out() { Ok("timed-out") } else { Ok("ok") }
             }
             None => {
                 waiters = futex.1.wait(waiters).unwrap();
@@ -143,7 +137,11 @@ impl Atomics {
     }
 
     /// Wake up to `count` waiting threads on the given index.
-    pub fn notify(sab: &SharedArrayBuffer, index: usize, count: usize) -> Result<usize, AtomicsError> {
+    pub fn notify(
+        sab: &SharedArrayBuffer,
+        index: usize,
+        count: usize,
+    ) -> Result<usize, AtomicsError> {
         let slice = sab.as_atomic_slice();
         if index >= slice.len() {
             return Err(AtomicsError::OutOfBounds(index));

@@ -5,7 +5,6 @@
 //! - High-performance mapping lookup by generated line & column
 //! - Original source symbolication for runtime errors and stack traces
 
-
 /// Decoded mapping from generated file position to original source position.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mapping {
@@ -48,14 +47,7 @@ impl SourceMap {
 
         let mappings = decode_mappings(&mappings_str)?;
 
-        Ok(Self {
-            version,
-            file,
-            sources,
-            sources_content: Vec::new(),
-            names,
-            mappings,
-        })
+        Ok(Self { version, file, sources, sources_content: Vec::new(), names, mappings })
     }
 
     /// Lookup the original source position corresponding to a generated line & column.
@@ -83,12 +75,7 @@ impl SourceMap {
         let source = self.sources.get(src_idx)?.clone();
         let name = m.original_name_index.and_then(|i| self.names.get(i as usize).cloned());
 
-        Some(OriginalPosition {
-            source,
-            line: orig_line,
-            column: orig_col,
-            name,
-        })
+        Some(OriginalPosition { source, line: orig_line, column: orig_col, name })
     }
 
     /// Symbolicate a formatted stack frame string.
@@ -255,7 +242,8 @@ fn extract_string_array(json: &str, field: &str) -> Vec<String> {
                     let inside = &after[1..end_bracket];
                     for item in inside.split(',') {
                         let trimmed = item.trim();
-                        if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+                        if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2
+                        {
                             items.push(trimmed[1..trimmed.len() - 1].to_string());
                         }
                     }

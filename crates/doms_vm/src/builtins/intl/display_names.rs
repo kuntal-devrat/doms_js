@@ -1,8 +1,8 @@
 //! `Intl.DisplayNames` implementation.
 
-use super::*;
-use super::setup_prototype_and_constructor;
 use super::locale::canonicalize_locale_list;
+use super::setup_prototype_and_constructor;
+use super::*;
 
 pub(super) fn register_display_names(vm: &mut Vm, intl_obj: JsValue) {
     let dn_proto = vm.alloc_object();
@@ -26,19 +26,30 @@ pub(super) fn register_display_names(vm: &mut Vm, intl_obj: JsValue) {
             return Err(VmError::TypeError("Intl.DisplayNames requires options.type".into()));
         }
         let type_str = vm.to_string_value(type_val);
-        if !matches!(type_str.as_str(), "language" | "region" | "script" | "currency" | "calendar" | "dateTimeField") {
+        if !matches!(
+            type_str.as_str(),
+            "language" | "region" | "script" | "currency" | "calendar" | "dateTimeField"
+        ) {
             return Err(VmError::RangeError(format!("Invalid DisplayNames type: {}", type_str)));
         }
         let t_val = vm.alloc_string(type_str);
         vm.set_property(this, "_type", t_val);
 
         let style_val = vm.get_property(opt, "style");
-        let style_str = if !style_val.is_undefined() { vm.to_string_value(style_val) } else { "long".to_string() };
+        let style_str = if !style_val.is_undefined() {
+            vm.to_string_value(style_val)
+        } else {
+            "long".to_string()
+        };
         let s_val = vm.alloc_string(style_str);
         vm.set_property(this, "_style", s_val);
 
         let fallback_val = vm.get_property(opt, "fallback");
-        let fallback_str = if !fallback_val.is_undefined() { vm.to_string_value(fallback_val) } else { "code".to_string() };
+        let fallback_str = if !fallback_val.is_undefined() {
+            vm.to_string_value(fallback_val)
+        } else {
+            "code".to_string()
+        };
         let f_val = vm.alloc_string(fallback_str);
         vm.set_property(this, "_fallback", f_val);
 
@@ -48,7 +59,9 @@ pub(super) fn register_display_names(vm: &mut Vm, intl_obj: JsValue) {
     let dn_of_fn = vm.alloc_native_function("of", 1, |vm, this, args| {
         let code_val = args.first().copied().unwrap_or(JsValue::undefined());
         if code_val.is_undefined() {
-            return Err(VmError::TypeError("Intl.DisplayNames.prototype.of requires a code argument".into()));
+            return Err(VmError::TypeError(
+                "Intl.DisplayNames.prototype.of requires a code argument".into(),
+            ));
         }
         let code = vm.to_string_value(code_val);
         let t_prop = vm.get_property(this, "_type");
@@ -139,15 +152,22 @@ pub(super) fn register_display_names(vm: &mut Vm, intl_obj: JsValue) {
     vm.set_property(dn_proto, "resolvedOptions", dn_resolved_opts);
     vm.set_property_non_enumerable(dn_proto, "resolvedOptions".to_string());
 
-    let supported_locales_fn7 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
-        let loc = args.first().copied().unwrap_or(JsValue::undefined());
-        let canons = canonicalize_locale_list(vm, loc)?;
-        let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
-        Ok(vm.alloc_array(items))
-    });
+    let supported_locales_fn7 =
+        vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
+            let loc = args.first().copied().unwrap_or(JsValue::undefined());
+            let canons = canonicalize_locale_list(vm, loc)?;
+            let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
+            Ok(vm.alloc_array(items))
+        });
     vm.set_property(dn_ctor, "supportedLocalesOf", supported_locales_fn7);
     vm.set_property_non_enumerable(dn_ctor, "supportedLocalesOf".to_string());
 
-    setup_prototype_and_constructor(vm, dn_ctor, dn_proto, "Intl.DisplayNames", "DisplayNames", intl_obj);
-
+    setup_prototype_and_constructor(
+        vm,
+        dn_ctor,
+        dn_proto,
+        "Intl.DisplayNames",
+        "DisplayNames",
+        intl_obj,
+    );
 }

@@ -65,7 +65,10 @@ pub(super) fn is_expr_brace_context(prev: &Option<TokenKind>) -> bool {
     }
 }
 
-pub(super) fn can_precede_slash_operator(prev: &Option<TokenKind>, last_rbrace_was_expr: bool) -> bool {
+pub(super) fn can_precede_slash_operator(
+    prev: &Option<TokenKind>,
+    last_rbrace_was_expr: bool,
+) -> bool {
     match prev {
         Some(TokenKind::Ident(_))
         | Some(TokenKind::Number(_))

@@ -1,8 +1,8 @@
 //! `Intl.DateTimeFormat` implementation.
 
-use super::*;
-use super::setup_prototype_and_constructor;
 use super::locale::canonicalize_locale_list;
+use super::setup_prototype_and_constructor;
+use super::*;
 
 pub(super) fn register_date_time_format(vm: &mut Vm, intl_obj: JsValue) {
     let date_format_proto = vm.alloc_object();
@@ -30,7 +30,10 @@ pub(super) fn register_date_time_format(vm: &mut Vm, intl_obj: JsValue) {
     });
 
     let df_format_fn = vm.alloc_native_function("format", 1, |vm, _this, args| {
-        let s = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_else(|| "2026-10-06T00:00:00Z".to_string());
+        let s = args
+            .first()
+            .map(|v| vm.to_string_value(*v))
+            .unwrap_or_else(|| "2026-10-06T00:00:00Z".to_string());
         Ok(vm.alloc_string(s))
     });
     vm.set_property(date_format_proto, "format", df_format_fn);
@@ -52,15 +55,22 @@ pub(super) fn register_date_time_format(vm: &mut Vm, intl_obj: JsValue) {
     vm.set_property(date_format_proto, "resolvedOptions", df_resolved_opts);
     vm.set_property_non_enumerable(date_format_proto, "resolvedOptions".to_string());
 
-    let supported_locales_fn2 = vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
-        let loc = args.first().copied().unwrap_or(JsValue::undefined());
-        let canons = canonicalize_locale_list(vm, loc)?;
-        let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
-        Ok(vm.alloc_array(items))
-    });
+    let supported_locales_fn2 =
+        vm.alloc_native_function("supportedLocalesOf", 1, |vm, _this, args| {
+            let loc = args.first().copied().unwrap_or(JsValue::undefined());
+            let canons = canonicalize_locale_list(vm, loc)?;
+            let items: Vec<JsValue> = canons.into_iter().map(|s| vm.alloc_string(s)).collect();
+            Ok(vm.alloc_array(items))
+        });
     vm.set_property(date_format_ctor, "supportedLocalesOf", supported_locales_fn2);
     vm.set_property_non_enumerable(date_format_ctor, "supportedLocalesOf".to_string());
 
-    setup_prototype_and_constructor(vm, date_format_ctor, date_format_proto, "Intl.DateTimeFormat", "DateTimeFormat", intl_obj);
-
+    setup_prototype_and_constructor(
+        vm,
+        date_format_ctor,
+        date_format_proto,
+        "Intl.DateTimeFormat",
+        "DateTimeFormat",
+        intl_obj,
+    );
 }

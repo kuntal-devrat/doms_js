@@ -12,7 +12,9 @@ impl Vm {
     /// Allocate a `JsObject` directly in OldGen (immovable tenured space for functions/prototypes).
     pub fn allocate_js_object_old_gen(&mut self, obj: JsObject) -> *mut JsObject {
         let payload_size = std::mem::size_of::<JsObject>();
-        if let Some(ptr) = self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+        if let Some(ptr) =
+            self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object)
+        {
             let obj_ptr = ptr as *mut JsObject;
             unsafe {
                 std::ptr::write(obj_ptr, obj);
@@ -28,7 +30,9 @@ impl Vm {
         let payload_size = std::mem::size_of::<JsObject>();
 
         // 1. Try fast bump allocation in the young generation nursery
-        if let Some(ptr) = self.heap.nursery.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+        if let Some(ptr) =
+            self.heap.nursery.allocate(payload_size, doms_gc::header::TypeTag::Object)
+        {
             let obj_ptr = ptr as *mut JsObject;
             unsafe {
                 std::ptr::write(obj_ptr, obj);
@@ -41,7 +45,9 @@ impl Vm {
         self.gc_collect();
 
         // 3. Retry nursery allocation after collection
-        if let Some(ptr) = self.heap.nursery.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+        if let Some(ptr) =
+            self.heap.nursery.allocate(payload_size, doms_gc::header::TypeTag::Object)
+        {
             let obj_ptr = ptr as *mut JsObject;
             unsafe {
                 std::ptr::write(obj_ptr, obj);
@@ -51,7 +57,9 @@ impl Vm {
         }
 
         // 4. If nursery is still full, allocate in OldGen
-        if let Some(ptr) = self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+        if let Some(ptr) =
+            self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object)
+        {
             let obj_ptr = ptr as *mut JsObject;
             unsafe {
                 std::ptr::write(obj_ptr, obj);
@@ -66,7 +74,9 @@ impl Vm {
         //     live objects would not be marked and would be reclaimed.
         if !self.gc_suppressed {
             self.heap.old_gen.sweep();
-            if let Some(ptr) = self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+            if let Some(ptr) =
+                self.heap.old_gen.allocate(payload_size, doms_gc::header::TypeTag::Object)
+            {
                 let obj_ptr = ptr as *mut JsObject;
                 unsafe {
                     std::ptr::write(obj_ptr, obj);
@@ -77,7 +87,9 @@ impl Vm {
         }
 
         // 5. Fallback to large object space
-        if let Some(ptr) = self.heap.large_objects.allocate(payload_size, doms_gc::header::TypeTag::Object) {
+        if let Some(ptr) =
+            self.heap.large_objects.allocate(payload_size, doms_gc::header::TypeTag::Object)
+        {
             let obj_ptr = ptr as *mut JsObject;
             unsafe {
                 std::ptr::write(obj_ptr, obj);
@@ -93,4 +105,3 @@ impl Vm {
         ptr
     }
 }
-

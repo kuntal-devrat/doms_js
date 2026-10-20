@@ -4,7 +4,6 @@ use super::*;
 use crate::object::PrivateElement;
 
 impl Vm {
-
     pub(crate) fn op_get_prop(
         &mut self,
         name_idx: u16,
@@ -36,7 +35,8 @@ impl Vm {
                         }
                         PrivateElement::Accessor(acc) => {
                             if let Some(getter) = acc.getter {
-                                let val = self.call(getter, obj, &[]).unwrap_or(JsValue::undefined());
+                                let val =
+                                    self.call(getter, obj, &[]).unwrap_or(JsValue::undefined());
                                 self.push(val);
                                 return Ok(());
                             } else {
@@ -74,14 +74,12 @@ impl Vm {
             if let ObjectKind::Array(elements) = &jsobj.kind {
                 if name == "length" {
                     chunk.record_feedback_array_length(call_site_ip);
-                    let val = if let Some(info) = self.shapes.get_property_info(jsobj.shape_id, "length") {
+                    let val = if let Some(info) =
+                        self.shapes.get_property_info(jsobj.shape_id, "length")
+                    {
                         if let Some(v) = jsobj.get_slot(info.offset) {
                             if let Some(n) = v.to_number() {
-                                if (n as usize) >= elements.len() {
-                                    Some(v)
-                                } else {
-                                    None
-                                }
+                                if (n as usize) >= elements.len() { Some(v) } else { None }
                             } else {
                                 None
                             }
@@ -226,7 +224,10 @@ impl Vm {
             let prop_val = self.get_property(this_val, &name);
             if prop_val == JsValue::uninitialized() {
                 self.handle_exception_at_depth(
-                    VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                    VmError::ReferenceError(format!(
+                        "Cannot access '{}' before initialization",
+                        name
+                    )),
                     target_depth,
                 )?;
                 return Ok(());
@@ -274,7 +275,11 @@ impl Vm {
 
         self.temp_roots.push(obj);
         self.temp_roots.push(val);
-        let res = self.set_property_result(self.temp_roots[self.temp_roots.len() - 2], name, self.temp_roots[self.temp_roots.len() - 1]);
+        let res = self.set_property_result(
+            self.temp_roots[self.temp_roots.len() - 2],
+            name,
+            self.temp_roots[self.temp_roots.len() - 1],
+        );
         let _rooted_val = self.temp_roots.pop().unwrap();
         let rooted_obj = self.temp_roots.pop().unwrap();
         if let Err(err) = res {
@@ -287,9 +292,10 @@ impl Vm {
             let has_acc = jsobj.accessors.as_ref().map_or(false, |a| a.contains_key(name));
             if !has_acc {
                 if let Some(offset) = self.shapes.lookup_offset(jsobj.shape_id, name) {
-                    let ics = self.chunk_ics.entry(chunk_key).or_insert_with(|| {
-                        vec![InlineCacheSlot::new(); chunk.instructions.len()]
-                    });
+                    let ics = self
+                        .chunk_ics
+                        .entry(chunk_key)
+                        .or_insert_with(|| vec![InlineCacheSlot::new(); chunk.instructions.len()]);
                     if call_site_ip < ics.len() {
                         ics[call_site_ip].record_hit(name_idx, jsobj.shape_id, offset);
                     }
@@ -302,171 +308,167 @@ impl Vm {
         Ok(())
     }
 
-#[inline(always)]
-fn to_canonical_array_index(key: JsValue) -> Option<usize> {
-    if key.is_int32() {
-        let i = key.as_int32().unwrap();
-        if i >= 0 {
-            return Some(i as usize);
+    #[inline(always)]
+    fn to_canonical_array_index(key: JsValue) -> Option<usize> {
+        if key.is_int32() {
+            let i = key.as_int32().unwrap();
+            if i >= 0 {
+                return Some(i as usize);
+            }
+        } else if let Some(d) = key.as_double() {
+            if !d.is_nan() && !d.is_infinite() && d >= 0.0 && d.fract() == 0.0 && d < 4294967295.0 {
+                return Some(d as usize);
+            }
         }
-    } else if let Some(d) = key.as_double() {
-        if !d.is_nan() && !d.is_infinite() && d >= 0.0 && d.fract() == 0.0 && d < 4294967295.0 {
-            return Some(d as usize);
-        }
+        None
     }
-    None
-}
 
-    pub(crate) fn op_get_elem(
-        &mut self,
-        target_depth: usize,
-    ) -> Result<(), VmError> {
-                    let key = self.pop()?;
-                    let obj = self.pop()?;
-                    if let Some(idx) = Self::to_canonical_array_index(key) {
-                        if obj.is_sso_string() {
-                            let len = ((obj.0 >> 40) & 0x7) as usize;
-                            if idx < len {
-                                let payload = obj.0 & 0x0000_00FF_FFFF_FFFF;
-                                let byte = ((payload >> (idx * 8)) & 0xFF) as u8;
-                                let ch_str = self.alloc_string((byte as char).to_string());
-                                self.push(ch_str);
-                                return Ok(());
-                            }
-                        }
-                        if let Some(ptr) = obj.as_object_ptr() {
-                            let jsobj = unsafe { &*(ptr as *mut JsObject) };
-                            if let ObjectKind::Array(elements) = &jsobj.kind {
-                                if !jsobj.has_element_attributes() && idx < elements.len() {
-                                    let el = elements[idx];
-                                    if !el.is_hole() {
-                                        self.push(el);
-                                        return Ok(());
-                                    }
-                                }
-                            }
-                            if let ObjectKind::String(s) = &jsobj.kind {
-                                if let Some(ch) = s.chars().nth(idx) {
-                                    let ch_str = self.alloc_string(ch.to_string());
-                                    self.push(ch_str);
-                                    return Ok(());
-                                }
-                            }
-                            if let ObjectKind::ConsString { length, .. } = &jsobj.kind {
-                                if idx < *length {
-                                    let s = self.to_string_value(obj);
-                                    if let Some(ch) = s.chars().nth(idx) {
-                                        let ch_str = self.alloc_string(ch.to_string());
-                                        self.push(ch_str);
-                                        return Ok(());
-                                    }
-                                }
-                            }
-                            if let ObjectKind::TypedArray(ta) = &jsobj.kind {
-                                let ta = ta.clone();
-                                if let Some(val) = self.read_typed_array_element_vm(&ta, idx) {
-                                    self.push(val);
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                    let prop_key = match self.to_property_key(key) {
-                        Ok(k) => k,
-                        Err(err) => {
-                            self.handle_exception_at_depth(err, target_depth)?;
+    pub(crate) fn op_get_elem(&mut self, target_depth: usize) -> Result<(), VmError> {
+        let key = self.pop()?;
+        let obj = self.pop()?;
+        if let Some(idx) = Self::to_canonical_array_index(key) {
+            if obj.is_sso_string() {
+                let len = ((obj.0 >> 40) & 0x7) as usize;
+                if idx < len {
+                    let payload = obj.0 & 0x0000_00FF_FFFF_FFFF;
+                    let byte = ((payload >> (idx * 8)) & 0xFF) as u8;
+                    let ch_str = self.alloc_string((byte as char).to_string());
+                    self.push(ch_str);
+                    return Ok(());
+                }
+            }
+            if let Some(ptr) = obj.as_object_ptr() {
+                let jsobj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Array(elements) = &jsobj.kind {
+                    if !jsobj.has_element_attributes() && idx < elements.len() {
+                        let el = elements[idx];
+                        if !el.is_hole() {
+                            self.push(el);
                             return Ok(());
                         }
-                    };
-                    let val = match prop_key {
-                        PropertyKeyVal::Symbol(sym) => {
-                            match self.get_symbol_property_result(obj, sym) {
-                                Ok(v) => v,
-                                Err(err) => {
-                                    self.handle_exception_at_depth(err, target_depth)?;
-                                    return Ok(());
-                                }
-                            }
+                    }
+                }
+                if let ObjectKind::String(s) = &jsobj.kind {
+                    if let Some(ch) = s.chars().nth(idx) {
+                        let ch_str = self.alloc_string(ch.to_string());
+                        self.push(ch_str);
+                        return Ok(());
+                    }
+                }
+                if let ObjectKind::ConsString { length, .. } = &jsobj.kind {
+                    if idx < *length {
+                        let s = self.to_string_value(obj);
+                        if let Some(ch) = s.chars().nth(idx) {
+                            let ch_str = self.alloc_string(ch.to_string());
+                            self.push(ch_str);
+                            return Ok(());
                         }
-                        PropertyKeyVal::String(key_str) => {
-                            match self.get_property_result(obj, &key_str) {
-                                Ok(v) => v,
-                                Err(err) => {
-                                    self.handle_exception_at_depth(err, target_depth)?;
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    };
-                    self.push(val);
+                    }
+                }
+                if let ObjectKind::TypedArray(ta) = &jsobj.kind {
+                    let ta = ta.clone();
+                    if let Some(val) = self.read_typed_array_element_vm(&ta, idx) {
+                        self.push(val);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        let prop_key = match self.to_property_key(key) {
+            Ok(k) => k,
+            Err(err) => {
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            }
+        };
+        let val = match prop_key {
+            PropertyKeyVal::Symbol(sym) => match self.get_symbol_property_result(obj, sym) {
+                Ok(v) => v,
+                Err(err) => {
+                    self.handle_exception_at_depth(err, target_depth)?;
+                    return Ok(());
+                }
+            },
+            PropertyKeyVal::String(key_str) => match self.get_property_result(obj, &key_str) {
+                Ok(v) => v,
+                Err(err) => {
+                    self.handle_exception_at_depth(err, target_depth)?;
+                    return Ok(());
+                }
+            },
+        };
+        self.push(val);
         Ok(())
     }
 
-    pub(crate) fn op_set_elem(
-        &mut self,
-        target_depth: usize,
-    ) -> Result<(), VmError> {
-                    let val = self.pop()?;
-                    let key = self.pop()?;
-                    let obj = self.pop()?;
-                    if let Some(idx) = Self::to_canonical_array_index(key) {
-                        if let Some(ptr) = obj.as_object_ptr() {
-                            let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
-                            let is_extensible = jsobj.is_extensible();
-                            let has_elem_attrs = jsobj.has_element_attributes();
-                            if let ObjectKind::Array(elements) = &mut jsobj.kind {
-                                let is_existing = idx < elements.len() && !elements[idx].is_hole();
-                                let is_standard_proto = jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
-                                if !has_elem_attrs && (is_existing || is_standard_proto) && idx < 65536 && idx <= elements.len() + 1024 && is_extensible {
-                                    if idx < elements.len() {
-                                        elements[idx] = val;
-                                    } else if idx == elements.len() {
-                                        elements.push(val);
-                                    } else {
-                                        elements.resize(idx + 1, JsValue::hole());
-                                        elements[idx] = val;
-                                    }
-                                    self.push(val);
-                                    return Ok(());
-                                }
-                            }
-                            if let ObjectKind::TypedArray(ta) = &mut jsobj.kind {
-                                match self.write_typed_array_element_vm(ta, idx, val) {
-                                    Ok(true) => {
-                                        self.push(val);
-                                        return Ok(());
-                                    }
-                                    Err(err) => {
-                                        self.handle_exception_at_depth(err, target_depth)?;
-                                        return Ok(());
-                                    }
-                                    _ => {}
-                                }
-                            }
+    pub(crate) fn op_set_elem(&mut self, target_depth: usize) -> Result<(), VmError> {
+        let val = self.pop()?;
+        let key = self.pop()?;
+        let obj = self.pop()?;
+        if let Some(idx) = Self::to_canonical_array_index(key) {
+            if let Some(ptr) = obj.as_object_ptr() {
+                let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                let is_extensible = jsobj.is_extensible();
+                let has_elem_attrs = jsobj.has_element_attributes();
+                if let ObjectKind::Array(elements) = &mut jsobj.kind {
+                    let is_existing = idx < elements.len() && !elements[idx].is_hole();
+                    let is_standard_proto =
+                        jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
+                    if !has_elem_attrs
+                        && (is_existing || is_standard_proto)
+                        && idx < 65536
+                        && idx <= elements.len() + 1024
+                        && is_extensible
+                    {
+                        if idx < elements.len() {
+                            elements[idx] = val;
+                        } else if idx == elements.len() {
+                            elements.push(val);
+                        } else {
+                            elements.resize(idx + 1, JsValue::hole());
+                            elements[idx] = val;
                         }
+                        self.push(val);
+                        return Ok(());
                     }
-                    let prop_key = match self.to_property_key(key) {
-                        Ok(k) => k,
+                }
+                if let ObjectKind::TypedArray(ta) = &mut jsobj.kind {
+                    match self.write_typed_array_element_vm(ta, idx, val) {
+                        Ok(true) => {
+                            self.push(val);
+                            return Ok(());
+                        }
                         Err(err) => {
                             self.handle_exception_at_depth(err, target_depth)?;
                             return Ok(());
                         }
-                    };
-                    match prop_key {
-                        PropertyKeyVal::Symbol(sym) => {
-                            if let Err(err) = self.set_symbol_property_result(obj, sym, val) {
-                                self.handle_exception_at_depth(err, target_depth)?;
-                                return Ok(());
-                            }
-                        }
-                        PropertyKeyVal::String(key_str) => {
-                            if let Err(err) = self.set_property_result(obj, &key_str, val) {
-                                self.handle_exception_at_depth(err, target_depth)?;
-                                return Ok(());
-                            }
-                        }
+                        _ => {}
                     }
-                    self.push(val);
+                }
+            }
+        }
+        let prop_key = match self.to_property_key(key) {
+            Ok(k) => k,
+            Err(err) => {
+                self.handle_exception_at_depth(err, target_depth)?;
+                return Ok(());
+            }
+        };
+        match prop_key {
+            PropertyKeyVal::Symbol(sym) => {
+                if let Err(err) = self.set_symbol_property_result(obj, sym, val) {
+                    self.handle_exception_at_depth(err, target_depth)?;
+                    return Ok(());
+                }
+            }
+            PropertyKeyVal::String(key_str) => {
+                if let Err(err) = self.set_property_result(obj, &key_str, val) {
+                    self.handle_exception_at_depth(err, target_depth)?;
+                    return Ok(());
+                }
+            }
+        }
+        self.push(val);
         Ok(())
     }
 
@@ -492,7 +494,10 @@ fn to_canonical_array_index(key: JsValue) -> Option<usize> {
             };
             if frame.this_val == JsValue::uninitialized() {
                 self.handle_exception_at_depth(
-                    VmError::ReferenceError("Must call super constructor in derived class before accessing 'this'".into()),
+                    VmError::ReferenceError(
+                        "Must call super constructor in derived class before accessing 'this'"
+                            .into(),
+                    ),
                     target_depth,
                 )?;
                 return Ok(());
@@ -540,10 +545,7 @@ fn to_canonical_array_index(key: JsValue) -> Option<usize> {
         Ok(())
     }
 
-    pub(crate) fn op_set_super_elem(
-        &mut self,
-        target_depth: usize,
-    ) -> Result<(), VmError> {
+    pub(crate) fn op_set_super_elem(&mut self, target_depth: usize) -> Result<(), VmError> {
         let val = self.pop()?;
         let key = self.pop()?;
 
@@ -568,7 +570,10 @@ fn to_canonical_array_index(key: JsValue) -> Option<usize> {
             };
             if frame.this_val == JsValue::uninitialized() {
                 self.handle_exception_at_depth(
-                    VmError::ReferenceError("Must call super constructor in derived class before accessing 'this'".into()),
+                    VmError::ReferenceError(
+                        "Must call super constructor in derived class before accessing 'this'"
+                            .into(),
+                    ),
                     target_depth,
                 )?;
                 return Ok(());

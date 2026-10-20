@@ -34,11 +34,8 @@ impl Compiler {
         compiler.is_in_function = true;
         compiler.symbols.enter_scope();
         for p in &params {
-            let local_name = if let Some(rest_name) = p.strip_prefix("...") {
-                rest_name
-            } else {
-                p.as_str()
-            };
+            let local_name =
+                if let Some(rest_name) = p.strip_prefix("...") { rest_name } else { p.as_str() };
             compiler.symbols.define_local(local_name.to_string());
         }
 
@@ -65,7 +62,8 @@ impl Compiler {
         let mut idx = 0;
         let mut has_param_exprs = false;
         while idx < body.len() {
-            if matches!(&body[idx], Statement::Expression(Expression::Literal(Literal::String { value, has_escape: false, .. })) if value == "use strict") {
+            if matches!(&body[idx], Statement::Expression(Expression::Literal(Literal::String { value, has_escape: false, .. })) if value == "use strict")
+            {
                 idx += 1;
                 continue;
             }
@@ -95,7 +93,12 @@ impl Compiler {
         // Hoist function declarations to the top of the function
         for stmt in &body[idx..] {
             if let Statement::FunctionDecl { name, params, body } = stmt {
-                let def = Self::compile_function(Some(name.clone()), params.clone(), body, compiler.is_strict)?;
+                let def = Self::compile_function(
+                    Some(name.clone()),
+                    params.clone(),
+                    body,
+                    compiler.is_strict,
+                )?;
                 let const_idx = compiler.chunk.add_constant(Constant::Function(Arc::new(def)));
                 compiler.chunk.emit(OpCode::CreateFunction(const_idx), 0);
                 let slot = compiler.symbols.define_local(name.clone());

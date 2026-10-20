@@ -170,9 +170,7 @@ pub struct TypeRegistry {
 
 impl TypeRegistry {
     pub const fn new() -> Self {
-        Self {
-            visitors: [None; 32],
-        }
+        Self { visitors: [None; 32] }
     }
 
     /// Register a trace visitor function for a given TypeTag.
@@ -188,7 +186,12 @@ impl TypeRegistry {
     /// # Safety
     /// `payload` must point to a valid object payload for `tag`.
     #[inline]
-    pub unsafe fn trace(&self, tag: TypeTag, payload: *mut u8, visit: &mut dyn FnMut(*mut *mut u8)) {
+    pub unsafe fn trace(
+        &self,
+        tag: TypeTag,
+        payload: *mut u8,
+        visit: &mut dyn FnMut(*mut *mut u8),
+    ) {
         let idx = tag as usize;
         if idx < self.visitors.len() {
             if let Some(v) = self.visitors[idx] {

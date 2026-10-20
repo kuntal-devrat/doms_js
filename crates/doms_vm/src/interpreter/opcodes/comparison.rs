@@ -45,7 +45,10 @@ impl Vm {
         let b_val = self.pop()?;
         let a_val = self.pop()?;
         let ord = self.abstract_relational_comparison(a_val, b_val)?;
-        self.push(JsValue::from_boolean(matches!(ord, Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal))));
+        self.push(JsValue::from_boolean(matches!(
+            ord,
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        )));
         Ok(())
     }
 
@@ -61,7 +64,10 @@ impl Vm {
         let b_val = self.pop()?;
         let a_val = self.pop()?;
         let ord = self.abstract_relational_comparison(a_val, b_val)?;
-        self.push(JsValue::from_boolean(matches!(ord, Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal))));
+        self.push(JsValue::from_boolean(matches!(
+            ord,
+            Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+        )));
         Ok(())
     }
 }

@@ -13,9 +13,7 @@ pub struct CdpDispatcher {
 
 impl CdpDispatcher {
     pub fn new() -> Self {
-        Self {
-            session: DebuggerSession::new(),
-        }
+        Self { session: DebuggerSession::new() }
     }
 }
 

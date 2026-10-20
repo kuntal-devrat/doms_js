@@ -35,7 +35,10 @@ impl<'a> Parser<'a> {
             let mut seen_catch = std::collections::HashSet::new();
             for name in &catch_bound_names {
                 if !seen_catch.insert(name) {
-                    return Err(ParseError::General(format!("Duplicate catch parameter '{}'", name)));
+                    return Err(ParseError::General(format!(
+                        "Duplicate catch parameter '{}'",
+                        name
+                    )));
                 }
             }
             let mut block = self.parse_block_statement()?;
@@ -46,7 +49,10 @@ impl<'a> Parser<'a> {
                             for decl in declarations {
                                 if !decl.name.starts_with("__") && !decl.name.starts_with('@') {
                                     if seen_catch.contains(&decl.name) {
-                                        return Err(ParseError::General(format!("Identifier '{}' has already been declared", decl.name)));
+                                        return Err(ParseError::General(format!(
+                                            "Identifier '{}' has already been declared",
+                                            decl.name
+                                        )));
                                     }
                                 }
                             }
@@ -54,7 +60,10 @@ impl<'a> Parser<'a> {
                         Statement::ClassDecl(class_def) => {
                             if let Some(ref name) = class_def.name {
                                 if seen_catch.contains(name) {
-                                    return Err(ParseError::General(format!("Identifier '{}' has already been declared", name)));
+                                    return Err(ParseError::General(format!(
+                                        "Identifier '{}' has already been declared",
+                                        name
+                                    )));
                                 }
                             }
                         }
@@ -63,7 +72,10 @@ impl<'a> Parser<'a> {
                         | Statement::GeneratorDecl { name, .. }
                         | Statement::AsyncGeneratorDecl { name, .. } => {
                             if seen_catch.contains(name) {
-                                return Err(ParseError::General(format!("Identifier '{}' has already been declared", name)));
+                                return Err(ParseError::General(format!(
+                                    "Identifier '{}' has already been declared",
+                                    name
+                                )));
                             }
                         }
                         _ => {}

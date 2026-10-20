@@ -1,7 +1,7 @@
 //! Web Standards Host APIs (Timers, TextEncoder/Decoder, URL, Fetch, EventTarget).
 
-use crate::interpreter::{Vm, VmError, TimerEntry};
-use crate::object::{JsObject, ObjectKind, TypedArrayKind, JsTypedArray, PromiseState};
+use crate::interpreter::{TimerEntry, Vm, VmError};
+use crate::object::{JsObject, JsTypedArray, ObjectKind, PromiseState, TypedArrayKind};
 use crate::value::JsValue;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

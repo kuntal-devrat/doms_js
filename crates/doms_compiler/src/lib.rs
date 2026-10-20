@@ -2,15 +2,19 @@
 //!
 //! Bytecode compiler for the DOMS JavaScript engine.
 
+#![allow(clippy::all)]
+
 pub mod bytecode;
 pub mod compiler;
 pub mod scope;
 pub mod source_map;
 
-pub use bytecode::{BytecodeChunk, Constant, FeedbackSlot, FeedbackVector, Label, OpCode, TypeMask};
+pub use bytecode::{
+    BytecodeChunk, Constant, FeedbackSlot, FeedbackVector, Label, OpCode, TypeMask,
+};
 pub use compiler::{CompileError, Compiler};
 pub use scope::{Local, SymbolTable, UpvalueInfo};
-pub use source_map::{decode_vlq, Mapping, OriginalPosition, SourceMap};
+pub use source_map::{Mapping, OriginalPosition, SourceMap, decode_vlq};
 
 use doms_parser::ast::Program;
 

@@ -7,11 +7,18 @@ impl Vm {
         self.get_property_with_receiver(target, key, target)
     }
 
-    pub fn get_property_with_receiver(&mut self, target: JsValue, key: &str, receiver: JsValue) -> JsValue {
+    pub fn get_property_with_receiver(
+        &mut self,
+        target: JsValue,
+        key: &str,
+        receiver: JsValue,
+    ) -> JsValue {
         let mut cur_tgt = target;
         let mut cur_key = key.to_string();
         let mut hops = 0;
-        while let Some((tgt_mod, tgt_key)) = self.module_reexports.get(&(cur_tgt, cur_key.clone())).cloned() {
+        while let Some((tgt_mod, tgt_key)) =
+            self.module_reexports.get(&(cur_tgt, cur_key.clone())).cloned()
+        {
             hops += 1;
             if hops > 100 {
                 return JsValue::uninitialized();
@@ -126,7 +133,6 @@ impl Vm {
                         return self.alloc_string(ch.to_string());
                     }
                 }
-
             }
 
             // Special properties on Promise (fallback only if no prototype)
@@ -165,7 +171,6 @@ impl Vm {
                 }
             }
 
-
             // Special properties on TypedArray
             if let ObjectKind::TypedArray(ta) = &obj.kind {
                 if ta.buffer.is_detached() {
@@ -184,7 +189,9 @@ impl Vm {
                             }
                             return buf;
                         }
-                        "BYTES_PER_ELEMENT" => return JsValue::from_int32(ta.kind.bytes_per_element() as i32),
+                        "BYTES_PER_ELEMENT" => {
+                            return JsValue::from_int32(ta.kind.bytes_per_element() as i32);
+                        }
                         _ => {
                             if key.parse::<usize>().is_ok() {
                                 return JsValue::undefined();
@@ -192,43 +199,57 @@ impl Vm {
                         }
                     }
                 } else {
-                match key {
-                    "length" => return JsValue::from_int32(ta.length as i32),
-                    "byteLength" => return JsValue::from_int32((ta.length * ta.kind.bytes_per_element()) as i32),
-                    "byteOffset" => return JsValue::from_int32(ta.byte_offset as i32),
-                    "buffer" => {
-                        if let Some(buf) = ta.buffer_val {
+                    match key {
+                        "length" => return JsValue::from_int32(ta.length as i32),
+                        "byteLength" => {
+                            return JsValue::from_int32(
+                                (ta.length * ta.kind.bytes_per_element()) as i32,
+                            );
+                        }
+                        "byteOffset" => return JsValue::from_int32(ta.byte_offset as i32),
+                        "buffer" => {
+                            if let Some(buf) = ta.buffer_val {
+                                return buf;
+                            }
+                            let buf = self.alloc_array_buffer(Arc::clone(&ta.buffer));
+                            if let Some(ptr) = target.as_object_ptr() {
+                                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                                if let ObjectKind::TypedArray(ref mut ta) = obj.kind {
+                                    ta.buffer_val = Some(buf);
+                                }
+                            }
                             return buf;
                         }
-                        let buf = self.alloc_array_buffer(Arc::clone(&ta.buffer));
-                        if let Some(ptr) = target.as_object_ptr() {
-                            let obj = unsafe { &mut *(ptr as *mut JsObject) };
-                            if let ObjectKind::TypedArray(ref mut ta) = obj.kind {
-                                ta.buffer_val = Some(buf);
-                            }
+                        "BYTES_PER_ELEMENT" => {
+                            return JsValue::from_int32(ta.kind.bytes_per_element() as i32);
                         }
-                        return buf;
-                    }
-                    "BYTES_PER_ELEMENT" => return JsValue::from_int32(ta.kind.bytes_per_element() as i32),
-                    _ => {
-                        if let Ok(idx) = key.parse::<usize>() {
-                            let ta = ta.clone();
-                            if let Some(val) = self.read_typed_array_element_vm(&ta, idx) {
-                                return val;
+                        _ => {
+                            if let Ok(idx) = key.parse::<usize>() {
+                                let ta = ta.clone();
+                                if let Some(val) = self.read_typed_array_element_vm(&ta, idx) {
+                                    return val;
+                                }
                             }
                         }
                     }
                 }
-            }
             }
 
             // Special properties on Worker
             if let ObjectKind::Worker(port) = &obj.kind {
                 let port_clone = Arc::clone(port);
                 match key {
-                    "postMessage" => return self.get_worker_post_message(port_clone).unwrap_or_default(),
-                    "receiveMessage" => return self.get_worker_receive_message(port_clone).unwrap_or_default(),
-                    "terminate" => return self.alloc_native_function("terminate", 0, |_vm, _this, _args| Ok(JsValue::undefined())),
+                    "postMessage" => {
+                        return self.get_worker_post_message(port_clone).unwrap_or_default();
+                    }
+                    "receiveMessage" => {
+                        return self.get_worker_receive_message(port_clone).unwrap_or_default();
+                    }
+                    "terminate" => {
+                        return self.alloc_native_function("terminate", 0, |_vm, _this, _args| {
+                            Ok(JsValue::undefined())
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -237,9 +258,11 @@ impl Vm {
             if let ObjectKind::WeakRef(target_ref) = &obj.kind {
                 let tr = *target_ref;
                 if key == "deref" {
-                    return self.alloc_closure_native_function("deref", 0, Arc::new(move |_vm, _this, _args| {
-                        Ok(tr)
-                    }));
+                    return self.alloc_closure_native_function(
+                        "deref",
+                        0,
+                        Arc::new(move |_vm, _this, _args| Ok(tr)),
+                    );
                 }
             }
 
@@ -249,7 +272,6 @@ impl Vm {
                     return m;
                 }
             }
-
 
             // Shape offset lookup (own properties take precedence)
             if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {
@@ -277,12 +299,16 @@ impl Vm {
                     let proto_obj = unsafe { &*(proto_ptr as *mut JsObject) };
                     if matches!(proto_obj.kind, ObjectKind::Proxy { .. }) {
                         let prop_key = PropertyKeyVal::String(key.to_string());
-                        return self.proxy_get(proto_val, &prop_key, receiver).unwrap_or(JsValue::undefined());
+                        return self
+                            .proxy_get(proto_val, &prop_key, receiver)
+                            .unwrap_or(JsValue::undefined());
                     }
                     if let Some(accs) = &proto_obj.accessors {
                         if let Some(acc) = accs.get(key) {
                             if let Some(getter) = acc.getter {
-                                return self.call(getter, receiver, &[]).unwrap_or(JsValue::undefined());
+                                return self
+                                    .call(getter, receiver, &[])
+                                    .unwrap_or(JsValue::undefined());
                             } else {
                                 return JsValue::undefined();
                             }

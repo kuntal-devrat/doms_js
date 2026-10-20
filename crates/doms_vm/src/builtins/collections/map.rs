@@ -1,4 +1,3 @@
-
 use super::*;
 
 pub(super) fn register_map_builtins(vm: &mut Vm) {
@@ -78,7 +77,9 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
                 return Ok(JsValue::from_boolean(false));
             }
         }
-        Err(VmError::TypeError("Method Map.prototype.delete called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method Map.prototype.delete called on incompatible receiver".into(),
+        ))
     });
 
     let map_clear = vm.alloc_native_function("clear", 0, |_vm, this, _args| {
@@ -111,10 +112,14 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
                         break;
                     }
                 } else {
-                    return Err(VmError::TypeError("Method Map.prototype.forEach called on incompatible receiver".into()));
+                    return Err(VmError::TypeError(
+                        "Method Map.prototype.forEach called on incompatible receiver".into(),
+                    ));
                 }
             } else {
-                return Err(VmError::TypeError("Method Map.prototype.forEach called on incompatible receiver".into()));
+                return Err(VmError::TypeError(
+                    "Method Map.prototype.forEach called on incompatible receiver".into(),
+                ));
             };
             idx += 1;
             if let Some((k, v)) = entry {
@@ -131,7 +136,9 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
                 return Ok(vm.alloc_map_iterator(this, MapIterationKind::KeyValue));
             }
         }
-        Err(VmError::TypeError("Method Map.prototype.entries called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method Map.prototype.entries called on incompatible receiver".into(),
+        ))
     });
 
     let map_keys = vm.alloc_native_function("keys", 0, |vm, this, _args| {
@@ -151,7 +158,9 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
                 return Ok(vm.alloc_map_iterator(this, MapIterationKind::Value));
             }
         }
-        Err(VmError::TypeError("Method Map.prototype.values called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method Map.prototype.values called on incompatible receiver".into(),
+        ))
     });
 
     let map_size_getter = vm.alloc_native_function("get size", 0, |_vm, this, _args| {
@@ -162,7 +171,9 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
                 return Ok(JsValue::from_int32(count as i32));
             }
         }
-        Err(VmError::TypeError("Method get Map.prototype.size called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method get Map.prototype.size called on incompatible receiver".into(),
+        ))
     });
 
     vm.set_property(map_proto, "get", map_get);
@@ -214,9 +225,12 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
         }
         for i in 0..len {
             let item = vm.get_element(items, i);
-            let key_val = vm.call(callback, JsValue::undefined(), &[item, JsValue::from_int32(i as i32)])?;
+            let key_val =
+                vm.call(callback, JsValue::undefined(), &[item, JsValue::from_int32(i as i32)])?;
             let has_fn = vm.get_property(map_val, "has");
-            let has_res = vm.call(has_fn, map_val, &[key_val]).unwrap_or_else(|_| JsValue::from_boolean(false));
+            let has_res = vm
+                .call(has_fn, map_val, &[key_val])
+                .unwrap_or_else(|_| JsValue::from_boolean(false));
             if has_res.is_truthy() {
                 let get_fn = vm.get_property(map_val, "get");
                 let arr = vm.call(get_fn, map_val, &[key_val])?;
@@ -274,7 +288,9 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
                     let cur_item = vm.temp_roots[items_start + i];
                     if !cur_item.is_object() {
                         vm.temp_roots.truncate(prev_temp);
-                        return Err(VmError::TypeError("Iterator value is not an entry object".into()));
+                        return Err(VmError::TypeError(
+                            "Iterator value is not an entry object".into(),
+                        ));
                     }
                     let k = vm.get_property(cur_item, "0");
                     vm.temp_roots.push(k);
@@ -304,5 +320,4 @@ pub(super) fn register_map_builtins(vm: &mut Vm) {
     vm.set_property_non_enumerable(map_proto, "constructor".to_string());
     add_species_getter(vm, map_ctor);
     vm.globals.insert("Map".to_string(), map_ctor);
-
 }

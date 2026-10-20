@@ -146,7 +146,8 @@ impl Compiler {
                     }
                 }
                 _ => {
-                    let is_direct_eval = matches!(callee, Expression::Identifier(name) if name == "eval");
+                    let is_direct_eval =
+                        matches!(callee, Expression::Identifier(name) if name == "eval");
                     self.compile_expression(callee)?;
                     for arg in args {
                         self.compile_expression(arg)?;

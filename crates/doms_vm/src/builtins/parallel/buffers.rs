@@ -21,7 +21,9 @@ pub(super) fn register_buffers(vm: &mut Vm) {
                 return Ok(JsValue::from_double(buf.byte_length() as f64));
             }
         }
-        Err(VmError::TypeError("SharedArrayBuffer.prototype.byteLength called on non-SharedArrayBuffer".into()))
+        Err(VmError::TypeError(
+            "SharedArrayBuffer.prototype.byteLength called on non-SharedArrayBuffer".into(),
+        ))
     });
     if let Some(ptr) = sab_proto.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
@@ -32,11 +34,10 @@ pub(super) fn register_buffers(vm: &mut Vm) {
         vm.set_symbol_property(sab_proto, sym_tag, tag_val);
         if let Some(ptr) = sab_proto.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            obj.set_symbol_attributes(sym_tag, PropertyAttributes {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            });
+            obj.set_symbol_attributes(
+                sym_tag,
+                PropertyAttributes { writable: false, enumerable: false, configurable: true },
+            );
         }
     }
 
@@ -101,10 +102,14 @@ pub(super) fn register_buffers(vm: &mut Vm) {
                 }
                 (Arc::clone(buf), buf.byte_length())
             } else {
-                return Err(VmError::TypeError("ArrayBuffer.prototype.slice called on non-ArrayBuffer".into()));
+                return Err(VmError::TypeError(
+                    "ArrayBuffer.prototype.slice called on non-ArrayBuffer".into(),
+                ));
             }
         } else {
-            return Err(VmError::TypeError("ArrayBuffer.prototype.slice called on non-ArrayBuffer".into()));
+            return Err(VmError::TypeError(
+                "ArrayBuffer.prototype.slice called on non-ArrayBuffer".into(),
+            ));
         };
 
         // 6. Let relativeStart = ? ToIntegerOrInfinity(start).
@@ -150,19 +155,27 @@ pub(super) fn register_buffers(vm: &mut Vm) {
         // 17. If new.[[ArrayByteLength]] < newLen, throw a TypeError exception.
         let new_buf = if let Some(n_ptr) = new_obj.as_object_ptr() {
             if new_obj == this {
-                return Err(VmError::TypeError("Species constructor returned same ArrayBuffer".into()));
+                return Err(VmError::TypeError(
+                    "Species constructor returned same ArrayBuffer".into(),
+                ));
             }
             let n_obj = unsafe { &*(n_ptr as *mut JsObject) };
             if let ObjectKind::ArrayBuffer(nb) = &n_obj.kind {
                 if nb.is_detached() {
-                    return Err(VmError::TypeError("Species constructor returned detached ArrayBuffer".into()));
+                    return Err(VmError::TypeError(
+                        "Species constructor returned detached ArrayBuffer".into(),
+                    ));
                 }
                 if nb.byte_length() < new_len {
-                    return Err(VmError::TypeError("Species constructor returned smaller ArrayBuffer".into()));
+                    return Err(VmError::TypeError(
+                        "Species constructor returned smaller ArrayBuffer".into(),
+                    ));
                 }
                 Arc::clone(nb)
             } else {
-                return Err(VmError::TypeError("Species constructor did not return an ArrayBuffer".into()));
+                return Err(VmError::TypeError(
+                    "Species constructor did not return an ArrayBuffer".into(),
+                ));
             }
         } else {
             return Err(VmError::TypeError("Species constructor did not return an object".into()));
@@ -170,7 +183,9 @@ pub(super) fn register_buffers(vm: &mut Vm) {
 
         // 19. If IsDetachedBuffer(O) is true, throw a TypeError exception.
         if buf.is_detached() {
-            return Err(VmError::TypeError("Source ArrayBuffer was detached during species construct".into()));
+            return Err(VmError::TypeError(
+                "Source ArrayBuffer was detached during species construct".into(),
+            ));
         }
 
         for i in 0..new_len {
@@ -190,11 +205,10 @@ pub(super) fn register_buffers(vm: &mut Vm) {
         vm.set_symbol_property(ab_proto, sym_tag, tag_val);
         if let Some(ptr) = ab_proto.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            obj.set_symbol_attributes(sym_tag, PropertyAttributes {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            });
+            obj.set_symbol_attributes(
+                sym_tag,
+                PropertyAttributes { writable: false, enumerable: false, configurable: true },
+            );
         }
     }
 

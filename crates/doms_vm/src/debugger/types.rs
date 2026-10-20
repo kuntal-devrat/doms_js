@@ -79,9 +79,7 @@ impl DebuggerSession {
 
     /// Check if a breakpoint matches the given location.
     pub fn has_breakpoint_at(&self, script_id: &str, line: usize) -> bool {
-        self.breakpoints
-            .values()
-            .any(|bp| bp.script_id == script_id && bp.line_number == line)
+        self.breakpoints.values().any(|bp| bp.script_id == script_id && bp.line_number == line)
     }
 }
 

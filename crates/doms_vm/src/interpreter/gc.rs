@@ -58,11 +58,7 @@ fn detect_native_stack_top() -> usize {
         let mut size: libc::size_t = 0;
         let ok = libc::pthread_attr_getstack(&attr, &mut addr, &mut size) == 0;
         libc::pthread_attr_destroy(&mut attr);
-        if ok && !addr.is_null() && size > 0 {
-            addr as usize + size
-        } else {
-            0
-        }
+        if ok && !addr.is_null() && size > 0 { addr as usize + size } else { 0 }
     }
 }
 
@@ -507,7 +503,13 @@ impl Vm {
                 if let ObjectKind::WeakMap(entries) = &obj.kind {
                     for (k, v) in entries {
                         if Self::gc_value_is_live(*k, &live)
-                            && Self::gc_mark_value(*v, &self.heap, &starts, &mut live, &mut worklist)
+                            && Self::gc_mark_value(
+                                *v,
+                                &self.heap,
+                                &starts,
+                                &mut live,
+                                &mut worklist,
+                            )
                         {
                             newly_marked = true;
                         }
@@ -517,7 +519,13 @@ impl Vm {
             if !newly_marked {
                 break;
             }
-            Self::gc_drain_worklist(&self.heap, &starts, &mut live, &mut worklist, VisitMode::Strong);
+            Self::gc_drain_worklist(
+                &self.heap,
+                &starts,
+                &mut live,
+                &mut worklist,
+                VisitMode::Strong,
+            );
         }
 
         // 4. Clear dead weak references so the VM can never observe dangling

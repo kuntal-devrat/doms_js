@@ -2,8 +2,20 @@
 
 use super::*;
 
-pub type NativeFn = fn(&mut crate::interpreter::Vm, JsValue, &[JsValue]) -> Result<JsValue, crate::interpreter::VmError>;
-pub type ClosureNativeFn = Arc<dyn Fn(&mut crate::interpreter::Vm, JsValue, &[JsValue]) -> Result<JsValue, crate::interpreter::VmError> + Send + Sync>;
+pub type NativeFn = fn(
+    &mut crate::interpreter::Vm,
+    JsValue,
+    &[JsValue],
+) -> Result<JsValue, crate::interpreter::VmError>;
+pub type ClosureNativeFn = Arc<
+    dyn Fn(
+            &mut crate::interpreter::Vm,
+            JsValue,
+            &[JsValue],
+        ) -> Result<JsValue, crate::interpreter::VmError>
+        + Send
+        + Sync,
+>;
 
 #[derive(Clone)]
 pub enum NativeHandler {
@@ -20,22 +32,19 @@ pub struct NativeFunction {
 
 impl NativeFunction {
     pub fn new_fn(name: String, length: u8, func: NativeFn) -> Self {
-        Self {
-            name,
-            length,
-            handler: NativeHandler::Fn(func),
-        }
+        Self { name, length, handler: NativeHandler::Fn(func) }
     }
 
     pub fn new_closure(name: String, length: u8, func: ClosureNativeFn) -> Self {
-        Self {
-            name,
-            length,
-            handler: NativeHandler::Closure(func),
-        }
+        Self { name, length, handler: NativeHandler::Closure(func) }
     }
 
-    pub fn call(&self, vm: &mut crate::interpreter::Vm, this: JsValue, args: &[JsValue]) -> Result<JsValue, crate::interpreter::VmError> {
+    pub fn call(
+        &self,
+        vm: &mut crate::interpreter::Vm,
+        this: JsValue,
+        args: &[JsValue],
+    ) -> Result<JsValue, crate::interpreter::VmError> {
         match &self.handler {
             NativeHandler::Fn(f) => (f)(vm, this, args),
             NativeHandler::Closure(c) => (c)(vm, this, args),

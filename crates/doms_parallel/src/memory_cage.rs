@@ -60,14 +60,7 @@ impl MemoryCage {
         {
             let map_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
             let ptr = unsafe {
-                mmap(
-                    std::ptr::null_mut(),
-                    size,
-                    PROT_READ | PROT_WRITE,
-                    map_flags,
-                    -1,
-                    0,
-                )
+                mmap(std::ptr::null_mut(), size, PROT_READ | PROT_WRITE, map_flags, -1, 0)
             };
             let map_failed = usize::MAX as *mut u8;
             if ptr != map_failed && !ptr.is_null() {
@@ -138,11 +131,7 @@ impl MemoryCage {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let offset = current;
 
-        let alloc = CagedAllocation {
-            id,
-            offset_in_cage: offset,
-            size,
-        };
+        let alloc = CagedAllocation { id, offset_in_cage: offset, size };
 
         let mut map = self.allocations.lock().unwrap();
         map.insert(id, alloc);
@@ -155,12 +144,7 @@ impl MemoryCage {
             CagedBufferStorage::Heap(Arc::new(Mutex::new(vec![0u8; size])))
         };
 
-        Ok(CagedBuffer {
-            id,
-            offset_in_cage: offset,
-            size,
-            storage: data,
-        })
+        Ok(CagedBuffer { id, offset_in_cage: offset, size, storage: data })
     }
 
     /// Verify whether a raw address resides strictly inside the bounds of this cage.
@@ -222,9 +206,7 @@ impl CagedBuffer {
             return None;
         }
         match &self.storage {
-            CagedBufferStorage::Virtual(ptr) => unsafe {
-                Some(*ptr.add(index))
-            },
+            CagedBufferStorage::Virtual(ptr) => unsafe { Some(*ptr.add(index)) },
             CagedBufferStorage::Heap(h) => {
                 let lock = h.lock().unwrap();
                 lock.get(index).copied()

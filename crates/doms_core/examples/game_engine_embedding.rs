@@ -28,14 +28,7 @@ fn main() {
     let mut ctx = isolate.create_context();
 
     // Setup native entity in Rust
-    let mut player = GameEntity {
-        id: 1,
-        x: 100.0,
-        y: 200.0,
-        vx: 0.0,
-        vy: 0.0,
-        health: 100,
-    };
+    let mut player = GameEntity { id: 1, x: 100.0, y: 200.0, vx: 0.0, vy: 0.0, health: 100 };
 
     println!("[Game Engine] Initial Player State: {:?}", player);
 
@@ -90,8 +83,10 @@ fn main() {
         player.y = y_val;
         player.health = hp_val;
 
-        println!("  [Frame {:02}] Script Status: {:?} | Rust Synced: (x: {:.1}, y: {:.1}, hp: {})",
-            frame, status, player.x, player.y, player.health);
+        println!(
+            "  [Frame {:02}] Script Status: {:?} | Rust Synced: (x: {:.1}, y: {:.1}, hp: {})",
+            frame, status, player.x, player.y, player.health
+        );
     }
 
     println!("\n[Game Engine] Final Native Player State: {:?}", player);

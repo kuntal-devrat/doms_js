@@ -29,11 +29,7 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
             String::new()
         };
         let flags = if let Some(arg1) = args.get(1) {
-            if arg1.is_undefined() {
-                String::new()
-            } else {
-                vm.to_string_value(*arg1)
-            }
+            if arg1.is_undefined() { String::new() } else { vm.to_string_value(*arg1) }
         } else {
             String::new()
         };
@@ -42,18 +38,26 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         let mut seen = [false; 256];
         for ch in flags.chars() {
             if !matches!(ch, 'd' | 'g' | 'i' | 'm' | 's' | 'u' | 'v' | 'y') {
-                return Err(VmError::SyntaxError(format!("Invalid regular expression flag: {}", ch)));
+                return Err(VmError::SyntaxError(format!(
+                    "Invalid regular expression flag: {}",
+                    ch
+                )));
             }
             let b = ch as usize;
             if b < 256 {
                 if seen[b] {
-                    return Err(VmError::SyntaxError(format!("Duplicate regular expression flag: {}", ch)));
+                    return Err(VmError::SyntaxError(format!(
+                        "Duplicate regular expression flag: {}",
+                        ch
+                    )));
                 }
                 seen[b] = true;
             }
         }
         if seen[b'u' as usize] && seen[b'v' as usize] {
-            return Err(VmError::SyntaxError("Invalid regular expression flags: 'u' and 'v' cannot both be present".into()));
+            return Err(VmError::SyntaxError(
+                "Invalid regular expression flags: 'u' and 'v' cannot both be present".into(),
+            ));
         }
 
         // Validate pattern and flags via regress
@@ -123,7 +127,11 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                     let match_end_u16 = text[..match_end_byte].encode_utf16().count();
 
                     if is_global || is_sticky {
-                        vm.set_property(this, "lastIndex", JsValue::from_int32(match_end_u16 as i32));
+                        vm.set_property(
+                            this,
+                            "lastIndex",
+                            JsValue::from_int32(match_end_u16 as i32),
+                        );
                     }
 
                     let matched_str = &text[match_start_byte..match_end_byte];
@@ -152,7 +160,8 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                             String::new()
                         };
                     }
-                    vm.regexp_last_match.last_paren = cap_strings.iter()
+                    vm.regexp_last_match.last_paren = cap_strings
+                        .iter()
                         .rev()
                         .filter_map(|c| c.as_ref())
                         .next()
@@ -265,7 +274,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.global called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.global called on incompatible receiver".into(),
+        ))
     });
 
     let re_ignore_case_getter = vm.alloc_native_function("get ignoreCase", 0, |vm, this, _| {
@@ -278,7 +289,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.ignoreCase called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.ignoreCase called on incompatible receiver".into(),
+        ))
     });
 
     let re_multiline_getter = vm.alloc_native_function("get multiline", 0, |vm, this, _| {
@@ -291,7 +304,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.multiline called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.multiline called on incompatible receiver".into(),
+        ))
     });
 
     let re_dot_all_getter = vm.alloc_native_function("get dotAll", 0, |vm, this, _| {
@@ -304,7 +319,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.dotAll called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.dotAll called on incompatible receiver".into(),
+        ))
     });
 
     let re_unicode_getter = vm.alloc_native_function("get unicode", 0, |vm, this, _| {
@@ -317,7 +334,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.unicode called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.unicode called on incompatible receiver".into(),
+        ))
     });
 
     let re_sticky_getter = vm.alloc_native_function("get sticky", 0, |vm, this, _| {
@@ -330,7 +349,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.sticky called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.sticky called on incompatible receiver".into(),
+        ))
     });
 
     let re_has_indices_getter = vm.alloc_native_function("get hasIndices", 0, |vm, this, _| {
@@ -343,7 +364,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.hasIndices called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.hasIndices called on incompatible receiver".into(),
+        ))
     });
 
     let re_unicode_sets_getter = vm.alloc_native_function("get unicodeSets", 0, |vm, this, _| {
@@ -356,7 +379,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(JsValue::undefined());
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.unicodeSets called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.unicodeSets called on incompatible receiver".into(),
+        ))
     });
 
     let re_source_getter = vm.alloc_native_function("get source", 0, |vm, this, _| {
@@ -372,13 +397,17 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 return Ok(vm.alloc_string("(?:)".to_string()));
             }
         }
-        Err(VmError::TypeError("Method RegExp.prototype.source called on incompatible receiver".into()))
+        Err(VmError::TypeError(
+            "Method RegExp.prototype.source called on incompatible receiver".into(),
+        ))
     });
 
     // ES2024 22.2.6.4 get RegExp.prototype.flags (generic receiver)
     let re_flags_getter = vm.alloc_native_function("get flags", 0, |vm, this, _| {
         if !this.is_object() {
-            return Err(VmError::TypeError("Method RegExp.prototype.flags called on incompatible receiver".into()));
+            return Err(VmError::TypeError(
+                "Method RegExp.prototype.flags called on incompatible receiver".into(),
+            ));
         }
         let mut flags_str = String::new();
         if vm.get_property(this, "hasIndices").is_truthy() {
@@ -418,16 +447,46 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                         let p_obj = unsafe { &*(p_ptr as *mut JsObject) };
                         if let ObjectKind::RegExp { pattern: p_pat, flags: p_fl } = &p_obj.kind {
                             if args.get(1).map_or(false, |v| !v.is_undefined()) {
-                                return Err(VmError::TypeError("Cannot supply flags when pattern is a RegExp".into()));
+                                return Err(VmError::TypeError(
+                                    "Cannot supply flags when pattern is a RegExp".into(),
+                                ));
                             }
                             (p_pat.clone(), p_fl.clone())
                         } else {
-                            (if p_arg.is_undefined() { String::new() } else { vm.to_string_value(*p_arg) },
-                             args.get(1).map(|v| if v.is_undefined() { String::new() } else { vm.to_string_value(*v) }).unwrap_or_default())
+                            (
+                                if p_arg.is_undefined() {
+                                    String::new()
+                                } else {
+                                    vm.to_string_value(*p_arg)
+                                },
+                                args.get(1)
+                                    .map(|v| {
+                                        if v.is_undefined() {
+                                            String::new()
+                                        } else {
+                                            vm.to_string_value(*v)
+                                        }
+                                    })
+                                    .unwrap_or_default(),
+                            )
                         }
                     } else {
-                        (if p_arg.is_undefined() { String::new() } else { vm.to_string_value(*p_arg) },
-                         args.get(1).map(|v| if v.is_undefined() { String::new() } else { vm.to_string_value(*v) }).unwrap_or_default())
+                        (
+                            if p_arg.is_undefined() {
+                                String::new()
+                            } else {
+                                vm.to_string_value(*p_arg)
+                            },
+                            args.get(1)
+                                .map(|v| {
+                                    if v.is_undefined() {
+                                        String::new()
+                                    } else {
+                                        vm.to_string_value(*v)
+                                    }
+                                })
+                                .unwrap_or_default(),
+                        )
                     }
                 } else {
                     (String::new(), String::new())
@@ -436,18 +495,27 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
                 let mut seen = [false; 256];
                 for ch in new_flags.chars() {
                     if !matches!(ch, 'd' | 'g' | 'i' | 'm' | 's' | 'u' | 'v' | 'y') {
-                        return Err(VmError::SyntaxError(format!("Invalid regular expression flag: {}", ch)));
+                        return Err(VmError::SyntaxError(format!(
+                            "Invalid regular expression flag: {}",
+                            ch
+                        )));
                     }
                     let b = ch as usize;
                     if b < 256 {
                         if seen[b] {
-                            return Err(VmError::SyntaxError(format!("Duplicate regular expression flag: {}", ch)));
+                            return Err(VmError::SyntaxError(format!(
+                                "Duplicate regular expression flag: {}",
+                                ch
+                            )));
                         }
                         seen[b] = true;
                     }
                 }
                 if seen[b'u' as usize] && seen[b'v' as usize] {
-                    return Err(VmError::SyntaxError("Invalid regular expression flags: 'u' and 'v' cannot both be present".into()));
+                    return Err(VmError::SyntaxError(
+                        "Invalid regular expression flags: 'u' and 'v' cannot both be present"
+                            .into(),
+                    ));
                 }
 
                 if let Err(e) = regress::Regex::with_flags(&new_pat, new_flags.as_str()) {
@@ -473,7 +541,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         let text_prim = vm.to_primitive(text_arg, PreferredType::String)?;
         let text = vm.to_string_value(text_prim);
         if !this.is_object() {
-            return Err(VmError::TypeError("RegExp.prototype[Symbol.match] called on non-object".into()));
+            return Err(VmError::TypeError(
+                "RegExp.prototype[Symbol.match] called on non-object".into(),
+            ));
         }
         let global = vm.get_property(this, "global").is_truthy();
         if !global {
@@ -482,7 +552,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         }
         let ok = vm.set_property_with_receiver(this, "lastIndex", JsValue::from_int32(0), this)?;
         if !ok {
-            return Err(VmError::TypeError("Cannot assign to read-only property 'lastIndex'".into()));
+            return Err(VmError::TypeError(
+                "Cannot assign to read-only property 'lastIndex'".into(),
+            ));
         }
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(this);
@@ -500,21 +572,24 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
             let cur_this = vm.temp_roots[prev_temp];
             if s.is_empty() {
                 let this_index = vm.get_property(cur_this, "lastIndex").as_int32().unwrap_or(0);
-                let ok = vm.set_property_with_receiver(cur_this, "lastIndex", JsValue::from_int32(this_index + 1), cur_this)?;
+                let ok = vm.set_property_with_receiver(
+                    cur_this,
+                    "lastIndex",
+                    JsValue::from_int32(this_index + 1),
+                    cur_this,
+                )?;
                 if !ok {
                     vm.temp_roots.truncate(prev_temp);
-                    return Err(VmError::TypeError("Cannot assign to read-only property 'lastIndex'".into()));
+                    return Err(VmError::TypeError(
+                        "Cannot assign to read-only property 'lastIndex'".into(),
+                    ));
                 }
             }
             let str_val = vm.alloc_string(s);
             matches.push(str_val);
         }
         vm.temp_roots.truncate(prev_temp);
-        if matches.is_empty() {
-            Ok(JsValue::null())
-        } else {
-            Ok(vm.alloc_array(matches))
-        }
+        if matches.is_empty() { Ok(JsValue::null()) } else { Ok(vm.alloc_array(matches)) }
     });
 
     // @@replace ( string, replaceValue )
@@ -524,13 +599,18 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         let string_val = vm.to_string_value(str_prim);
         let replace_val = args.get(1).copied().unwrap_or(JsValue::undefined());
         if !this.is_object() {
-            return Err(VmError::TypeError("RegExp.prototype[Symbol.replace] called on non-object".into()));
+            return Err(VmError::TypeError(
+                "RegExp.prototype[Symbol.replace] called on non-object".into(),
+            ));
         }
         let global = vm.get_property(this, "global").is_truthy();
         if global {
-            let ok = vm.set_property_with_receiver(this, "lastIndex", JsValue::from_int32(0), this)?;
+            let ok =
+                vm.set_property_with_receiver(this, "lastIndex", JsValue::from_int32(0), this)?;
             if !ok {
-                return Err(VmError::TypeError("Cannot assign to read-only property 'lastIndex'".into()));
+                return Err(VmError::TypeError(
+                    "Cannot assign to read-only property 'lastIndex'".into(),
+                ));
             }
         }
         let prev_temp = vm.temp_roots.len();
@@ -558,7 +638,8 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         let result = if is_func {
             let m_arg = vm.alloc_string(matched.clone());
             let s_arg = vm.alloc_string(string_val.clone());
-            let rep_res = vm.call(cur_rep, JsValue::undefined(), &[m_arg, JsValue::from_int32(0), s_arg])?;
+            let rep_res =
+                vm.call(cur_rep, JsValue::undefined(), &[m_arg, JsValue::from_int32(0), s_arg])?;
             let rep_prim = vm.to_primitive(rep_res, PreferredType::String)?;
             let rep_s = vm.to_string_value(rep_prim);
             vm.alloc_string(string_val.replacen(&matched, &rep_s, 1))
@@ -575,7 +656,9 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         let str_prim = vm.to_primitive(string_arg, PreferredType::String)?;
         let string_val = vm.to_string_value(str_prim);
         if !this.is_object() {
-            return Err(VmError::TypeError("RegExp.prototype[Symbol.search] called on non-object".into()));
+            return Err(VmError::TypeError(
+                "RegExp.prototype[Symbol.search] called on non-object".into(),
+            ));
         }
         let _ = vm.set_property_result(this, "lastIndex", JsValue::from_int32(0));
         let prev_temp = vm.temp_roots.len();
@@ -597,9 +680,12 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         let string_arg = args.first().copied().unwrap_or(JsValue::undefined());
         let str_prim = vm.to_primitive(string_arg, PreferredType::String)?;
         let string_val = vm.to_string_value(str_prim);
-        let limit = args.get(1).and_then(|v| v.as_int32()).map(|l| l.max(0) as usize).unwrap_or(usize::MAX);
+        let limit =
+            args.get(1).and_then(|v| v.as_int32()).map(|l| l.max(0) as usize).unwrap_or(usize::MAX);
         if !this.is_object() {
-            return Err(VmError::TypeError("RegExp.prototype[Symbol.split] called on non-object".into()));
+            return Err(VmError::TypeError(
+                "RegExp.prototype[Symbol.split] called on non-object".into(),
+            ));
         }
         if limit == 0 {
             return Ok(vm.alloc_array(Vec::new()));
@@ -672,8 +758,21 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
     }
 
     for prop in [
-        "global", "ignoreCase", "multiline", "dotAll", "unicode", "unicodeSets", "sticky",
-        "hasIndices", "source", "flags", "exec", "test", "toString", "compile", "constructor"
+        "global",
+        "ignoreCase",
+        "multiline",
+        "dotAll",
+        "unicode",
+        "unicodeSets",
+        "sticky",
+        "hasIndices",
+        "source",
+        "flags",
+        "exec",
+        "test",
+        "toString",
+        "compile",
+        "constructor",
     ] {
         vm.set_property_non_enumerable(regexp_proto, prop.to_string());
     }
@@ -747,9 +846,10 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
         vm.set_property_non_enumerable(regexp_ctor, "$`".to_string());
 
         // rightContext / $'
-        let right_context_getter = vm.alloc_native_function("get rightContext", 0, |vm, _this, _| {
-            Ok(vm.alloc_string(vm.regexp_last_match.right_context.clone()))
-        });
+        let right_context_getter =
+            vm.alloc_native_function("get rightContext", 0, |vm, _this, _| {
+                Ok(vm.alloc_string(vm.regexp_last_match.right_context.clone()))
+            });
         ctor_obj.define_getter("rightContext".to_string(), right_context_getter);
         ctor_obj.define_getter("$'".to_string(), right_context_getter);
         vm.set_property_non_enumerable(regexp_ctor, "rightContext".to_string());
@@ -762,5 +862,4 @@ pub(super) fn register_regexp_builtins(vm: &mut Vm) {
     if vm.global_object.is_object() {
         vm.set_property(vm.global_object, "RegExp", regexp_ctor);
     }
-
 }

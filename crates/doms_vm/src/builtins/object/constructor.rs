@@ -100,17 +100,22 @@ pub(super) fn register_constructor(
                 let from = vm.to_object_value(*source)?;
                 let keys = super::names::get_own_property_keys(vm, from)?;
                 for key in keys {
-                    let desc = super::descriptor::get_own_property_descriptor_internal(vm, from, &key)?;
+                    let desc =
+                        super::descriptor::get_own_property_descriptor_internal(vm, from, &key)?;
                     if desc.is_object() {
                         let enum_val = vm.get_property(desc, "enumerable");
                         if enum_val.is_truthy() {
                             let val = match &key {
                                 PropertyKeyVal::String(s) => vm.get_property_result(from, s)?,
-                                PropertyKeyVal::Symbol(sym) => vm.get_symbol_property_result(from, *sym)?,
+                                PropertyKeyVal::Symbol(sym) => {
+                                    vm.get_symbol_property_result(from, *sym)?
+                                }
                             };
                             match &key {
                                 PropertyKeyVal::String(s) => vm.set_property_result(to, s, val)?,
-                                PropertyKeyVal::Symbol(sym) => vm.set_symbol_property_result(to, *sym, val)?,
+                                PropertyKeyVal::Symbol(sym) => {
+                                    vm.set_symbol_property_result(to, *sym, val)?
+                                }
                             }
                         }
                     }

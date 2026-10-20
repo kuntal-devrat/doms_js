@@ -41,7 +41,11 @@ impl Vm {
         Ok(obj)
     }
 
-    pub fn alloc_object_with_shape_and_proto(&mut self, shape_id: crate::shape::ShapeId, proto: Option<JsValue>) -> JsValue {
+    pub fn alloc_object_with_shape_and_proto(
+        &mut self,
+        shape_id: crate::shape::ShapeId,
+        proto: Option<JsValue>,
+    ) -> JsValue {
         let mut obj = JsObject::new_ordinary(shape_id, proto.or(self.object_proto));
         let num_props = self.shapes.get(shape_id).map(|s| s.next_offset as usize).unwrap_or(0);
         if num_props > crate::object::IN_OBJECT_SLOTS {
@@ -68,7 +72,13 @@ impl Vm {
     }
 
     pub fn alloc_cons_string(&mut self, left: JsValue, right: JsValue, length: usize) -> JsValue {
-        let obj = JsObject::new_cons_string(ShapeRegistry::ROOT_SHAPE_ID, self.string_proto, left, right, length);
+        let obj = JsObject::new_cons_string(
+            ShapeRegistry::ROOT_SHAPE_ID,
+            self.string_proto,
+            left,
+            right,
+            length,
+        );
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
@@ -108,7 +118,12 @@ impl Vm {
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
-    pub fn alloc_arguments(&mut self, callee: JsValue, args: Vec<JsValue>, is_strict: bool) -> JsValue {
+    pub fn alloc_arguments(
+        &mut self,
+        callee: JsValue,
+        args: Vec<JsValue>,
+        is_strict: bool,
+    ) -> JsValue {
         let prev_temp = self.temp_roots.len();
         self.temp_roots.push(callee);
         let args_start = self.temp_roots.len();
@@ -155,7 +170,9 @@ impl Vm {
             );
         } else {
             let thrower = self.alloc_native_function("thrower", 0, |_vm, _this, _args| {
-                Err(VmError::TypeError("'arguments.callee' cannot be accessed in strict mode".into()))
+                Err(VmError::TypeError(
+                    "'arguments.callee' cannot be accessed in strict mode".into(),
+                ))
             });
             let cur_args = self.temp_roots[args_obj_idx];
             if let Some(ptr) = cur_args.as_object_ptr() {

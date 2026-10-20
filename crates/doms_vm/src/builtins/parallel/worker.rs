@@ -11,16 +11,25 @@ pub(super) fn register_worker(vm: &mut Vm) {
         std::thread::spawn(move || {
             let mut worker_vm = Vm::new();
             let parent_port = Arc::new(std::sync::Mutex::new(child_port));
-            let post_msg = worker_vm.alloc_closure_native_function("postMessage", 1, Arc::new({
-                let p = Arc::clone(&parent_port);
-                move |vm: &mut Vm, _this: JsValue, args: &[JsValue]| -> Result<JsValue, VmError> {
-                    let msg = args.first().copied().unwrap_or_default();
-                    let json = vm.to_json_string(msg);
-                    let guard = p.lock().unwrap();
-                    guard.post_message(json.into_bytes()).map_err(|e| VmError::RuntimeError(e.to_string()))?;
-                    Ok(JsValue::undefined())
-                }
-            }));
+            let post_msg = worker_vm.alloc_closure_native_function(
+                "postMessage",
+                1,
+                Arc::new({
+                    let p = Arc::clone(&parent_port);
+                    move |vm: &mut Vm,
+                          _this: JsValue,
+                          args: &[JsValue]|
+                          -> Result<JsValue, VmError> {
+                        let msg = args.first().copied().unwrap_or_default();
+                        let json = vm.to_json_string(msg);
+                        let guard = p.lock().unwrap();
+                        guard
+                            .post_message(json.into_bytes())
+                            .map_err(|e| VmError::RuntimeError(e.to_string()))?;
+                        Ok(JsValue::undefined())
+                    }
+                }),
+            );
             worker_vm.globals.insert("postMessage".to_string(), post_msg);
 
             let code = if std::path::Path::new(&script).exists() {

@@ -1,7 +1,7 @@
 //! Work-stealing prioritized task scheduler for parallel isolates and web worker pools.
 
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -38,8 +38,7 @@ impl PartialOrd for PrioritizedJob {
 impl Ord for PrioritizedJob {
     fn cmp(&self, other: &Self) -> Ordering {
         // Higher priority first; if equal, earlier sequence first
-        self.priority.cmp(&other.priority)
-            .then_with(|| other.seq.cmp(&self.seq))
+        self.priority.cmp(&other.priority).then_with(|| other.seq.cmp(&self.seq))
     }
 }
 
@@ -74,11 +73,7 @@ impl Scheduler {
     /// Create a new worker pool with `threads` worker threads.
     pub fn new(threads: usize) -> Self {
         let state = Arc::new((
-            Mutex::new(QueueState {
-                heap: BinaryHeap::new(),
-                shutdown: false,
-                next_seq: 0,
-            }),
+            Mutex::new(QueueState { heap: BinaryHeap::new(), shutdown: false, next_seq: 0 }),
             Condvar::new(),
         ));
         let mut workers = Vec::with_capacity(threads);
@@ -128,11 +123,7 @@ impl Scheduler {
         let mut guard = lock.lock().unwrap();
         let seq = guard.next_seq;
         guard.next_seq += 1;
-        guard.heap.push(PrioritizedJob {
-            priority,
-            seq,
-            job: Box::new(f),
-        });
+        guard.heap.push(PrioritizedJob { priority, seq, job: Box::new(f) });
         cvar.notify_one();
     }
 

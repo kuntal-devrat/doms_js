@@ -7,5 +7,5 @@ mod iterator;
 mod methods;
 mod register;
 
-pub(super) use iterator::{create_array_iterator, IterKind};
+pub(super) use iterator::{IterKind, create_array_iterator};
 pub(super) use register::register_typed_arrays;

@@ -1,11 +1,16 @@
 //! Operator and punctuation token scanning.
 
+use super::Lexer;
 use super::context::is_expr_brace_context;
 use super::token::{LexError, TokenKind};
-use super::Lexer;
 
 impl<'a> Lexer<'a> {
-    pub(super) fn read_punctuation_or_operator(&mut self, ch: char, line: usize, col: usize) -> Result<TokenKind, LexError> {
+    pub(super) fn read_punctuation_or_operator(
+        &mut self,
+        ch: char,
+        line: usize,
+        col: usize,
+    ) -> Result<TokenKind, LexError> {
         self.advance();
 
         let kind = match ch {
@@ -69,7 +74,9 @@ impl<'a> Lexer<'a> {
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
             '{' => {
-                let is_expr = if self.prev_token_kind == Some(TokenKind::RParen) && !self.fn_expr_stack.is_empty() {
+                let is_expr = if self.prev_token_kind == Some(TokenKind::RParen)
+                    && !self.fn_expr_stack.is_empty()
+                {
                     self.fn_expr_stack.pop().unwrap_or(false)
                 } else {
                     is_expr_brace_context(&self.prev_token_kind)

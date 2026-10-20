@@ -1,7 +1,7 @@
 //! `Object.getOwnPropertyDescriptor` and `Object.getOwnPropertyDescriptors`.
 
-use super::*;
 use super::names::get_own_property_keys;
+use super::*;
 
 /// Evaluates internal [[GetOwnProperty]] according to ECMAScript specification.
 /// If `target` is a Proxy, invokes the `getOwnPropertyDescriptor` trap if present.
@@ -38,10 +38,24 @@ pub fn get_own_property_descriptor_internal(
                     if let Some(val) = syms.get(&sym) {
                         let desc = vm.alloc_object();
                         vm.set_property(desc, "value", *val);
-                        if let Some(attrs) = obj.symbol_attributes.as_ref().and_then(|m| m.get(&sym)) {
-                            vm.set_property(desc, "writable", JsValue::from_boolean(attrs.writable));
-                            vm.set_property(desc, "enumerable", JsValue::from_boolean(attrs.enumerable));
-                            vm.set_property(desc, "configurable", JsValue::from_boolean(attrs.configurable));
+                        if let Some(attrs) =
+                            obj.symbol_attributes.as_ref().and_then(|m| m.get(&sym))
+                        {
+                            vm.set_property(
+                                desc,
+                                "writable",
+                                JsValue::from_boolean(attrs.writable),
+                            );
+                            vm.set_property(
+                                desc,
+                                "enumerable",
+                                JsValue::from_boolean(attrs.enumerable),
+                            );
+                            vm.set_property(
+                                desc,
+                                "configurable",
+                                JsValue::from_boolean(attrs.configurable),
+                            );
                         } else {
                             let is_tag = vm.symbol_to_string_tag.is_some_and(|t| t == sym);
                             let is_iter = vm.symbol_iterator.is_some_and(|i| i == sym);
@@ -74,7 +88,9 @@ pub fn get_own_property_descriptor_internal(
                         if prop_name == "length" {
                             let desc = vm.alloc_object();
                             let is_writ = obj.is_array_length_writable();
-                            let len_val = if let Some(info) = vm.shapes.get_property_info(obj.shape_id, "length") {
+                            let len_val = if let Some(info) =
+                                vm.shapes.get_property_info(obj.shape_id, "length")
+                            {
                                 if let Some(val) = obj.get_slot(info.offset) {
                                     val
                                 } else {
@@ -99,14 +115,32 @@ pub fn get_own_property_descriptor_internal(
                                 if !elem.is_hole() {
                                     let desc = vm.alloc_object();
                                     vm.set_property(desc, "value", *elem);
-                                    let (is_writ, is_enum, is_conf) = if let Some(info) = vm.shapes.get_property_info(obj.shape_id, prop_name) {
-                                        (info.attributes.writable, info.attributes.enumerable, info.attributes.configurable)
+                                    let (is_writ, is_enum, is_conf) = if let Some(info) =
+                                        vm.shapes.get_property_info(obj.shape_id, prop_name)
+                                    {
+                                        (
+                                            info.attributes.writable,
+                                            info.attributes.enumerable,
+                                            info.attributes.configurable,
+                                        )
                                     } else {
                                         (true, true, true)
                                     };
-                                    vm.set_property(desc, "writable", JsValue::from_boolean(is_writ));
-                                    vm.set_property(desc, "enumerable", JsValue::from_boolean(is_enum));
-                                    vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
+                                    vm.set_property(
+                                        desc,
+                                        "writable",
+                                        JsValue::from_boolean(is_writ),
+                                    );
+                                    vm.set_property(
+                                        desc,
+                                        "enumerable",
+                                        JsValue::from_boolean(is_enum),
+                                    );
+                                    vm.set_property(
+                                        desc,
+                                        "configurable",
+                                        JsValue::from_boolean(is_conf),
+                                    );
                                     return Ok(desc);
                                 }
                             }
@@ -115,7 +149,11 @@ pub fn get_own_property_descriptor_internal(
                     ObjectKind::String(s) | ObjectKind::StringObject(s) => {
                         if prop_name == "length" {
                             let desc = vm.alloc_object();
-                            vm.set_property(desc, "value", JsValue::from_int32(s.encode_utf16().count() as i32));
+                            vm.set_property(
+                                desc,
+                                "value",
+                                JsValue::from_int32(s.encode_utf16().count() as i32),
+                            );
                             vm.set_property(desc, "writable", JsValue::from_boolean(false));
                             vm.set_property(desc, "enumerable", JsValue::from_boolean(false));
                             vm.set_property(desc, "configurable", JsValue::from_boolean(false));
@@ -136,7 +174,8 @@ pub fn get_own_property_descriptor_internal(
                     ObjectKind::TypedArray(ta) => {
                         if let Ok(idx) = prop_name.parse::<usize>() {
                             if idx < ta.length {
-                                let val = Vm::read_typed_array_element(ta, idx).unwrap_or(JsValue::undefined());
+                                let val = Vm::read_typed_array_element(ta, idx)
+                                    .unwrap_or(JsValue::undefined());
                                 let desc = vm.alloc_object();
                                 vm.set_property(desc, "value", val);
                                 vm.set_property(desc, "writable", JsValue::from_boolean(true));
@@ -150,8 +189,13 @@ pub fn get_own_property_descriptor_internal(
                 }
                 if let Some(info) = vm.shapes.get_property_info(obj.shape_id, prop_name) {
                     let val = vm.get_property(target, prop_name);
-                    if vm.module_namespace_objects.contains(&target) && val == JsValue::uninitialized() {
-                        return Err(VmError::ReferenceError(format!("Cannot access uninitialized export '{}'", prop_name)));
+                    if vm.module_namespace_objects.contains(&target)
+                        && val == JsValue::uninitialized()
+                    {
+                        return Err(VmError::ReferenceError(format!(
+                            "Cannot access uninitialized export '{}'",
+                            prop_name
+                        )));
                     }
                     let desc = vm.alloc_object();
                     vm.set_property(desc, "value", val);
@@ -175,10 +219,15 @@ pub fn get_own_property_descriptor_internal(
                     vm.set_property(desc, "configurable", JsValue::from_boolean(is_conf));
                     return Ok(desc);
                 }
-                if let Some((tgt_mod, orig_name)) = vm.module_reexports.get(&(target, prop_name.clone())).cloned() {
+                if let Some((tgt_mod, orig_name)) =
+                    vm.module_reexports.get(&(target, prop_name.clone())).cloned()
+                {
                     let val = vm.get_property(tgt_mod, &orig_name);
                     if val == JsValue::uninitialized() {
-                        return Err(VmError::ReferenceError(format!("Cannot access uninitialized export '{}'", prop_name)));
+                        return Err(VmError::ReferenceError(format!(
+                            "Cannot access uninitialized export '{}'",
+                            prop_name
+                        )));
                     }
                     let desc = vm.alloc_object();
                     vm.set_property(desc, "value", val);
@@ -194,46 +243,52 @@ pub fn get_own_property_descriptor_internal(
 }
 
 pub(super) fn register_descriptor(vm: &mut Vm) -> (JsValue, JsValue) {
-    let get_own_prop_desc_fn = vm.alloc_native_function("getOwnPropertyDescriptor", 2, |vm, _this, args| {
-        let target = match args.first() {
-            Some(t) if !t.is_nullish() => *t,
-            _ => return Err(VmError::TypeError("Object.getOwnPropertyDescriptor called on non-object".into())),
-        };
-        let target_obj = if target.is_js_object() {
-            target
-        } else {
-            vm.to_object_value(target)?
-        };
-        let prop_key = match args.get(1) {
-            Some(p) => vm.to_property_key(*p)?,
-            None => PropertyKeyVal::String("undefined".to_string()),
-        };
-        get_own_property_descriptor_internal(vm, target_obj, &prop_key)
-    });
+    let get_own_prop_desc_fn =
+        vm.alloc_native_function("getOwnPropertyDescriptor", 2, |vm, _this, args| {
+            let target = match args.first() {
+                Some(t) if !t.is_nullish() => *t,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "Object.getOwnPropertyDescriptor called on non-object".into(),
+                    ));
+                }
+            };
+            let target_obj =
+                if target.is_js_object() { target } else { vm.to_object_value(target)? };
+            let prop_key = match args.get(1) {
+                Some(p) => vm.to_property_key(*p)?,
+                None => PropertyKeyVal::String("undefined".to_string()),
+            };
+            get_own_property_descriptor_internal(vm, target_obj, &prop_key)
+        });
 
-    let get_own_prop_descriptors_fn = vm.alloc_native_function("getOwnPropertyDescriptors", 1, |vm, _this, args| {
-        let target = match args.first() {
-            Some(t) if !t.is_nullish() => *t,
-            _ => return Err(VmError::TypeError("Cannot convert undefined or null to object".into())),
-        };
-        let target_obj = if target.is_js_object() {
-            target
-        } else {
-            vm.to_object_value(target)?
-        };
-        let keys = get_own_property_keys(vm, target_obj)?;
-        let descriptors = vm.alloc_object();
-        for key in keys {
-            let desc = get_own_property_descriptor_internal(vm, target_obj, &key)?;
-            if !desc.is_undefined() {
-                match key {
-                    PropertyKeyVal::String(s) => vm.set_property(descriptors, &s, desc),
-                    PropertyKeyVal::Symbol(sym) => vm.set_symbol_property(descriptors, sym, desc),
+    let get_own_prop_descriptors_fn =
+        vm.alloc_native_function("getOwnPropertyDescriptors", 1, |vm, _this, args| {
+            let target = match args.first() {
+                Some(t) if !t.is_nullish() => *t,
+                _ => {
+                    return Err(VmError::TypeError(
+                        "Cannot convert undefined or null to object".into(),
+                    ));
+                }
+            };
+            let target_obj =
+                if target.is_js_object() { target } else { vm.to_object_value(target)? };
+            let keys = get_own_property_keys(vm, target_obj)?;
+            let descriptors = vm.alloc_object();
+            for key in keys {
+                let desc = get_own_property_descriptor_internal(vm, target_obj, &key)?;
+                if !desc.is_undefined() {
+                    match key {
+                        PropertyKeyVal::String(s) => vm.set_property(descriptors, &s, desc),
+                        PropertyKeyVal::Symbol(sym) => {
+                            vm.set_symbol_property(descriptors, sym, desc)
+                        }
+                    }
                 }
             }
-        }
-        Ok(descriptors)
-    });
+            Ok(descriptors)
+        });
 
     (get_own_prop_desc_fn, get_own_prop_descriptors_fn)
 }

@@ -1,7 +1,10 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    pub(crate) fn parse_class_elements(&mut self, is_derived: bool) -> Result<(Vec<String>, Vec<Statement>, bool, Vec<ClassElement>), ParseError> {
+    pub(crate) fn parse_class_elements(
+        &mut self,
+        is_derived: bool,
+    ) -> Result<(Vec<String>, Vec<Statement>, bool, Vec<ClassElement>), ParseError> {
         let mut ctor_params = Vec::new();
         let mut ctor_body = Vec::new();
         let mut has_ctor = false;
@@ -27,7 +30,10 @@ impl<'a> Parser<'a> {
                 continue;
             }
             let is_static = if self.check(&TokenKind::Static) || self.check_ident("static") {
-                if self.peeked.kind == TokenKind::LParen || self.peeked.kind == TokenKind::Colon || self.peeked.kind == TokenKind::Eq {
+                if self.peeked.kind == TokenKind::LParen
+                    || self.peeked.kind == TokenKind::Colon
+                    || self.peeked.kind == TokenKind::Eq
+                {
                     false
                 } else {
                     self.advance()?;
@@ -67,7 +73,11 @@ impl<'a> Parser<'a> {
             }
 
             let is_async = if self.check(&TokenKind::Async) || self.check_ident("async") {
-                if self.peeked.kind == TokenKind::LParen || self.peeked.kind == TokenKind::Colon || self.peeked.kind == TokenKind::Eq || self.peeked.kind == TokenKind::Semicolon {
+                if self.peeked.kind == TokenKind::LParen
+                    || self.peeked.kind == TokenKind::Colon
+                    || self.peeked.kind == TokenKind::Eq
+                    || self.peeked.kind == TokenKind::Semicolon
+                {
                     false
                 } else {
                     self.advance()?;
@@ -79,7 +89,8 @@ impl<'a> Parser<'a> {
 
             let is_generator = self.match_token(&TokenKind::Star)?;
 
-            if !is_generator && (self.check_ident("get") || self.check_ident("set"))
+            if !is_generator
+                && (self.check_ident("get") || self.check_ident("set"))
                 && self.peeked.kind != TokenKind::LParen
                 && self.peeked.kind != TokenKind::Semicolon
                 && self.peeked.kind != TokenKind::RBrace
@@ -114,16 +125,18 @@ impl<'a> Parser<'a> {
                     self.in_derived_constructor = prev_ctor;
                     if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
                         if let PropertyKey::Literal(k) = &key {
-                            instance_fields.push(Statement::Expression(Expression::DefinePrivateAccessor {
-                                target: Box::new(Expression::This),
-                                property: k.clone(),
-                                is_getter: true,
-                                accessor: Box::new(Expression::FunctionExpr {
-                                    name: None,
-                                    params: vec![],
-                                    body: body.clone(),
-                                }),
-                            }));
+                            instance_fields.push(Statement::Expression(
+                                Expression::DefinePrivateAccessor {
+                                    target: Box::new(Expression::This),
+                                    property: k.clone(),
+                                    is_getter: true,
+                                    accessor: Box::new(Expression::FunctionExpr {
+                                        name: None,
+                                        params: vec![],
+                                        body: body.clone(),
+                                    }),
+                                },
+                            ));
                         }
                     }
                     elements.push(ClassElement {
@@ -146,7 +159,9 @@ impl<'a> Parser<'a> {
                     self.in_async = false;
                     let (params, defaults) = self.parse_formal_parameters()?;
                     if params.len() != 1 || params[0].starts_with("...") {
-                        return Err(ParseError::General("Setter must have exactly one formal parameter".to_string()));
+                        return Err(ParseError::General(
+                            "Setter must have exactly one formal parameter".to_string(),
+                        ));
                     }
                     let mut body = self.parse_function_body(&params, None)?;
                     self.in_generator = prev_gen;
@@ -156,16 +171,18 @@ impl<'a> Parser<'a> {
                     Self::apply_parameter_defaults(&mut body, defaults);
                     if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
                         if let PropertyKey::Literal(k) = &key {
-                            instance_fields.push(Statement::Expression(Expression::DefinePrivateAccessor {
-                                target: Box::new(Expression::This),
-                                property: k.clone(),
-                                is_getter: false,
-                                accessor: Box::new(Expression::FunctionExpr {
-                                    name: None,
-                                    params: params.clone(),
-                                    body: body.clone(),
-                                }),
-                            }));
+                            instance_fields.push(Statement::Expression(
+                                Expression::DefinePrivateAccessor {
+                                    target: Box::new(Expression::This),
+                                    property: k.clone(),
+                                    is_getter: false,
+                                    accessor: Box::new(Expression::FunctionExpr {
+                                        name: None,
+                                        params: params.clone(),
+                                        body: body.clone(),
+                                    }),
+                                },
+                            ));
                         }
                     }
                     elements.push(ClassElement {
@@ -189,7 +206,10 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            if !is_static && !is_generator && matches!(&key, PropertyKey::Literal(k) if k == "constructor") {
+            if !is_static
+                && !is_generator
+                && matches!(&key, PropertyKey::Literal(k) if k == "constructor")
+            {
                 if self.check(&TokenKind::LParen) {
                     let prev_ctor = self.in_derived_constructor;
                     let prev_method = self.in_method;
@@ -224,29 +244,13 @@ impl<'a> Parser<'a> {
                 self.in_method = prev_method;
                 Self::apply_parameter_defaults(&mut body, defaults);
                 let method_expr = if is_async && is_generator {
-                    Expression::AsyncGeneratorExpr {
-                        name: None,
-                        params,
-                        body,
-                    }
+                    Expression::AsyncGeneratorExpr { name: None, params, body }
                 } else if is_async {
-                    Expression::AsyncFunctionExpr {
-                        name: None,
-                        params,
-                        body,
-                    }
+                    Expression::AsyncFunctionExpr { name: None, params, body }
                 } else if is_generator {
-                    Expression::GeneratorExpr {
-                        name: None,
-                        params,
-                        body,
-                    }
+                    Expression::GeneratorExpr { name: None, params, body }
                 } else {
-                    Expression::MethodExpr {
-                        name: None,
-                        params,
-                        body,
-                    }
+                    Expression::MethodExpr { name: None, params, body }
                 };
                 if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
                     if let PropertyKey::Literal(k) = &key {
@@ -277,21 +281,27 @@ impl<'a> Parser<'a> {
                 if !is_static {
                     let init_val = init_opt.unwrap_or(Expression::Literal(Literal::Undefined));
                     let init_stmt = match key {
-                        PropertyKey::Literal(k) if k.starts_with('#') => Statement::Expression(Expression::DefineField {
-                            target: Box::new(Expression::This),
-                            property: k,
-                            value: Box::new(init_val),
-                        }),
-                        PropertyKey::Literal(k) => Statement::Expression(Expression::MemberAssignment {
-                            object: Box::new(Expression::This),
-                            property: k,
-                            value: Box::new(init_val),
-                        }),
-                        PropertyKey::Computed(expr) => Statement::Expression(Expression::IndexAssignment {
-                            object: Box::new(Expression::This),
-                            index: Box::new(expr),
-                            value: Box::new(init_val),
-                        }),
+                        PropertyKey::Literal(k) if k.starts_with('#') => {
+                            Statement::Expression(Expression::DefineField {
+                                target: Box::new(Expression::This),
+                                property: k,
+                                value: Box::new(init_val),
+                            })
+                        }
+                        PropertyKey::Literal(k) => {
+                            Statement::Expression(Expression::MemberAssignment {
+                                object: Box::new(Expression::This),
+                                property: k,
+                                value: Box::new(init_val),
+                            })
+                        }
+                        PropertyKey::Computed(expr) => {
+                            Statement::Expression(Expression::IndexAssignment {
+                                object: Box::new(Expression::This),
+                                index: Box::new(expr),
+                                value: Box::new(init_val),
+                            })
+                        }
                     };
                     instance_fields.push(init_stmt);
                 }
@@ -383,7 +393,9 @@ impl<'a> Parser<'a> {
             }
             Statement::ForIn { left, right, body, .. } => {
                 if left == "arguments" {
-                    return Err(ParseError::General("Static initialization block cannot use 'arguments'".into()));
+                    return Err(ParseError::General(
+                        "Static initialization block cannot use 'arguments'".into(),
+                    ));
                 }
                 self.check_static_block_expr(right)?;
                 self.check_static_block_stmt(body)
@@ -393,7 +405,9 @@ impl<'a> Parser<'a> {
                     return Err(ParseError::UnexpectedToken(TokenKind::Await, 0, 0));
                 }
                 if left == "arguments" {
-                    return Err(ParseError::General("Static initialization block cannot use 'arguments'".into()));
+                    return Err(ParseError::General(
+                        "Static initialization block cannot use 'arguments'".into(),
+                    ));
                 }
                 self.check_static_block_expr(right)?;
                 self.check_static_block_stmt(body)
@@ -401,7 +415,10 @@ impl<'a> Parser<'a> {
             Statement::VarDecl { declarations, .. } => {
                 for d in declarations {
                     if d.name == "arguments" || d.name == "await" {
-                        return Err(ParseError::General(format!("Static initialization block cannot declare '{}'", d.name)));
+                        return Err(ParseError::General(format!(
+                            "Static initialization block cannot declare '{}'",
+                            d.name
+                        )));
                     }
                     if let Some(ref init) = d.init {
                         self.check_static_block_expr(init)?;
@@ -422,8 +439,12 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             Statement::TryCatch { try_block, catch_param, catch_block, finally_block } => {
-                if catch_param.as_deref() == Some("arguments") || catch_param.as_deref() == Some("await") {
-                    return Err(ParseError::General("Static initialization block cannot bind 'arguments' or 'await'".into()));
+                if catch_param.as_deref() == Some("arguments")
+                    || catch_param.as_deref() == Some("await")
+                {
+                    return Err(ParseError::General(
+                        "Static initialization block cannot bind 'arguments' or 'await'".into(),
+                    ));
                 }
                 self.check_static_block_stmt(try_block)?;
                 if let Some(cb) = catch_block {
@@ -451,15 +472,13 @@ impl<'a> Parser<'a> {
 
     fn check_static_block_expr(&self, expr: &Expression) -> Result<(), ParseError> {
         match expr {
-            Expression::Identifier(name) if name == "arguments" => {
-                Err(ParseError::General("Static initialization block cannot use 'arguments'".into()))
-            }
+            Expression::Identifier(name) if name == "arguments" => Err(ParseError::General(
+                "Static initialization block cannot use 'arguments'".into(),
+            )),
             Expression::Identifier(name) if name == "await" => {
                 Err(ParseError::UnexpectedToken(TokenKind::Await, 0, 0))
             }
-            Expression::Await(_) => {
-                Err(ParseError::UnexpectedToken(TokenKind::Await, 0, 0))
-            }
+            Expression::Await(_) => Err(ParseError::UnexpectedToken(TokenKind::Await, 0, 0)),
             Expression::Yield(_) | Expression::YieldStar(_) => {
                 Err(ParseError::UnexpectedToken(TokenKind::Yield, 0, 0))
             }
@@ -470,7 +489,10 @@ impl<'a> Parser<'a> {
             Expression::Unary { expr, .. } => self.check_static_block_expr(expr),
             Expression::Assignment { target, value } => {
                 if target == "arguments" || target == "await" {
-                    return Err(ParseError::General(format!("Static initialization block cannot assign to '{}'", target)));
+                    return Err(ParseError::General(format!(
+                        "Static initialization block cannot assign to '{}'",
+                        target
+                    )));
                 }
                 self.check_static_block_expr(value)
             }
