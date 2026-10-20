@@ -12,6 +12,7 @@ use cranelift_codegen::ir::{
     condcodes::{FloatCC, IntCC},
     types,
 };
+use cranelift_codegen::settings::Configurable;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
@@ -168,6 +169,99 @@ pub fn compile_native_osr(chunk: &BytecodeChunk, loop_target: usize) -> Option<J
     compile_native_internal(chunk, Some(loop_target))
 }
 
+fn compute_stack_depths(chunk: &BytecodeChunk, osr_target: Option<usize>) -> Vec<usize> {
+    let num_insts = chunk.instructions.len();
+    let mut depths: Vec<Option<usize>> = vec![None; num_insts + 1];
+    let start_ip = osr_target.unwrap_or(0);
+    depths[start_ip] = Some(0);
+
+    let mut worklist = std::collections::VecDeque::new();
+    worklist.push_back(start_ip);
+
+    while let Some(ip) = worklist.pop_front() {
+        if ip >= num_insts {
+            continue;
+        }
+        let cur_depth = depths[ip].unwrap_or(0);
+        let op = &chunk.instructions[ip];
+
+        let (pops, pushes, branches) = match op {
+            OpCode::LoadConst(_)
+            | OpCode::LoadNull
+            | OpCode::LoadUndefined
+            | OpCode::LoadTrue
+            | OpCode::LoadFalse
+            | OpCode::This
+            | OpCode::GetLocal(_)
+            | OpCode::GetGlobal(_)
+            | OpCode::GetGlobalSafe(_)
+            | OpCode::CreateObject
+            | OpCode::Dup => (0, 1, Vec::new()),
+
+            OpCode::SetLocal(_) | OpCode::SetGlobal(_) | OpCode::SetGlobalDirect(_) => {
+                (0, 0, Vec::new())
+            }
+
+            OpCode::Pop => (1, 0, Vec::new()),
+
+            OpCode::Add
+            | OpCode::Sub
+            | OpCode::Mul
+            | OpCode::Div
+            | OpCode::Mod
+            | OpCode::BitAnd
+            | OpCode::BitOr
+            | OpCode::BitXor
+            | OpCode::Shl
+            | OpCode::Shr
+            | OpCode::Ushr
+            | OpCode::Lt
+            | OpCode::Lte
+            | OpCode::Gt
+            | OpCode::Gte
+            | OpCode::Eq
+            | OpCode::NotEq
+            | OpCode::StrictEq
+            | OpCode::StrictNotEq
+            | OpCode::GetElem => (2, 1, Vec::new()),
+
+            OpCode::BitNot | OpCode::Pos | OpCode::Neg | OpCode::Not | OpCode::GetProp(_) => {
+                (1, 1, Vec::new())
+            }
+
+            OpCode::SetProp(_) => (2, 1, Vec::new()),
+            OpCode::SetElem => (3, 1, Vec::new()),
+
+            OpCode::CreateArray(n) => (*n as usize, 1, Vec::new()),
+            OpCode::Call(argc) | OpCode::Construct(argc) => (*argc as usize + 1, 1, Vec::new()),
+            OpCode::CallWithThis(argc) => (*argc as usize + 2, 1, Vec::new()),
+
+            OpCode::Jump(t) => (0, 0, vec![*t as usize]),
+            OpCode::JumpIfFalse(t) | OpCode::JumpIfTrue(t) => (1, 0, vec![*t as usize, ip + 1]),
+            OpCode::Return | OpCode::Halt => (cur_depth.min(1), 0, Vec::new()),
+            _ => (0, 0, Vec::new()),
+        };
+
+        let next_depth = cur_depth.saturating_sub(pops) + pushes;
+
+        if !branches.is_empty() {
+            for target in branches {
+                if target <= num_insts && depths[target].is_none() {
+                    depths[target] = Some(next_depth);
+                    worklist.push_back(target);
+                }
+            }
+        } else if !matches!(op, OpCode::Return | OpCode::Halt) && ip + 1 <= num_insts {
+            if depths[ip + 1].is_none() {
+                depths[ip + 1] = Some(next_depth);
+                worklist.push_back(ip + 1);
+            }
+        }
+    }
+
+    depths.into_iter().map(|d| d.unwrap_or(0)).collect()
+}
+
 fn compile_native_internal(
     chunk: &BytecodeChunk,
     osr_target: Option<usize>,
@@ -180,7 +274,11 @@ fn compile_native_internal(
         return None;
     }
 
-    let mut builder_obj = JITBuilder::new(cranelift_module::default_libcall_names()).ok()?;
+    let mut flag_builder = cranelift_codegen::settings::builder();
+    flag_builder.set("opt_level", "speed").ok()?;
+    let isa_builder = cranelift_native::builder().ok()?;
+    let isa = isa_builder.finish(cranelift_codegen::settings::Flags::new(flag_builder)).ok()?;
+    let mut builder_obj = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
     builder_obj.symbol("jit_strict_eq", jit_strict_eq as *const u8);
     builder_obj.symbol("jit_strict_neq", jit_strict_neq as *const u8);
     builder_obj.symbol("jit_get_prop_monomorphic", jit_get_prop_monomorphic as *const u8);
@@ -511,20 +609,19 @@ fn compile_native_internal(
     }
     builder.seal_block(entry_block);
 
-    let mut stack_depth: usize = 0;
+    let precomputed_depths = compute_stack_depths(chunk, osr_target);
+    let mut stack_depth: usize = precomputed_depths[osr_target.unwrap_or(0)];
     let mut block_terminated = false;
     let bitcast_flags = MemFlagsData::new().with_endianness(Endianness::Little);
 
     for ip in 0..num_insts {
-        if Some(ip) == osr_target {
-            stack_depth = 0;
-        }
         if let Some(&blk) = blocks.get(&ip) {
             if ip > 0 && !block_terminated {
                 builder.ins().jump(blk, &[]);
             }
             builder.switch_to_block(blk);
             block_terminated = false;
+            stack_depth = precomputed_depths[ip];
         }
 
         if block_terminated {
@@ -623,63 +720,83 @@ fn compile_native_internal(
                     let l32 = builder.ins().ireduce(types::I32, lhs);
                     let r32 = builder.ins().ireduce(types::I32, rhs);
 
-                    let l_f64_from_int = builder.ins().fcvt_from_sint(types::F64, l32);
-                    let l_f64_raw = builder.ins().bitcast(types::F64, bitcast_flags, lhs);
-                    let l_f64 = builder.ins().select(l_is_int, l_f64_from_int, l_f64_raw);
-
-                    let r_f64_from_int = builder.ins().fcvt_from_sint(types::F64, r32);
-                    let r_f64_raw = builder.ins().bitcast(types::F64, bitcast_flags, rhs);
-                    let r_f64 = builder.ins().select(r_is_int, r_f64_from_int, r_f64_raw);
-
                     let l64_s = builder.ins().sextend(types::I64, l32);
                     let r64_s = builder.ins().sextend(types::I64, r32);
 
                     let res = match op {
-                        OpCode::Add => {
-                            let sum64_s = builder.ins().iadd(l64_s, r64_s);
-                            let sum32 = builder.ins().ireduce(types::I32, sum64_s);
-                            let sum32_reext = builder.ins().sextend(types::I64, sum32);
+                        OpCode::Add | OpCode::Sub | OpCode::Mul => {
+                            let (calc64_s, calc32) = match op {
+                                OpCode::Add => {
+                                    let s64 = builder.ins().iadd(l64_s, r64_s);
+                                    let s32 = builder.ins().ireduce(types::I32, s64);
+                                    (s64, s32)
+                                }
+                                OpCode::Sub => {
+                                    let d64 = builder.ins().isub(l64_s, r64_s);
+                                    let d32 = builder.ins().ireduce(types::I32, d64);
+                                    (d64, d32)
+                                }
+                                OpCode::Mul => {
+                                    let p64 = builder.ins().imul(l64_s, r64_s);
+                                    let p32 = builder.ins().ireduce(types::I32, p64);
+                                    (p64, p32)
+                                }
+                                _ => unreachable!(),
+                            };
+                            let calc32_reext = builder.ins().sextend(types::I64, calc32);
                             let no_overflow =
-                                builder.ins().icmp(IntCC::Equal, sum64_s, sum32_reext);
+                                builder.ins().icmp(IntCC::Equal, calc64_s, calc32_reext);
                             let use_int = builder.ins().band(is_both_int, no_overflow);
 
-                            let sum64_u = builder.ins().uextend(types::I64, sum32);
-                            let int_res = builder.ins().bor(tag_int, sum64_u);
-                            let sum_f64 = builder.ins().fadd(l_f64, r_f64);
-                            let dbl_res = builder.ins().bitcast(types::I64, bitcast_flags, sum_f64);
-                            builder.ins().select(use_int, int_res, dbl_res)
-                        }
-                        OpCode::Sub => {
-                            let diff64_s = builder.ins().isub(l64_s, r64_s);
-                            let diff32 = builder.ins().ireduce(types::I32, diff64_s);
-                            let diff32_reext = builder.ins().sextend(types::I64, diff32);
-                            let no_overflow =
-                                builder.ins().icmp(IntCC::Equal, diff64_s, diff32_reext);
-                            let use_int = builder.ins().band(is_both_int, no_overflow);
+                            let fast_int_block = builder.create_block();
+                            let slow_dbl_block = builder.create_block();
+                            let merge_block = builder.create_block();
+                            let arith_res_var = builder.declare_var(types::I64);
 
-                            let diff64_u = builder.ins().uextend(types::I64, diff32);
-                            let int_res = builder.ins().bor(tag_int, diff64_u);
-                            let diff_f64 = builder.ins().fsub(l_f64, r_f64);
-                            let dbl_res =
-                                builder.ins().bitcast(types::I64, bitcast_flags, diff_f64);
-                            builder.ins().select(use_int, int_res, dbl_res)
-                        }
-                        OpCode::Mul => {
-                            let prod64_s = builder.ins().imul(l64_s, r64_s);
-                            let prod32 = builder.ins().ireduce(types::I32, prod64_s);
-                            let prod32_reext = builder.ins().sextend(types::I64, prod32);
-                            let no_overflow =
-                                builder.ins().icmp(IntCC::Equal, prod64_s, prod32_reext);
-                            let use_int = builder.ins().band(is_both_int, no_overflow);
+                            builder.ins().brif(use_int, fast_int_block, &[], slow_dbl_block, &[]);
 
-                            let prod64_u = builder.ins().uextend(types::I64, prod32);
-                            let int_res = builder.ins().bor(tag_int, prod64_u);
-                            let prod_f64 = builder.ins().fmul(l_f64, r_f64);
-                            let dbl_res =
-                                builder.ins().bitcast(types::I64, bitcast_flags, prod_f64);
-                            builder.ins().select(use_int, int_res, dbl_res)
+                            // Fast pure integer path: hardware integer ALU, 0 float conversions
+                            builder.switch_to_block(fast_int_block);
+                            let res64_u = builder.ins().uextend(types::I64, calc32);
+                            let int_res = builder.ins().bor(tag_int, res64_u);
+                            builder.def_var(arith_res_var, int_res);
+                            builder.ins().jump(merge_block, &[]);
+                            builder.seal_block(fast_int_block);
+
+                            // Slow float path: handles doubles and integer overflows
+                            builder.switch_to_block(slow_dbl_block);
+                            let l_f64_from_int = builder.ins().fcvt_from_sint(types::F64, l32);
+                            let l_f64_raw = builder.ins().bitcast(types::F64, bitcast_flags, lhs);
+                            let l_f64 = builder.ins().select(l_is_int, l_f64_from_int, l_f64_raw);
+
+                            let r_f64_from_int = builder.ins().fcvt_from_sint(types::F64, r32);
+                            let r_f64_raw = builder.ins().bitcast(types::F64, bitcast_flags, rhs);
+                            let r_f64 = builder.ins().select(r_is_int, r_f64_from_int, r_f64_raw);
+
+                            let f64_res = match op {
+                                OpCode::Add => builder.ins().fadd(l_f64, r_f64),
+                                OpCode::Sub => builder.ins().fsub(l_f64, r_f64),
+                                OpCode::Mul => builder.ins().fmul(l_f64, r_f64),
+                                _ => unreachable!(),
+                            };
+                            let dbl_res = builder.ins().bitcast(types::I64, bitcast_flags, f64_res);
+                            builder.def_var(arith_res_var, dbl_res);
+                            builder.ins().jump(merge_block, &[]);
+                            builder.seal_block(slow_dbl_block);
+
+                            builder.switch_to_block(merge_block);
+                            builder.seal_block(merge_block);
+                            builder.use_var(arith_res_var)
                         }
                         OpCode::Div => {
+                            let l_f64_from_int = builder.ins().fcvt_from_sint(types::F64, l32);
+                            let l_f64_raw = builder.ins().bitcast(types::F64, bitcast_flags, lhs);
+                            let l_f64 = builder.ins().select(l_is_int, l_f64_from_int, l_f64_raw);
+
+                            let r_f64_from_int = builder.ins().fcvt_from_sint(types::F64, r32);
+                            let r_f64_raw = builder.ins().bitcast(types::F64, bitcast_flags, rhs);
+                            let r_f64 = builder.ins().select(r_is_int, r_f64_from_int, r_f64_raw);
+
                             let div_f64 = builder.ins().fdiv(l_f64, r_f64);
                             builder.ins().bitcast(types::I64, bitcast_flags, div_f64)
                         }

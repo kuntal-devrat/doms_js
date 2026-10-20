@@ -26,9 +26,7 @@ impl<'a> Parser<'a> {
 
             let prev_gen = self.in_generator;
             let prev_async = self.in_async;
-            if is_generator {
-                self.in_generator = true;
-            }
+            self.in_generator = is_generator;
             self.in_async = true;
             let (params, defaults) = match self.parse_formal_parameters() {
                 Ok(p) => p,

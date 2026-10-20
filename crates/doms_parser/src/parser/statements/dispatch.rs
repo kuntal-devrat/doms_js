@@ -151,6 +151,7 @@ impl<'a> Parser<'a> {
                         | TokenKind::Public
                         | TokenKind::Static
                         | TokenKind::Yield
+                        | TokenKind::Let
                         | TokenKind::Await => true,
                         _ => false,
                     } =>
@@ -159,6 +160,13 @@ impl<'a> Parser<'a> {
                     TokenKind::Ident(s) => s.clone(),
                     other => other.as_prop_name().unwrap_or_default(),
                 };
+                if lbl == "let" {
+                    return Err(ParseError::UnexpectedToken(
+                        self.current.kind.clone(),
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
                 if self.is_strict && is_strict_reserved_word(&lbl) {
                     return Err(ParseError::UnexpectedToken(
                         self.current.kind.clone(),
@@ -169,6 +177,13 @@ impl<'a> Parser<'a> {
                 if (self.in_async || self.is_module || self.in_static_block) && lbl == "await" {
                     return Err(ParseError::UnexpectedToken(
                         TokenKind::Await,
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+                if (self.in_generator || self.is_strict) && lbl == "yield" {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Yield,
                         self.current.line,
                         self.current.col,
                     ));

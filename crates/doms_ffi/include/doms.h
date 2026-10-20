@@ -136,6 +136,9 @@ doms_value_t*   doms_value_new_undefined(void);
 doms_value_t*   doms_value_new_null(void);
 doms_value_t*   doms_value_new_boolean(int b);
 doms_value_t*   doms_value_new_number(double n);
+doms_status_t   doms_value_new_string(doms_context_t* ctx,
+                                      const char* str, size_t len,
+                                      doms_value_t** result);
 
 /* Value memory management */
 void            doms_value_ref(doms_value_t* val);
@@ -143,8 +146,22 @@ void            doms_value_unref(doms_value_t* val);
 void            doms_free_string(doms_context_t* ctx, const char* str);
 
 /* ----------------------------------------------------------------------------
+ * Global Object Operations
+ * ---------------------------------------------------------------------------- */
+
+doms_status_t   doms_get_global(doms_context_t* ctx,
+                                doms_value_t** result);
+
+doms_status_t   doms_set_global(doms_context_t* ctx,
+                                const char* name, size_t name_len,
+                                doms_value_t* val);
+
+/* ----------------------------------------------------------------------------
  * Object Operations
  * ---------------------------------------------------------------------------- */
+
+doms_status_t   doms_object_new(doms_context_t* ctx,
+                                doms_value_t** result);
 
 doms_status_t   doms_object_get(doms_context_t* ctx,
                                 doms_value_t* obj,
@@ -155,6 +172,26 @@ doms_status_t   doms_object_set(doms_context_t* ctx,
                                 doms_value_t* obj,
                                 const char* key, size_t key_len,
                                 doms_value_t* value);
+
+/* ----------------------------------------------------------------------------
+ * Array Operations
+ * ---------------------------------------------------------------------------- */
+
+doms_status_t   doms_array_new(doms_context_t* ctx,
+                               doms_value_t** result);
+
+doms_status_t   doms_array_push(doms_context_t* ctx,
+                                doms_value_t* arr,
+                                doms_value_t* val);
+
+doms_status_t   doms_array_length(doms_context_t* ctx,
+                                  doms_value_t* arr,
+                                  size_t* out_len);
+
+doms_status_t   doms_array_get_at(doms_context_t* ctx,
+                                  doms_value_t* arr,
+                                  size_t index,
+                                  doms_value_t** result);
 
 /* ----------------------------------------------------------------------------
  * Function Calls and Native Bindings
@@ -175,6 +212,11 @@ typedef doms_status_t (*doms_native_fn)(doms_context_t* ctx,
 
 doms_status_t   doms_set_native_function(doms_context_t* ctx,
                                          doms_value_t* obj,
+                                         const char* name, size_t name_len,
+                                         doms_native_fn fn,
+                                         void* userdata);
+
+doms_status_t   doms_set_global_function(doms_context_t* ctx,
                                          const char* name, size_t name_len,
                                          doms_native_fn fn,
                                          void* userdata);

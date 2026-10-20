@@ -20,6 +20,13 @@ impl<'a> Parser<'a> {
         let class_id = self.class_id_counter;
         self.class_id_counter += 1;
         let private_names = self.scan_declared_private_names();
+        if private_names.contains("#constructor") {
+            return Err(ParseError::General(
+                "Class cannot have private member '#constructor'".to_string(),
+            ));
+        }
+        let mut declared_privates: std::collections::HashMap<String, (bool, u8)> =
+            std::collections::HashMap::new();
         let mut scoped_names = std::collections::HashMap::new();
         for name in &private_names {
             scoped_names.insert(name.clone(), format!("{}@{}", name, class_id));
@@ -29,7 +36,7 @@ impl<'a> Parser<'a> {
             if self.match_token(&TokenKind::Semicolon)? {
                 continue;
             }
-            let is_static = if self.check(&TokenKind::Static) || self.check_ident("static") {
+            let is_static = if self.check(&TokenKind::Static) {
                 if self.peeked.kind == TokenKind::LParen
                     || self.peeked.kind == TokenKind::Colon
                     || self.peeked.kind == TokenKind::Eq
@@ -72,11 +79,12 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            let is_async = if self.check(&TokenKind::Async) || self.check_ident("async") {
+            let is_async = if self.check(&TokenKind::Async) {
                 if self.peeked.kind == TokenKind::LParen
                     || self.peeked.kind == TokenKind::Colon
                     || self.peeked.kind == TokenKind::Eq
                     || self.peeked.kind == TokenKind::Semicolon
+                    || self.peeked.has_preceding_line_terminator
                 {
                     false
                 } else {
@@ -100,6 +108,40 @@ impl<'a> Parser<'a> {
                 let is_getter = self.check_ident("get");
                 self.advance()?; // 'get' or 'set'
                 let mut key = self.parse_property_name()?;
+                if let PropertyKey::Literal(ref k) = key {
+                    if k == "#constructor" {
+                        return Err(ParseError::General(
+                            "Class cannot have private member '#constructor'".to_string(),
+                        ));
+                    }
+                    if is_static && k == "prototype" {
+                        return Err(ParseError::General(
+                            "Classes may not have a static property named 'prototype'".to_string(),
+                        ));
+                    }
+                    if !is_static && k == "constructor" {
+                        return Err(ParseError::General(
+                            "Class constructor may not be an accessor".to_string(),
+                        ));
+                    }
+                    if k.starts_with('#') {
+                        let kind_bit = if is_getter { 2u8 } else { 4u8 };
+                        if let Some((prev_static, prev_kind)) = declared_privates.get_mut(k) {
+                            if *prev_static != is_static
+                                || (*prev_kind & 1) != 0
+                                || (*prev_kind & kind_bit) != 0
+                            {
+                                return Err(ParseError::General(format!(
+                                    "Identifier '{}' has already been declared",
+                                    k
+                                )));
+                            }
+                            *prev_kind |= kind_bit;
+                        } else {
+                            declared_privates.insert(k.clone(), (is_static, kind_bit));
+                        }
+                    }
+                }
                 if let PropertyKey::Literal(ref mut k) = key {
                     if k.starts_with('#') {
                         if let Some(unique) = self.resolve_private_name(k) {
@@ -199,6 +241,27 @@ impl<'a> Parser<'a> {
             }
 
             let mut key = self.parse_property_name()?;
+            if let PropertyKey::Literal(ref k) = key {
+                if k == "#constructor" {
+                    return Err(ParseError::General(
+                        "Class cannot have private member '#constructor'".to_string(),
+                    ));
+                }
+                if is_static && k == "prototype" {
+                    return Err(ParseError::General(
+                        "Classes may not have a static property named 'prototype'".to_string(),
+                    ));
+                }
+                if k.starts_with('#') {
+                    if declared_privates.contains_key(k) {
+                        return Err(ParseError::General(format!(
+                            "Identifier '{}' has already been declared",
+                            k
+                        )));
+                    }
+                    declared_privates.insert(k.clone(), (is_static, 1u8));
+                }
+            }
             if let PropertyKey::Literal(ref mut k) = key {
                 if k.starts_with('#') {
                     if let Some(unique) = self.resolve_private_name(k) {
@@ -206,17 +269,35 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            if !is_static
-                && !is_generator
-                && matches!(&key, PropertyKey::Literal(k) if k == "constructor")
-            {
-                if self.check(&TokenKind::LParen) {
+            if matches!(&key, PropertyKey::Literal(k) if k == "constructor") {
+                if !is_static {
+                    if is_generator || is_async {
+                        return Err(ParseError::General(
+                            "Class constructor may not be an async method or generator".to_string(),
+                        ));
+                    }
+                    if !self.check(&TokenKind::LParen) {
+                        return Err(ParseError::General(
+                            "Classes may not have a field named 'constructor'".to_string(),
+                        ));
+                    }
+                    if has_ctor {
+                        return Err(ParseError::General(
+                            "A class may only have one constructor".to_string(),
+                        ));
+                    }
                     let prev_ctor = self.in_derived_constructor;
                     let prev_method = self.in_method;
+                    let prev_gen = self.in_generator;
+                    let prev_async = self.in_async;
                     self.in_derived_constructor = is_derived;
                     self.in_method = false;
+                    self.in_generator = false;
+                    self.in_async = false;
                     let (params, defaults) = self.parse_formal_parameters()?;
                     let mut body = self.parse_function_body(&params, None)?;
+                    self.in_generator = prev_gen;
+                    self.in_async = prev_async;
                     self.in_derived_constructor = prev_ctor;
                     self.in_method = prev_method;
                     Self::apply_parameter_defaults(&mut body, defaults);

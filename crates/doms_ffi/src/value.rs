@@ -24,7 +24,7 @@ pub unsafe extern "C" fn doms_value_to_number(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn doms_value_to_string(
-    _ctx: *mut doms_context_t,
+    ctx: *mut doms_context_t,
     val: *mut doms_value_t,
     out: *mut *const c_char,
     out_len: *mut usize,
@@ -32,7 +32,13 @@ pub unsafe extern "C" fn doms_value_to_string(
     if val.is_null() || out.is_null() {
         return doms_status_t::ErrorInvalidArg;
     }
-    let s = unsafe { format!("{}", (*val).inner) };
+    let s = if !ctx.is_null() && unsafe { !(*ctx).isolate.is_null() } {
+        let isolate = unsafe { &mut (*(*ctx).isolate).inner };
+        let inner = unsafe { (*val).inner };
+        isolate.vm.to_string_value(inner)
+    } else {
+        unsafe { format!("{}", (*val).inner) }
+    };
     let cstring = match CString::new(s) {
         Ok(cs) => cs,
         Err(_) => return doms_status_t::ErrorRuntime,
@@ -44,6 +50,32 @@ pub unsafe extern "C" fn doms_value_to_string(
     }
     unsafe {
         *out = cstring.into_raw();
+    }
+    doms_status_t::Ok
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn doms_value_new_string(
+    ctx: *mut doms_context_t,
+    str_ptr: *const c_char,
+    len: usize,
+    result: *mut *mut doms_value_t,
+) -> doms_status_t {
+    if ctx.is_null() || str_ptr.is_null() || result.is_null() {
+        return doms_status_t::ErrorInvalidArg;
+    }
+    let slice = unsafe { std::slice::from_raw_parts(str_ptr as *const u8, len) };
+    let s = match std::str::from_utf8(slice) {
+        Ok(v) => v,
+        Err(_) => return doms_status_t::ErrorInvalidArg,
+    };
+    let isolate = unsafe { &mut (*(*ctx).isolate).inner };
+    let str_val = isolate.vm.alloc_string(s.to_string());
+    unsafe {
+        *result = Box::into_raw(Box::new(doms_value_t {
+            inner: str_val,
+            ref_count: AtomicUsize::new(1),
+        }));
     }
     doms_status_t::Ok
 }
@@ -79,7 +111,7 @@ pub unsafe extern "C" fn doms_value_is_number(val: *mut doms_value_t) -> c_int {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn doms_value_is_string(val: *mut doms_value_t) -> c_int {
-    if val.is_null() { 0 } else { unsafe { (*val).inner.is_string() as c_int } }
+    if val.is_null() { 0 } else { unsafe { (*val).inner.is_js_string() as c_int } }
 }
 
 #[unsafe(no_mangle)]

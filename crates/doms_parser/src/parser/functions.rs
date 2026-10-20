@@ -39,12 +39,14 @@ impl<'a> Parser<'a> {
     ) -> Result<(Vec<String>, Vec<Statement>), ParseError> {
         let prev_in_param = self.in_param;
         self.in_param = true;
+        self.current_params_simple = true;
         self.expect(TokenKind::LParen)?;
         let mut params = Vec::new();
         let mut defaults = Vec::new();
         if !self.check(&TokenKind::RParen) {
             loop {
                 if self.match_token(&TokenKind::DotDotDot)? {
+                    self.current_params_simple = false;
                     if self.check(&TokenKind::LBracket) {
                         self.skip_balanced(TokenKind::LBracket, TokenKind::RBracket)?;
                         params.push(format!("...__rest_{}", self.destruct_counter));
@@ -61,11 +63,13 @@ impl<'a> Parser<'a> {
                 }
                 let mut destruct_decls = Vec::new();
                 let (id, is_destruct) = if self.match_token(&TokenKind::LBracket)? {
+                    self.current_params_simple = false;
                     let name = format!("__param_{}", self.destruct_counter);
                     self.destruct_counter += 1;
                     self.parse_array_destructuring_into(&name, &mut destruct_decls)?;
                     (name, true)
                 } else if self.match_token(&TokenKind::LBrace)? {
+                    self.current_params_simple = false;
                     let name = format!("__param_{}", self.destruct_counter);
                     self.destruct_counter += 1;
                     self.parse_object_destructuring_into(&name, &mut destruct_decls)?;
@@ -74,6 +78,7 @@ impl<'a> Parser<'a> {
                     (self.expect_identifier()?, false)
                 };
                 if self.match_token(&TokenKind::Eq)? {
+                    self.current_params_simple = false;
                     let def_expr = self.parse_expression(1)?;
                     defaults.push(Statement::If {
                         condition: Expression::Binary {
@@ -206,6 +211,25 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    pub(crate) fn validate_duplicate_params(
+        params: &[String],
+        line: usize,
+        col: usize,
+    ) -> Result<(), ParseError> {
+        let mut seen = std::collections::HashSet::new();
+        for p in params {
+            let clean = p.trim_start_matches("...");
+            if !seen.insert(clean) {
+                return Err(ParseError::UnexpectedToken(
+                    TokenKind::Ident(clean.to_string()),
+                    line,
+                    col,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn parse_function_body(
         &mut self,
         params: &[String],
@@ -223,6 +247,12 @@ impl<'a> Parser<'a> {
             Self::validate_strict_params_and_name(
                 params,
                 name,
+                self.current.line,
+                self.current.col,
+            )?;
+        } else if self.in_generator || self.in_async || !self.current_params_simple {
+            Self::validate_duplicate_params(
+                params,
                 self.current.line,
                 self.current.col,
             )?;
@@ -251,6 +281,11 @@ impl<'a> Parser<'a> {
                         ));
                     }
                     if value == "use strict" && !has_escape {
+                        if !self.current_params_simple {
+                            return Err(ParseError::General(
+                                "Illegal 'use strict' directive in function with non-simple parameter list".to_string(),
+                            ));
+                        }
                         if !self.is_strict {
                             self.is_strict = true;
                             self.lexer.is_strict = true;
@@ -298,7 +333,14 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_function_decl_body(&mut self) -> Result<Statement, ParseError> {
-        let (name, params, body) = self.parse_function_signature_and_body()?;
+        let prev_gen = self.in_generator;
+        let prev_async = self.in_async;
+        self.in_generator = false;
+        self.in_async = false;
+        let res = self.parse_function_signature_and_body();
+        self.in_generator = prev_gen;
+        self.in_async = prev_async;
+        let (name, params, body) = res?;
         Ok(Statement::FunctionDecl { name, params, body })
     }
 
@@ -307,9 +349,7 @@ impl<'a> Parser<'a> {
         let is_generator = self.match_token(&TokenKind::Star)?;
         let prev_gen = self.in_generator;
         let prev_async = self.in_async;
-        if is_generator {
-            self.in_generator = true;
-        }
+        self.in_generator = is_generator;
         self.in_async = true;
         let res = self.parse_function_signature_and_body();
         self.in_generator = prev_gen;
@@ -324,9 +364,12 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_generator_decl(&mut self) -> Result<Statement, ParseError> {
         let prev_gen = self.in_generator;
+        let prev_async = self.in_async;
         self.in_generator = true;
+        self.in_async = false;
         let res = self.parse_function_signature_and_body();
         self.in_generator = prev_gen;
+        self.in_async = prev_async;
         let (name, params, body) = res?;
         Ok(Statement::GeneratorDecl { name, params, body })
     }
@@ -336,13 +379,14 @@ impl<'a> Parser<'a> {
         self.in_static_block = false;
         let is_generator = self.match_token(&TokenKind::Star)?;
         let prev_gen = self.in_generator;
-        if is_generator {
-            self.in_generator = true;
-        }
+        let prev_async = self.in_async;
+        self.in_generator = is_generator;
+        self.in_async = false;
         let name = if let TokenKind::Ident(id) = &self.current.kind {
             if self.is_strict && (is_strict_reserved_word(id) || id == "eval" || id == "arguments")
             {
                 self.in_generator = prev_gen;
+                self.in_async = prev_async;
                 self.in_static_block = prev_in_static;
                 return Err(ParseError::UnexpectedToken(
                     TokenKind::Ident(id.clone()),
@@ -364,6 +408,7 @@ impl<'a> Parser<'a> {
             Ok(p) => p,
             Err(e) => {
                 self.in_generator = prev_gen;
+                self.in_async = prev_async;
                 self.in_static_block = prev_in_static;
                 return Err(e);
             }
@@ -372,6 +417,7 @@ impl<'a> Parser<'a> {
             Ok(b) => b,
             Err(e) => {
                 self.in_generator = prev_gen;
+                self.in_async = prev_async;
                 self.in_static_block = prev_in_static;
                 return Err(e);
             }
@@ -379,6 +425,7 @@ impl<'a> Parser<'a> {
         Self::apply_parameter_defaults(&mut body, defaults);
 
         self.in_generator = prev_gen;
+        self.in_async = prev_async;
         self.in_static_block = prev_in_static;
         if is_generator {
             Ok(Expression::GeneratorExpr { name, params, body })

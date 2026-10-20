@@ -137,3 +137,25 @@ pub unsafe extern "C" fn doms_set_native_function(
     isolate.vm.set_property(target, fn_name, func_val);
     doms_status_t::Ok
 }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn doms_set_global_function(
+    ctx: *mut doms_context_t,
+    name: *const c_char,
+    name_len: usize,
+    fn_ptr: doms_native_fn,
+    userdata: *mut std::ffi::c_void,
+) -> doms_status_t {
+    if ctx.is_null() || name.is_null() {
+        return doms_status_t::ErrorInvalidArg;
+    }
+    let isolate = unsafe { &mut (*(*ctx).isolate).inner };
+    let g = isolate.vm.global_object;
+    let mut g_handle = doms_value_t {
+        inner: g,
+        ref_count: AtomicUsize::new(1),
+    };
+    unsafe {
+        doms_set_native_function(ctx, &mut g_handle, name, name_len, fn_ptr, userdata)
+    }
+}

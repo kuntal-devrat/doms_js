@@ -273,6 +273,110 @@ impl<'isolate> Context<'isolate> {
     pub fn vm_mut(&mut self) -> &mut doms_vm::Vm {
         &mut self.isolate.vm
     }
+
+    /// Get the global object for this context.
+    pub fn get_global(&self) -> JsValue {
+        self.isolate.vm.global_object
+    }
+
+    /// Read a property from the global object.
+    pub fn get_global_val(&mut self, name: &str) -> JsValue {
+        let g = self.isolate.vm.global_object;
+        self.isolate.vm.get_property(g, name)
+    }
+
+    /// Set a property on the global object using any type implementing [`crate::convert::IntoJs`].
+    pub fn set_global(&mut self, name: &str, val: impl crate::convert::IntoJs) {
+        let js_val = val.into_js(&mut self.isolate.vm);
+        let g = self.isolate.vm.global_object;
+        self.isolate.vm.set_property(g, name, js_val);
+    }
+
+    /// Register a native Rust function or closure into the global scope with automatic
+    /// argument and return value conversion.
+    pub fn set_global_fn<Args, Ret>(
+        &mut self,
+        name: &str,
+        func: impl crate::callback::JsCallback<Args, Ret>,
+    ) {
+        let arity = func.arity();
+        let closure: doms_vm::object::ClosureNativeFn = std::sync::Arc::new(move |vm, this, args| {
+            func.invoke(vm, this, args)
+        });
+        let fn_val = self.isolate.vm.alloc_closure_native_function(name, arity, closure);
+        let g = self.isolate.vm.global_object;
+        self.isolate.vm.set_property(g, name, fn_val);
+    }
+
+    /// Register a native Rust function or closure as a method on a target object.
+    pub fn set_method<Args, Ret>(
+        &mut self,
+        obj: JsValue,
+        name: &str,
+        func: impl crate::callback::JsCallback<Args, Ret>,
+    ) {
+        let arity = func.arity();
+        let closure: doms_vm::object::ClosureNativeFn = std::sync::Arc::new(move |vm, this, args| {
+            func.invoke(vm, this, args)
+        });
+        let fn_val = self.isolate.vm.alloc_closure_native_function(name, arity, closure);
+        self.isolate.vm.set_property(obj, name, fn_val);
+    }
+
+    /// Create a new empty JavaScript object.
+    pub fn create_object(&mut self) -> JsValue {
+        self.isolate.vm.alloc_object()
+    }
+
+    /// Create a new JavaScript array containing the specified items.
+    pub fn create_array<T: crate::convert::IntoJs>(
+        &mut self,
+        items: impl IntoIterator<Item = T>,
+    ) -> JsValue {
+        let elements = items.into_iter().map(|item| item.into_js(&mut self.isolate.vm)).collect();
+        self.isolate.vm.alloc_array(elements)
+    }
+
+    /// Get a property from an object.
+    pub fn get_property(&mut self, obj: JsValue, key: &str) -> JsValue {
+        self.isolate.vm.get_property(obj, key)
+    }
+
+    /// Set a property on an object.
+    pub fn set_property(&mut self, obj: JsValue, key: &str, val: impl crate::convert::IntoJs) {
+        let js_val = val.into_js(&mut self.isolate.vm);
+        self.isolate.vm.set_property(obj, key, js_val);
+    }
+
+    /// Call a JavaScript function value.
+    pub fn call(
+        &mut self,
+        func: JsValue,
+        this_val: JsValue,
+        args: &[JsValue],
+    ) -> Result<JsValue, EngineError> {
+        self.isolate.vm.call(func, this_val, args).map_err(EngineError::from)
+    }
+
+    /// Call a named method on an object.
+    pub fn call_method(
+        &mut self,
+        obj: JsValue,
+        method: &str,
+        args: &[JsValue],
+    ) -> Result<JsValue, EngineError> {
+        let func = self.isolate.vm.get_property(obj, method);
+        if !self.isolate.vm.is_callable(func) {
+            return Err(EngineError::Generic(format!("Property '{}' is not callable", method)));
+        }
+        self.isolate.vm.call(func, obj, args).map_err(EngineError::from)
+    }
+
+    /// Evaluate a JavaScript expression and convert the result directly to a Rust type.
+    pub fn eval_as<T: crate::convert::FromJs>(&mut self, source: &str) -> Result<T, EngineError> {
+        let val = self.eval(source)?;
+        T::from_js(val, &mut self.isolate.vm).map_err(EngineError::Generic)
+    }
 }
 
 #[cfg(test)]
@@ -444,5 +548,71 @@ mod tests {
             .eval("[1, 2, 3].map(function (x) { return x * 2; }).join(',') === '2,4,6'")
             .unwrap();
         assert_eq!(res.as_boolean(), Some(true));
+    }
+
+    #[test]
+    fn test_native_function_binding_and_eval_as() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let mut ctx = isolate.create_context();
+
+        // Register 2-arg function
+        ctx.set_global_fn("add", |a: i32, b: i32| a + b);
+
+        // Register 1-arg function returning String
+        ctx.set_global_fn("greet", |name: String| format!("Hello, {}!", name));
+
+        // Register function returning Result for error throwing
+        ctx.set_global_fn("safe_divide", |a: f64, b: f64| -> Result<f64, String> {
+            if b == 0.0 {
+                Err("Division by zero".into())
+            } else {
+                Ok(a / b)
+            }
+        });
+
+        let sum: i32 = ctx.eval_as("add(15, 27)").unwrap();
+        assert_eq!(sum, 42);
+
+        let msg: String = ctx.eval_as("greet('Rust Embedding')").unwrap();
+        assert_eq!(msg, "Hello, Rust Embedding!");
+
+        let div: f64 = ctx.eval_as("safe_divide(100, 4)").unwrap();
+        assert_eq!(div, 25.0);
+
+        let div_err = ctx.eval("safe_divide(10, 0)");
+        assert!(div_err.is_err());
+    }
+
+    #[test]
+    fn test_object_and_array_manipulation() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let mut ctx = isolate.create_context();
+
+        // Create object, set properties, call method
+        let user = ctx.create_object();
+        ctx.set_property(user, "name", "Alice");
+        ctx.set_property(user, "age", 30);
+        ctx.set_method(user, "celebrateBirthday", || "Happy Birthday!");
+
+        ctx.set_global("currentUser", user);
+
+        let name: String = ctx.eval_as("currentUser.name").unwrap();
+        let age: i32 = ctx.eval_as("currentUser.age").unwrap();
+        let bday: String = ctx.eval_as("currentUser.celebrateBirthday()").unwrap();
+
+        assert_eq!(name, "Alice");
+        assert_eq!(age, 30);
+        assert_eq!(bday, "Happy Birthday!");
+
+        // Array creation and conversion
+        let arr = ctx.create_array(vec![10, 20, 30, 40]);
+        ctx.set_global("myNumbers", arr);
+        let doubled_sum: i32 = ctx.eval_as("myNumbers.reduce((a, b) => a + b, 0)").unwrap();
+        assert_eq!(doubled_sum, 100);
+
+        let vec_out: Vec<i32> = ctx.eval_as("[1, 2, 3, 4, 5]").unwrap();
+        assert_eq!(vec_out, vec![1, 2, 3, 4, 5]);
     }
 }

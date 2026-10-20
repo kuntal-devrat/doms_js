@@ -52,10 +52,12 @@ impl<'a> Parser<'a> {
         if !self.current.has_preceding_line_terminator && self.match_token(&TokenKind::FatArrow)? {
             let mut params = Vec::new();
             let mut defaults = Vec::new();
+            self.current_params_simple = rest_param.is_none();
             for e in exprs {
                 match e {
                     Expression::Identifier(name) => params.push(name),
                     Expression::Assignment { target, value } => {
+                        self.current_params_simple = false;
                         params.push(target.clone());
                         defaults.push(Statement::If {
                             condition: Expression::Binary {
@@ -71,6 +73,7 @@ impl<'a> Parser<'a> {
                         });
                     }
                     Expression::DestructuringAssignment { pattern, value } => {
+                        self.current_params_simple = false;
                         let name = format!("__param_{}", self.destruct_counter);
                         self.destruct_counter += 1;
                         params.push(name.clone());
@@ -120,6 +123,7 @@ impl<'a> Parser<'a> {
                         );
                     }
                     pat @ Expression::Array(_) | pat @ Expression::Object(_) => {
+                        self.current_params_simple = false;
                         let name = format!("__param_{}", self.destruct_counter);
                         self.destruct_counter += 1;
                         params.push(name.clone());

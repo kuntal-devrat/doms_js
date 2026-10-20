@@ -5,13 +5,13 @@
   "failed": 13896,
   "skipped": 0,
   "percentage": 72.86,
-  "elapsed_seconds": 8.04,
-  "timestamp": "1792491373-epoch",
+  "elapsed_seconds": 0.46,
+  "timestamp": "1792504620-epoch",
   "session": {
-    "total": 4367,
-    "passed": 3813,
-    "failed": 554,
-    "percentage": 87.31
+    "total": 301,
+    "passed": 274,
+    "failed": 27,
+    "percentage": 91.03
   },
   "categories": {
     "annexB/built-ins": { "total": 241, "passed": 183, "failed": 58, "percentage": 75.93 },

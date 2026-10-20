@@ -47,6 +47,7 @@ pub struct Parser<'a> {
     pub private_names_stack: Vec<std::collections::HashMap<String, String>>,
     pub class_id_counter: usize,
     pub(crate) trailing_comma_after_rest: bool,
+    pub(crate) current_params_simple: bool,
 }
 
 #[inline]
@@ -94,6 +95,7 @@ impl<'a> Parser<'a> {
             private_names_stack: Vec::new(),
             class_id_counter: 0,
             trailing_comma_after_rest: false,
+            current_params_simple: true,
         })
     }
 
@@ -128,6 +130,7 @@ impl<'a> Parser<'a> {
             private_names_stack: Vec::new(),
             class_id_counter: 0,
             trailing_comma_after_rest: false,
+            current_params_simple: true,
         })
     }
 
@@ -215,6 +218,12 @@ impl<'a> Parser<'a> {
                         tok.line,
                         tok.col,
                     ));
+                }
+                if (self.in_async || self.is_module || self.in_static_block) && id == "await" {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Await, tok.line, tok.col));
+                }
+                if (self.in_generator || self.is_strict) && id == "yield" {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Yield, tok.line, tok.col));
                 }
                 if self.is_strict
                     && (is_strict_reserved_word(id) || id == "eval" || id == "arguments")
