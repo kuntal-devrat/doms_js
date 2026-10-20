@@ -86,33 +86,36 @@ impl Vm {
                                 }
                             }
                         }
-                        if assigned { break; }
-                        let env_to_sync = {
-                            let frame = &mut self.frames[f_idx];
-                            let mut found_env = None;
-                            for (i, local_name) in frame.local_names.iter().enumerate().rev() {
-                                if *local_name == name {
-                                    if i < frame.locals.len() {
-                                        if frame.locals[i].is_uninitialized() {
-                                            self.handle_exception_at_depth(
-                                                VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
-                                                target_depth,
-                                            )?;
-                                            return Ok(None);
+                        let is_current_frame_with = f_idx == num_frames.saturating_sub(1)
+                            && self.frames[f_idx].scopes.len() > self.frames[f_idx].upvalues_count;
+                        if self.in_eval || is_current_frame_with {
+                            let env_to_sync = {
+                                let frame = &mut self.frames[f_idx];
+                                let mut found_env = None;
+                                for (i, local_name) in frame.local_names.iter().enumerate().rev() {
+                                    if *local_name == name {
+                                        if i < frame.locals.len() {
+                                            if frame.locals[i].is_uninitialized() {
+                                                self.handle_exception_at_depth(
+                                                    VmError::ReferenceError(format!("Cannot access '{}' before initialization", name)),
+                                                    target_depth,
+                                                )?;
+                                                return Ok(None);
+                                            }
+                                            frame.locals[i] = val;
                                         }
-                                        frame.locals[i] = val;
+                                        if let Some(env) = frame.env_obj {
+                                            found_env = Some(env);
+                                        }
+                                        assigned = true;
+                                        break;
                                     }
-                                    if let Some(env) = frame.env_obj {
-                                        found_env = Some(env);
-                                    }
-                                    assigned = true;
-                                    break;
                                 }
+                                found_env
+                            };
+                            if let Some(env) = env_to_sync {
+                                self.set_property(env, &name, val);
                             }
-                            found_env
-                        };
-                        if let Some(env) = env_to_sync {
-                            self.set_property(env, &name, val);
                         }
                         if assigned { break; }
                     }

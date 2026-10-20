@@ -77,20 +77,27 @@ impl Compiler {
                             self.symbols.define_local_at_depth(decl.name.clone(), 1)
                         }
                     } else {
-                        if self.symbols.is_local_in_current_scope(&decl.name) {
-                            return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
-                        }
-                        self.symbols.define_local(decl.name.clone())
+                        let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(&decl.name) {
+                            if local.is_declared {
+                                return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
+                            }
+                            local.is_declared = true;
+                            local.slot
+                        } else {
+                            self.symbols.define_local(decl.name.clone())
+                        };
+                        slot
                     };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 } else if !self.is_in_function && (*kind == VarKind::Let || *kind == VarKind::Const) && self.with_depth == 0 {
-                    let slot = if let Some(existing_slot) = self.symbols.resolve_local(&decl.name) {
-                        existing_slot
-                    } else {
-                        if self.symbols.is_local_in_current_scope(&decl.name) {
+                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(&decl.name) {
+                        if local.is_declared {
                             return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
                         }
+                        local.is_declared = true;
+                        local.slot
+                    } else {
                         self.symbols.define_local(decl.name.clone())
                     };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
@@ -127,17 +134,27 @@ impl Compiler {
             } else if *kind == VarKind::Let {
                 self.chunk.emit(OpCode::LoadUndefined, 0);
                 if self.is_in_function && self.symbols.scope_depth > 0 {
-                    if self.symbols.is_local_in_current_scope(&decl.name) {
-                        return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
-                    }
-                    let slot = self.symbols.define_local(decl.name.clone());
+                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(&decl.name) {
+                        if local.is_declared {
+                            return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
+                        }
+                        local.is_declared = true;
+                        local.slot
+                    } else {
+                        self.symbols.define_local(decl.name.clone())
+                    };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 } else if !self.is_in_function && self.with_depth == 0 {
-                    if self.symbols.is_local_in_current_scope(&decl.name) {
-                        return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
-                    }
-                    let slot = self.symbols.define_local(decl.name.clone());
+                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(&decl.name) {
+                        if local.is_declared {
+                            return Err(CompileError::DuplicateDeclaration(decl.name.clone()));
+                        }
+                        local.is_declared = true;
+                        local.slot
+                    } else {
+                        self.symbols.define_local(decl.name.clone())
+                    };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
                 } else {
@@ -170,9 +187,59 @@ impl Compiler {
         is_last: bool,
     ) -> Result<(), CompileError> {
         self.symbols.enter_scope();
+        let mut block_lex_names = Vec::new();
+        for stmt in stmts {
+            match stmt {
+                Statement::VarDecl { kind, declarations } if *kind != VarKind::Var => {
+                    for d in declarations {
+                        if !d.name.starts_with('@') && !d.name.starts_with("__") && !block_lex_names.contains(&d.name) {
+                            block_lex_names.push(d.name.clone());
+                        }
+                    }
+                }
+                Statement::ClassDecl(c) => {
+                    if let Some(ref n) = c.name {
+                        if !block_lex_names.contains(n) {
+                            block_lex_names.push(n.clone());
+                        }
+                    }
+                }
+                Statement::FunctionDecl { name, .. }
+                | Statement::AsyncFunctionDecl { name, .. }
+                | Statement::GeneratorDecl { name, .. }
+                | Statement::AsyncGeneratorDecl { name, .. } => {
+                    if !name.is_empty() && !block_lex_names.contains(name) {
+                        block_lex_names.push(name.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        for name in &block_lex_names {
+            self.symbols.define_pre_declared(name.clone());
+        }
+
+        let has_lex_scope = !block_lex_names.is_empty();
+        if has_lex_scope {
+            self.chunk.emit(OpCode::CreateObject, 0);
+            for name in &block_lex_names {
+                self.chunk.emit(OpCode::Dup, 0);
+                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit(OpCode::LoadConst(name_idx), 0);
+                self.chunk.emit(OpCode::LoadUndefined, 0);
+                self.chunk.emit(OpCode::SetElem, 0);
+                self.chunk.emit(OpCode::Pop, 0);
+            }
+            self.emit_push_scope();
+        }
+
         let len = stmts.len();
         for (idx, s) in stmts.iter().enumerate() {
             self.compile_statement(s, is_last && idx == len - 1)?;
+        }
+
+        if has_lex_scope {
+            self.emit_pop_scope();
         }
         self.symbols.exit_scope();
         Ok(())

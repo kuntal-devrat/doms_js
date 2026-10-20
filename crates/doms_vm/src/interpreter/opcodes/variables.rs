@@ -62,7 +62,7 @@ impl Vm {
     ) -> Result<(), VmError> {
                     let val = *self.peek()?;
                     let slot_idx = slot as usize;
-                    let (env_and_name, args_and_idx, global_lex_name) = {
+                    let (name_opt, args_and_idx) = {
                         let frame = self.frames.last_mut().unwrap();
                         if slot_idx < frame.locals.len() {
                             frame.locals[slot_idx] = val;
@@ -70,9 +70,7 @@ impl Vm {
                             frame.locals.resize(slot_idx + 1, JsValue::undefined());
                             frame.locals[slot_idx] = val;
                         }
-                        let env_and_name = frame.env_obj.and_then(|env| {
-                            frame.local_names.get(slot_idx).cloned().map(|name| (env, name))
-                        });
+                        let name = frame.local_names.get(slot_idx).cloned();
                         let args_and_idx = if let Some(mapped) = &frame.mapped_arguments {
                             if mapped.get(slot_idx).copied().unwrap_or(false) {
                                 frame.arguments.map(|a| (a, slot_idx))
@@ -82,23 +80,30 @@ impl Vm {
                         } else {
                             None
                         };
-                        let global_lex_name = if !frame.is_function {
-                            frame.local_names.get(slot_idx).cloned()
-                        } else {
-                            None
-                        };
-                        (env_and_name, args_and_idx, global_lex_name)
+                        (name, args_and_idx)
                     };
-                    if let Some((env, name)) = env_and_name {
-                        self.set_property(env, &name, val);
+                    if let Some(ref name) = name_opt {
+                        let mut updated_scope = false;
+                        let scopes = self.frames.last().map(|f| f.scopes.clone()).unwrap_or_default();
+                        for scope in scopes.iter().rev() {
+                            if scope.is_object() && self.has_property(*scope, name).unwrap_or(false) {
+                                self.set_property(*scope, name, val);
+                                updated_scope = true;
+                                break;
+                            }
+                        }
+                        if !updated_scope {
+                            if let Some(env) = self.frames.last().and_then(|f| f.env_obj) {
+                                self.set_property(env, name, val);
+                            }
+                            let is_fn = self.frames.last().map(|f| f.is_function).unwrap_or(false);
+                            if !is_fn && self.global_lexicals.contains_key(name) {
+                                self.global_lexicals.insert(name.clone(), val);
+                            }
+                        }
                     }
                     if let Some((args_obj, idx)) = args_and_idx {
                         self.set_own_property(args_obj, &idx.to_string(), val);
-                    }
-                    if let Some(name) = global_lex_name {
-                        if self.global_lexicals.contains_key(&name) {
-                            self.global_lexicals.insert(name, val);
-                        }
                     }
         Ok(())
     }

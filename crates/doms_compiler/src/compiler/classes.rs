@@ -28,7 +28,12 @@ impl Compiler {
 
         if let Some(ref n) = class_def.name {
             if self.symbols.scope_depth > 0 {
-                let slot = self.symbols.resolve_local(n).unwrap_or_else(|| self.symbols.define_local(n.clone()));
+                let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(n) {
+                    local.is_declared = true;
+                    local.slot
+                } else {
+                    self.symbols.define_local(n.clone())
+                };
                 self.chunk.emit(OpCode::Dup, 0);
                 self.chunk.emit(OpCode::SetLocal(slot), 0);
                 self.chunk.emit(OpCode::Pop, 0);

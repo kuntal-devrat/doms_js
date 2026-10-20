@@ -49,8 +49,8 @@ impl Compiler {
 
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
-        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd });
-        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len() });
+        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
+        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
 
         self.compile_statement(body, false)?;
 
@@ -105,8 +105,8 @@ impl Compiler {
 
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
-        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd });
-        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len() });
+        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
+        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
 
         self.compile_statement(body, false)?;
 
@@ -149,8 +149,8 @@ impl Compiler {
         let loop_start = self.chunk.instructions.len() as i32;
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
-        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd });
-        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len() });
+        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
+        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
 
         self.compile_statement(body, false)?;
 
@@ -268,8 +268,8 @@ impl Compiler {
 
         let loop_labels = std::mem::take(&mut self.current_labels);
         let bd = self.break_targets.len();
-        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd });
-        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len() });
+        self.break_targets.push(TargetScope { labels: loop_labels.clone(), jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: bd, catch_depth: self.catch_depth });
+        self.continue_targets.push(TargetScope { labels: loop_labels, jumps: Vec::new(), scope_depth: self.block_scope_depth, iter_slot: None, is_async_iter: false, break_depth: self.break_targets.len(), catch_depth: self.catch_depth });
 
         self.compile_statement(body, false)?;
 
@@ -371,6 +371,7 @@ impl Compiler {
             iter_slot: Some(iter_slot),
             is_async_iter: is_await,
             break_depth: bd,
+            catch_depth: self.catch_depth,
         });
         self.continue_targets.push(TargetScope {
             labels: loop_labels,
@@ -379,6 +380,7 @@ impl Compiler {
             iter_slot: None,
             is_async_iter: false,
             break_depth: self.break_targets.len(),
+            catch_depth: self.catch_depth,
         });
 
         let loop_start = self.chunk.instructions.len() as i32;

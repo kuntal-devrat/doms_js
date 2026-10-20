@@ -9,6 +9,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LBrace)?;
 
         let mut cases = Vec::new();
+        let mut has_default = false;
         while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
             if self.match_token(&TokenKind::Case)? {
                 let test = self.parse_expression(0)?;
@@ -26,6 +27,10 @@ impl<'a> Parser<'a> {
                     consequent,
                 });
             } else if self.match_token(&TokenKind::Default)? {
+                if has_default {
+                    return Err(ParseError::General("More than one default clause in switch statement".into()));
+                }
+                has_default = true;
                 self.expect(TokenKind::Colon)?;
                 let mut consequent = Vec::new();
                 while !self.check(&TokenKind::Case)
@@ -46,6 +51,13 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(TokenKind::RBrace)?;
+
+        let mut all_stmts = Vec::new();
+        for case in &cases {
+            all_stmts.extend(case.consequent.clone());
+        }
+        self.validate_block_declarations(&all_stmts)?;
+
         Ok(Statement::Switch { discriminant, cases })
     }
 }

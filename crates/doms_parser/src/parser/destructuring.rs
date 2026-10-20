@@ -462,6 +462,12 @@ impl<'a> Parser<'a> {
         tmp_name: &str,
         declarations: &mut Vec<VarDeclarator>,
     ) -> Result<(), ParseError> {
+        let chk_name = format!("@destruct_chk_{}", self.destruct_counter);
+        self.destruct_counter += 1;
+        declarations.push(VarDeclarator {
+            name: chk_name,
+            init: Some(Expression::Identifier(tmp_name.to_string())),
+        });
         let mut excluded_keys: Vec<Expression> = Vec::new();
         while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
             if self.check(&TokenKind::Comma) {

@@ -146,6 +146,9 @@ pub(crate) fn is_param_default_stmt(stmt: &Statement) -> bool {
             }
             false
         }
+        Statement::VarDecl { declarations, .. } => {
+            declarations.iter().any(|d| d.name.starts_with("__destruct_") || d.name.starts_with("@destruct_") || d.name.starts_with("__param_") || d.name.starts_with("@param_") || d.name.starts_with("@dstr_"))
+        }
         _ => false,
     }
 }

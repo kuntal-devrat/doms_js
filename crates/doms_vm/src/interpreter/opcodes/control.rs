@@ -285,7 +285,16 @@ impl Vm {
         self.temp_roots.push(obj);
         let cur_err = self.temp_roots[prev_temp];
         let cur_obj = self.temp_roots[prev_temp + 1];
-        self.set_property(cur_obj, &name, cur_err);
+        self.define_builtin_property(
+            cur_obj,
+            &name,
+            cur_err,
+            crate::shape::PropertyAttributes {
+                writable: true,
+                enumerable: true,
+                configurable: false,
+            },
+        );
         let cur_obj = self.temp_roots[prev_temp + 1];
         self.temp_roots.truncate(prev_temp);
         let frame = self.frames.last_mut().unwrap();

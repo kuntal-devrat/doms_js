@@ -123,7 +123,8 @@ impl Vm {
                         return Ok(None);
                     }
 
-                    if self.global_lexicals.contains_key(&name) || self.var_names.contains(&name) {
+                    let is_local = self.frames.iter().any(|f| f.local_names.iter().any(|n| n == &name));
+                    if is_local || self.global_lexicals.contains_key(&name) || self.var_names.contains(&name) {
                         if is_strict {
                             self.handle_exception_at_depth(
                                 VmError::SyntaxError(format!("Delete of unqualified identifier in strict mode: {}", name)),

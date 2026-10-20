@@ -10,6 +10,7 @@ pub mod statements;
 
 use crate::bytecode::{BytecodeChunk, OpCode};
 use crate::scope::SymbolTable;
+use doms_parser::ast::Statement;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -34,6 +35,15 @@ pub struct TargetScope {
     pub iter_slot: Option<u16>,
     pub is_async_iter: bool,
     pub break_depth: usize,
+    pub catch_depth: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct FinallyEntry {
+    pub stmt: Statement,
+    pub scope_depth: usize,
+    pub break_depth: usize,
+    pub catch_depth: usize,
 }
 
 pub struct Compiler {
@@ -42,10 +52,12 @@ pub struct Compiler {
     pub break_targets: Vec<TargetScope>,
     pub continue_targets: Vec<TargetScope>,
     pub current_labels: Vec<String>,
+    pub finally_stack: Vec<FinallyEntry>,
     pub is_in_function: bool,
     pub internal_statements: bool,
     pub with_depth: usize,
     pub block_scope_depth: usize,
+    pub catch_depth: usize,
     pub is_strict: bool,
     pub is_eval: bool,
     pub touched_bindings: std::collections::HashSet<String>,
@@ -59,10 +71,12 @@ impl Compiler {
             break_targets: Vec::new(),
             continue_targets: Vec::new(),
             current_labels: Vec::new(),
+            finally_stack: Vec::new(),
             is_in_function: false,
             internal_statements: false,
             with_depth: 0,
             block_scope_depth: 0,
+            catch_depth: 0,
             is_strict: false,
             is_eval: false,
             touched_bindings: std::collections::HashSet::new(),
@@ -125,5 +139,12 @@ mod tests {
         let chunk = Compiler::new().compile(&prog).unwrap();
         assert!(chunk.instructions.contains(&OpCode::CreateObject));
         assert!(chunk.instructions.contains(&OpCode::CreateArray(2)));
+    }
+
+    #[test]
+    fn test_try_finally_continue() {
+        let prog = parse("var c1=0, fin=0; while(c1<2){ try{ c1+=1; break; } catch(e){} finally{ fin=1; continue; } fin=-1; c1+=2; }").unwrap();
+        let chunk = Compiler::new().compile(&prog).unwrap();
+        assert!(!chunk.instructions.is_empty());
     }
 }

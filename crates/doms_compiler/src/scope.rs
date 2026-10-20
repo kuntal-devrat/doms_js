@@ -6,6 +6,7 @@ pub struct Local {
     pub depth: usize,
     pub slot: u16,
     pub is_lexical: bool,
+    pub is_declared: bool,
 }
 
 /// Information about a captured upvalue in lexical scoping.
@@ -51,22 +52,43 @@ impl SymbolTable {
         let is_lexical = self.scope_depth > 1;
         let slot = self.all_local_names.len() as u16;
         self.all_local_names.push(name.clone());
-        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical });
+        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical, is_declared: true });
+        slot
+    }
+
+    pub fn define_pre_declared(&mut self, name: String) -> u16 {
+        let is_lexical = self.scope_depth > 1;
+        let slot = self.all_local_names.len() as u16;
+        self.all_local_names.push(name.clone());
+        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical, is_declared: false });
         slot
     }
 
     pub fn define_local_lexical(&mut self, name: String) -> u16 {
         let slot = self.all_local_names.len() as u16;
         self.all_local_names.push(name.clone());
-        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical: true });
+        self.locals.push(Local { name, depth: self.scope_depth, slot, is_lexical: true, is_declared: true });
         slot
     }
 
     pub fn define_local_at_depth(&mut self, name: String, depth: usize) -> u16 {
         let slot = self.all_local_names.len() as u16;
         self.all_local_names.push(name.clone());
-        self.locals.push(Local { name, depth, slot, is_lexical: false });
+        self.locals.push(Local { name, depth, slot, is_lexical: false, is_declared: true });
         slot
+    }
+
+    pub fn get_local_in_current_scope_mut(&mut self, name: &str) -> Option<&mut Local> {
+        let current_depth = self.scope_depth;
+        for local in self.locals.iter_mut().rev() {
+            if local.depth < current_depth {
+                break;
+            }
+            if local.name == name {
+                return Some(local);
+            }
+        }
+        None
     }
 
     pub fn resolve_local(&self, name: &str) -> Option<u16> {

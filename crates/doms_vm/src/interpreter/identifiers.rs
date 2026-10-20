@@ -60,10 +60,20 @@ impl Vm {
             }
         }
 
-        for frame in self.frames.iter().rev() {
-            for (i, local_name) in frame.local_names.iter().enumerate().rev() {
-                if local_name == name {
-                    return Ok(Some(frame.locals.get(i).copied().unwrap_or(JsValue::undefined())));
+        if self.in_eval {
+            for frame in self.frames.iter().rev() {
+                for (i, local_name) in frame.local_names.iter().enumerate().rev() {
+                    if local_name == name {
+                        return Ok(Some(frame.locals.get(i).copied().unwrap_or(JsValue::undefined())));
+                    }
+                }
+            }
+        } else if let Some(frame) = self.frames.last() {
+            if frame.scopes.len() > frame.upvalues_count {
+                for (i, local_name) in frame.local_names.iter().enumerate().rev() {
+                    if local_name == name {
+                        return Ok(Some(frame.locals.get(i).copied().unwrap_or(JsValue::undefined())));
+                    }
                 }
             }
         }
