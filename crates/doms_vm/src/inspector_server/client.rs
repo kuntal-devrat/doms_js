@@ -21,10 +21,12 @@ pub(super) fn handle_client(
     // 1. JSON Discovery: GET /json/version
     if req_str.starts_with("GET /json/version") {
         let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{{\"Browser\":\"DOMS/0.1.0\",\"Protocol-Version\":\"1.3\"}}",
+            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{{\"Browser\":\"DOMS/0.1.0\",\"Protocol-Version\":\"1.3\"}}",
             44
         );
         let _ = stream.write_all(resp.as_bytes());
+        let _ = stream.flush();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
         return;
     }
 
@@ -35,11 +37,13 @@ pub(super) fn handle_client(
             host, script_url, host
         );
         let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
             body
         );
         let _ = stream.write_all(resp.as_bytes());
+        let _ = stream.flush();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
         return;
     }
 

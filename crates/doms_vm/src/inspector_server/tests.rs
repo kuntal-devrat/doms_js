@@ -18,7 +18,9 @@ fn test_inspector_server_discovery_and_lifecycle() {
     // Query /json/version via HTTP
     let addr = server.addr.clone();
     let mut stream = TcpStream::connect(&addr).expect("connect");
-    stream.write_all(b"GET /json/version HTTP/1.1\r\nHost: localhost\r\n\r\n").expect("write");
+    stream
+        .write_all(b"GET /json/version HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .expect("write");
     let mut buf = [0u8; 512];
     let n = stream.read(&mut buf).expect("read");
     let resp = String::from_utf8_lossy(&buf[..n]);
