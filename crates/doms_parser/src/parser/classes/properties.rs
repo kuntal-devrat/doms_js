@@ -9,7 +9,16 @@ impl<'a> Parser<'a> {
         } else {
             let key_tok = self.advance()?;
             let is_ident = match &key_tok.kind {
-                TokenKind::Ident(id) => !(self.is_strict && is_strict_reserved_word(id)),
+                TokenKind::Ident(id) => {
+                    !(key_tok.has_escape
+                        && (crate::lexer::is_reserved_word(id)
+                            || is_strict_reserved_word(id)
+                            || id == "await"
+                            || id == "yield"))
+                        && !(self.is_strict && is_strict_reserved_word(id))
+                        && !(id == "await" && (self.in_async || self.is_module || self.in_static_block))
+                        && !(id == "yield" && (self.in_generator || self.is_strict))
+                }
                 TokenKind::Undefined | TokenKind::As | TokenKind::From | TokenKind::Async => true,
                 TokenKind::Await => !self.is_module && !self.in_async && !self.in_static_block,
                 TokenKind::Yield => !self.is_strict && !self.in_generator,

@@ -126,6 +126,16 @@ impl Trace for JsObject {
                         tracer.trace_ref(p);
                     }
                 }
+                if let Some(lt) = f.lexical_this {
+                    if let Some(p) = lt.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+                if let Some(lnt) = f.lexical_new_target {
+                    if let Some(p) = lnt.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
                 if let Some(proto) = f.prototype {
                     if let Some(p) = proto.as_heap_ptr() {
                         tracer.trace_ref(p);
@@ -521,6 +531,12 @@ impl JsObject {
                 }
                 if let Some(ref mut ho) = f.home_object {
                     visitor(ho);
+                }
+                if let Some(ref mut lt) = f.lexical_this {
+                    visitor(lt);
+                }
+                if let Some(ref mut lnt) = f.lexical_new_target {
+                    visitor(lnt);
                 }
                 if let Some(ref mut proto) = f.prototype {
                     visitor(proto);

@@ -3,9 +3,23 @@ use super::*;
 impl<'a> Parser<'a> {
     pub(super) fn parse_template_expression(
         &mut self,
-        quasis: Vec<String>,
+        quasis: Vec<Option<String>>,
         raw_exprs: Vec<String>,
+        line: usize,
+        col: usize,
     ) -> Result<Expression, ParseError> {
+        if quasis.iter().any(|q| q.is_none()) {
+            return Err(ParseError::UnexpectedToken(
+                TokenKind::TemplateLiteral {
+                    quasis: Vec::new(),
+                    raw_quasis: Vec::new(),
+                    raw_exprs: Vec::new(),
+                },
+                line,
+                col,
+            ));
+        }
+        let quasis: Vec<String> = quasis.into_iter().map(|q| q.unwrap_or_default()).collect();
         if raw_exprs.is_empty() {
             let s = quasis.into_iter().next().unwrap_or_default();
             return Ok(Expression::Literal(Literal::String {

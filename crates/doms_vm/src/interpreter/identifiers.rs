@@ -62,7 +62,7 @@ impl Vm {
             }
         }
 
-        if self.in_eval {
+        if self.in_eval && !self.frames.last().map_or(false, |f| f.is_indirect_eval) {
             for frame in self.frames.iter().rev() {
                 for (i, local_name) in frame.local_names.iter().enumerate().rev() {
                     if local_name == name {

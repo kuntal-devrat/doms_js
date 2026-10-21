@@ -124,9 +124,35 @@ impl Compiler {
         compiler.chunk.local_names = std::sync::Arc::clone(&local_names_arc);
         compiler.chunk.lexical_local_names = std::sync::Arc::clone(&lexical_local_names_arc);
         compiler.chunk.self_slot = self_slot;
+        let mut length = 0;
+        for p in &params {
+            if p.starts_with("...") {
+                break;
+            }
+            let is_param_with_default = body.iter().any(|s| {
+                if let Statement::If { condition, .. } = s {
+                    if let Expression::Binary { op: BinaryOp::StrictEq, left, right } = condition {
+                        if let (Expression::Identifier(id), Expression::Literal(Literal::Undefined)) =
+                            (&**left, &**right)
+                        {
+                            if id == p {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                false
+            });
+            if is_param_with_default || p.contains('=') {
+                break;
+            }
+            length += 1;
+        }
+
         Ok(FunctionDef {
             name,
             params,
+            length,
             self_slot,
             local_names: local_names_arc,
             lexical_local_names: lexical_local_names_arc,

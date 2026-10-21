@@ -6,6 +6,92 @@ impl<'a> Parser<'a> {
 
         loop {
             // Postfix / Infix operations
+            if let TokenKind::TemplateLiteral { quasis, raw_quasis, raw_exprs } = &self.current.kind {
+                if matches!(lhs, Expression::OptionalChain(_)) {
+                    return Err(ParseError::UnexpectedToken(
+                        self.current.kind.clone(),
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+                let quasis = quasis.clone();
+                let raw_quasis = raw_quasis.clone();
+                let raw_exprs = raw_exprs.clone();
+                self.advance()?;
+                let mut exprs = Vec::new();
+                for raw in &raw_exprs {
+                    let sub = Parser::new(raw)?.parse_expression(0)?;
+                    exprs.push(sub);
+                }
+                lhs = Expression::TaggedTemplate {
+                    tag: Box::new(lhs),
+                    quasis,
+                    raw_quasis,
+                    exprs,
+                };
+                continue;
+            }
+
+            if self.check(&TokenKind::QuestionDot) {
+                self.advance()?; // consume ?.
+                if matches!(self.current.kind, TokenKind::TemplateLiteral { .. }) {
+                    return Err(ParseError::UnexpectedToken(
+                        self.current.kind.clone(),
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+
+                let element = if self.check(&TokenKind::LParen) {
+                    self.advance()?;
+                    let args = self.parse_call_args()?;
+                    ChainElement::Call { args, optional: true }
+                } else if self.check(&TokenKind::LBracket) {
+                    self.advance()?;
+                    let index = self.parse_expression(0)?;
+                    self.expect(TokenKind::RBracket)?;
+                    ChainElement::Index { index: Box::new(index), optional: true }
+                } else {
+                    let prop_tok = self.advance()?;
+                    let mut prop = match prop_tok.kind.as_prop_name() {
+                        Some(id) => id,
+                        None => {
+                            return Err(ParseError::UnexpectedToken(
+                                prop_tok.kind,
+                                prop_tok.line,
+                                prop_tok.col,
+                            ));
+                        }
+                    };
+                    if prop.starts_with('#') {
+                        prop = match self.resolve_private_name(&prop) {
+                            Some(scoped) => scoped,
+                            None => {
+                                return Err(ParseError::UnexpectedToken(
+                                    prop_tok.kind,
+                                    prop_tok.line,
+                                    prop_tok.col,
+                                ));
+                            }
+                        };
+                    }
+                    ChainElement::Property { name: prop, optional: true }
+                };
+
+                match lhs {
+                    Expression::OptionalChain(ref mut oc) => {
+                        oc.chain.push(element);
+                    }
+                    _ => {
+                        lhs = Expression::OptionalChain(OptionalChain {
+                            base: Box::new(lhs),
+                            chain: vec![element],
+                        });
+                    }
+                }
+                continue;
+            }
+
             if self.check(&TokenKind::LParen) {
                 if matches!(lhs, Expression::Super) && !self.in_derived_constructor {
                     return Err(ParseError::UnexpectedToken(
@@ -16,20 +102,15 @@ impl<'a> Parser<'a> {
                 }
                 // Function call
                 self.advance()?;
-                let mut args = Vec::new();
-                if !self.check(&TokenKind::RParen) {
-                    loop {
-                        args.push(self.parse_expression(1)?);
-                        if !self.match_token(&TokenKind::Comma)? {
-                            break;
-                        }
-                        if self.check(&TokenKind::RParen) {
-                            break;
-                        }
+                let args = self.parse_call_args()?;
+                match lhs {
+                    Expression::OptionalChain(ref mut oc) => {
+                        oc.chain.push(ChainElement::Call { args, optional: false });
+                    }
+                    _ => {
+                        lhs = Expression::Call { callee: Box::new(lhs), args };
                     }
                 }
-                self.expect(TokenKind::RParen)?;
-                lhs = Expression::Call { callee: Box::new(lhs), args };
                 continue;
             }
 
@@ -68,7 +149,14 @@ impl<'a> Parser<'a> {
                         }
                     };
                 }
-                lhs = Expression::Member { object: Box::new(lhs), property: prop };
+                match lhs {
+                    Expression::OptionalChain(ref mut oc) => {
+                        oc.chain.push(ChainElement::Property { name: prop, optional: false });
+                    }
+                    _ => {
+                        lhs = Expression::Member { object: Box::new(lhs), property: prop };
+                    }
+                }
                 continue;
             }
 
@@ -87,7 +175,14 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 let index = self.parse_expression(0)?;
                 self.expect(TokenKind::RBracket)?;
-                lhs = Expression::Index { object: Box::new(lhs), index: Box::new(index) };
+                match lhs {
+                    Expression::OptionalChain(ref mut oc) => {
+                        oc.chain.push(ChainElement::Index { index: Box::new(index), optional: false });
+                    }
+                    _ => {
+                        lhs = Expression::Index { object: Box::new(lhs), index: Box::new(index) };
+                    }
+                }
                 continue;
             }
 
@@ -302,8 +397,48 @@ impl<'a> Parser<'a> {
                 ));
             }
 
+            // ES Spec: cannot mix ?? with && or || without parentheses
+            if op == BinaryOp::NullishCoalescing {
+                if matches!(lhs, Expression::Binary { op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr, .. }) {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::QuestionQuestion,
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+            } else if op == BinaryOp::LogicalAnd || op == BinaryOp::LogicalOr {
+                if matches!(lhs, Expression::Binary { op: BinaryOp::NullishCoalescing, .. }) {
+                    let tok = if op == BinaryOp::LogicalAnd { TokenKind::AmpAmp } else { TokenKind::PipePipe };
+                    return Err(ParseError::UnexpectedToken(
+                        tok,
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+            }
+
             self.advance()?;
             let rhs = self.parse_expression(r_bp)?;
+
+            if op == BinaryOp::NullishCoalescing {
+                if matches!(rhs, Expression::Binary { op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr, .. }) {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::QuestionQuestion,
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+            } else if op == BinaryOp::LogicalAnd || op == BinaryOp::LogicalOr {
+                if matches!(rhs, Expression::Binary { op: BinaryOp::NullishCoalescing, .. }) {
+                    let tok = if op == BinaryOp::LogicalAnd { TokenKind::AmpAmp } else { TokenKind::PipePipe };
+                    return Err(ParseError::UnexpectedToken(
+                        tok,
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+            }
+
             if matches!(rhs, Expression::PrivateIdentifier(_)) {
                 return Err(ParseError::UnexpectedToken(
                     TokenKind::In,
@@ -332,5 +467,26 @@ impl<'a> Parser<'a> {
         }
 
         Ok(lhs)
+    }
+
+    pub(crate) fn parse_call_args(&mut self) -> Result<Vec<Expression>, ParseError> {
+        let mut args = Vec::new();
+        if !self.check(&TokenKind::RParen) {
+            loop {
+                let prev_spread = self.allow_spread;
+                self.allow_spread = true;
+                let arg = self.parse_expression(1)?;
+                self.allow_spread = prev_spread;
+                args.push(arg);
+                if !self.match_token(&TokenKind::Comma)? {
+                    break;
+                }
+                if self.check(&TokenKind::RParen) {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        Ok(args)
     }
 }

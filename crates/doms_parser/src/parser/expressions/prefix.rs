@@ -9,8 +9,8 @@ impl<'a> Parser<'a> {
             TokenKind::StringLit { value, has_escape, has_legacy_escape, .. } => {
                 Ok(Expression::Literal(Literal::String { value, has_escape, has_legacy_escape }))
             }
-            TokenKind::TemplateLiteral { quasis, raw_exprs } => {
-                self.parse_template_expression(quasis, raw_exprs)
+            TokenKind::TemplateLiteral { quasis, raw_quasis: _, raw_exprs } => {
+                self.parse_template_expression(quasis, raw_exprs, tok.line, tok.col)
             }
             TokenKind::RegExp { pattern, flags } => {
                 Ok(Expression::Literal(Literal::RegExp { pattern, flags }))
@@ -115,7 +115,7 @@ impl<'a> Parser<'a> {
                 } else if self.is_module || self.in_async || self.in_static_block {
                     Err(ParseError::UnexpectedToken(TokenKind::Await, tok.line, tok.col))
                 } else {
-                    Ok(Expression::Identifier("await".to_string()))
+                    self.parse_identifier_expr("await".to_string(), tok.line, tok.col)
                 }
             }
             TokenKind::Yield => {
@@ -127,7 +127,7 @@ impl<'a> Parser<'a> {
                             tok.col,
                         ));
                     }
-                    return Ok(Expression::Identifier("yield".to_string()));
+                    return self.parse_identifier_expr("yield".to_string(), tok.line, tok.col);
                 }
                 if self.match_token(&TokenKind::Star)? {
                     let expr = self.parse_expression(0)?;
@@ -153,7 +153,13 @@ impl<'a> Parser<'a> {
                 Ok(Expression::DynamicImport(Box::new(spec)))
             }
             TokenKind::DotDotDot => {
+                if !self.allow_spread {
+                    return Err(ParseError::UnexpectedToken(TokenKind::DotDotDot, tok.line, tok.col));
+                }
+                let prev_spread = self.allow_spread;
+                self.allow_spread = false;
                 let expr = self.parse_expression(1)?;
+                self.allow_spread = prev_spread;
                 Ok(Expression::Spread(Box::new(expr)))
             }
             TokenKind::PrivateIdent(s) => {

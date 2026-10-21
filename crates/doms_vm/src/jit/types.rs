@@ -238,6 +238,11 @@ pub extern "C" fn jit_get_elem(obj: u64, key: u64) -> u64 {
                             return el.0;
                         }
                     }
+                } else if let crate::object::ObjectKind::TypedArray(ta) = &jsobj.kind {
+                    let uidx = idx as usize;
+                    if let Some(v) = crate::Vm::read_typed_array_element(ta, uidx) {
+                        return v.0;
+                    }
                 }
             }
         }
@@ -279,6 +284,10 @@ pub extern "C" fn jit_get_elem_dense(raw_obj: u64, idx_i32: i32) -> u64 {
                         return el.0;
                     }
                 }
+            } else if let crate::object::ObjectKind::TypedArray(ta) = &jsobj.kind {
+                if let Some(v) = crate::Vm::read_typed_array_element(ta, uidx) {
+                    return v.0;
+                }
             }
         }
     }
@@ -309,6 +318,11 @@ pub extern "C" fn jit_set_elem(obj: u64, key: u64, val: u64) -> u64 {
                         return val;
                     } else if uidx == elements.len() {
                         elements.push(v);
+                        return val;
+                    }
+                } else if let crate::object::ObjectKind::TypedArray(ta) = &mut jsobj.kind {
+                    let uidx = idx as usize;
+                    if crate::Vm::write_typed_array_element(ta, uidx, v) {
                         return val;
                     }
                 }
@@ -344,6 +358,11 @@ pub extern "C" fn jit_set_elem_dense(raw_obj: u64, idx_i32: i32, val: u64) -> u6
                             len: new_slice.len(),
                         }));
                     });
+                    return val;
+                }
+            } else if let crate::object::ObjectKind::TypedArray(ta) = &mut jsobj.kind {
+                let uidx = idx_i32 as usize;
+                if crate::Vm::write_typed_array_element(ta, uidx, v) {
                     return val;
                 }
             }

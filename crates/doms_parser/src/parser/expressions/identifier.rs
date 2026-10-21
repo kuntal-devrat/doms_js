@@ -17,15 +17,15 @@ impl<'a> Parser<'a> {
             return Err(ParseError::UnexpectedToken(TokenKind::Yield, line, col));
         }
         if !self.current.has_preceding_line_terminator && self.match_token(&TokenKind::FatArrow)? {
+            if self.is_strict && (is_strict_reserved_word(&s) || s == "eval" || s == "arguments") {
+                return Err(ParseError::UnexpectedToken(TokenKind::Ident(s), line, col));
+            }
             let prev_in_func = self.in_function;
             let prev_in_static = self.in_static_block;
             self.in_function = true;
             self.in_static_block = false;
             let body = if self.check(&TokenKind::LBrace) {
-                match self.parse_statement()? {
-                    Statement::Block(stmts) => stmts,
-                    other => vec![other],
-                }
+                self.parse_function_body(&[s.clone()], None)?
             } else {
                 let expr = self.parse_expression(1)?;
                 vec![Statement::Return(Some(expr))]

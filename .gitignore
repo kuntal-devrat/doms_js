@@ -29,3 +29,9 @@ coverage/
 # Benchmarks output
 bench_results/
 scratch/
+
+# Python / C examples artifacts
+__pycache__/
+*.pyc
+examples/c_embedding/embed_demo
+

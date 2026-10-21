@@ -88,6 +88,7 @@ pub struct Vm {
     pub loop_hotness: HashMap<(u64, usize), u32>,
     pub osr_cache: HashMap<(u64, usize), Option<crate::jit::JitFunction>>,
     pub regexp_last_match: RegExpLastMatch,
+    pub template_map: HashMap<(u64, u64), JsValue>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -197,6 +198,7 @@ impl Vm {
             loop_hotness: HashMap::new(),
             osr_cache: HashMap::new(),
             regexp_last_match: RegExpLastMatch::default(),
+            template_map: HashMap::new(),
         };
         let global_obj = vm.alloc_object_old_gen();
         vm.global_object = global_obj;

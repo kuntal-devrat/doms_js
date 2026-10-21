@@ -26,7 +26,9 @@ impl Vm {
             }
             match &obj.kind {
                 ObjectKind::Function(f) => {
-                    !f.is_generator
+                    !f.is_arrow
+                        && !f.is_method
+                        && !f.is_generator
                         && !f.is_async
                         && self.shapes.has_property(obj.shape_id, "prototype")
                 }

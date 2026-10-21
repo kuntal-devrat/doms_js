@@ -418,28 +418,31 @@ pub fn define_property_internal(
                 } else {
                     None
                 };
+                let curr_writ = if let Some(ref info) = current_info {
+                    info.attributes.writable
+                } else if current_exists {
+                    vm.get_property(current, "writable").is_truthy()
+                } else {
+                    false
+                };
+                let curr_enum = if let Some(ref info) = current_info {
+                    info.attributes.enumerable
+                } else if current_exists {
+                    vm.get_property(current, "enumerable").is_truthy()
+                } else {
+                    false
+                };
+                let curr_conf = if let Some(ref info) = current_info {
+                    info.attributes.configurable
+                } else if current_exists {
+                    vm.get_property(current, "configurable").is_truthy()
+                } else {
+                    false
+                };
                 let attrs = crate::shape::PropertyAttributes {
-                    writable: if has_writ {
-                        writ_val
-                    } else if let Some(ref info) = current_info {
-                        info.attributes.writable
-                    } else {
-                        false
-                    },
-                    enumerable: if has_enum {
-                        enum_val
-                    } else if let Some(ref info) = current_info {
-                        info.attributes.enumerable
-                    } else {
-                        false
-                    },
-                    configurable: if has_conf {
-                        conf_val
-                    } else if let Some(ref info) = current_info {
-                        info.attributes.configurable
-                    } else {
-                        false
-                    },
+                    writable: if has_writ { writ_val } else { curr_writ },
+                    enumerable: if has_enum { enum_val } else { curr_enum },
+                    configurable: if has_conf { conf_val } else { curr_conf },
                 };
                 let val = if has_val {
                     val_val

@@ -3,6 +3,15 @@
 use super::*;
 
 impl Vm {
+    pub fn get_enumerable_property_keys(&self, target: JsValue) -> Vec<String> {
+        if let Some(ptr) = target.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            self.shapes.enumerable_properties(obj.shape_id)
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn get_property(&mut self, target: JsValue, key: &str) -> JsValue {
         self.get_property_with_receiver(target, key, target)
     }

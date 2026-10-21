@@ -6,6 +6,7 @@ use super::*;
 pub struct JsFunction {
     pub name: Option<String>,
     pub params: Vec<String>,
+    pub length: usize,
     pub self_slot: Option<u16>,
     pub local_names: Arc<Vec<String>>,
     pub lexical_local_names: Arc<Vec<String>>,
@@ -21,6 +22,8 @@ pub struct JsFunction {
     pub is_method: bool,
     pub is_arrow: bool,
     pub home_object: Option<JsValue>,
+    pub lexical_this: Option<JsValue>,
+    pub lexical_new_target: Option<JsValue>,
     pub prototype: Option<JsValue>,
     pub initial_shape: Option<ShapeId>,
 }

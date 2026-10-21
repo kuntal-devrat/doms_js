@@ -83,7 +83,8 @@ pub enum TokenKind {
         has_unpaired_surrogate: bool,
     },
     TemplateLiteral {
-        quasis: Vec<String>,
+        quasis: Vec<Option<String>>,
+        raw_quasis: Vec<String>,
         raw_exprs: Vec<String>,
     },
     RegExp {
@@ -134,6 +135,7 @@ pub enum TokenKind {
     Caret,
     CaretEq,
     Question,
+    QuestionDot,
     QuestionQuestion,
     QuestionQuestionEq,
     Colon,

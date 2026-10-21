@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub struct FunctionDef {
     pub name: Option<String>,
     pub params: Vec<String>,
+    pub length: usize,
     pub self_slot: Option<u16>,
     pub local_names: Arc<Vec<String>>,
     pub lexical_local_names: Arc<Vec<String>>,
@@ -25,6 +26,11 @@ pub enum Constant {
     Boolean(bool),
     Function(Arc<FunctionDef>),
     BigInt(BigInt),
+    TemplateObject {
+        site: u64,
+        quasis: Vec<Option<String>>,
+        raw: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +50,7 @@ pub enum OpCode {
     // Objects & Arrays
     CreateObject,
     CreateArray(u16),
+    GetTemplateObject(u16),
     ArrayPush,
     ArraySpreadPush,
     RequireObjectCoercible,
@@ -312,6 +319,7 @@ enum ConstantKey {
     Boolean(bool),
     Function(usize),
     BigInt(BigInt),
+    TemplateObject(u64),
 }
 
 static CHUNK_ID_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -426,6 +434,9 @@ impl BytecodeChunk {
             Constant::Boolean(b) => ConstantKey::Boolean(*b),
             Constant::Function(f) => ConstantKey::Function(Arc::as_ptr(f) as usize),
             Constant::BigInt(bi) => ConstantKey::BigInt(bi.clone()),
+            Constant::TemplateObject { site, .. } => {
+                ConstantKey::TemplateObject(*site)
+            }
         };
 
         if let Some(&idx) = self.constant_indices.get(&key) {

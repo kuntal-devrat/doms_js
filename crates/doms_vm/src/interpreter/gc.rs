@@ -386,6 +386,9 @@ impl Vm {
             for s in self.symbol_registry.values() {
                 mark!(*s);
             }
+            for val in self.template_map.values() {
+                mark!(*val);
+            }
 
             // 1b. Interpreter state.
             for val in &self.temp_roots {
@@ -431,6 +434,12 @@ impl Vm {
                     }
                     if let Some(ho) = f.home_object {
                         mark!(ho);
+                    }
+                    if let Some(lt) = f.lexical_this {
+                        mark!(lt);
+                    }
+                    if let Some(lnt) = f.lexical_new_target {
+                        mark!(lnt);
                     }
                     if let Some(proto) = f.prototype {
                         mark!(proto);

@@ -9,16 +9,10 @@ pub(super) fn register_eval(vm: &mut Vm) {
             return Ok(JsValue::undefined());
         }
         let code_val = args[0];
-        let code_str = if let Some(ptr) = code_val.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            if let ObjectKind::String(ref s) = obj.kind {
-                s.clone()
-            } else {
-                return Ok(code_val);
-            }
-        } else {
+        if !code_val.is_js_string() {
             return Ok(code_val);
-        };
+        }
+        let code_str = vm.to_string_value(code_val);
 
         if let Some(max) = vm.max_evals {
             vm.eval_count += 1;

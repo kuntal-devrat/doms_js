@@ -109,6 +109,14 @@ impl<'a> Lexer<'a> {
                     } else {
                         TokenKind::QuestionQuestion
                     }
+                } else if self.peek() == Some('.') {
+                    // OptionalChainingPunctuator :: ?. [lookahead ∉ DecimalDigit]
+                    if self.peek2().map_or(false, |c| c.is_ascii_digit()) {
+                        TokenKind::Question
+                    } else {
+                        self.advance();
+                        TokenKind::QuestionDot
+                    }
                 } else {
                     TokenKind::Question
                 }

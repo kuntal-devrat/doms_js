@@ -734,8 +734,87 @@ impl Vm {
                     let ctor_proto_obj = unsafe { &mut *(ctor_proto_ptr as *mut JsObject) };
                     ctor_proto_obj.prototype = Some(super_proto);
                 }
+                if let ObjectKind::Function(ref mut f) = ctor_obj.kind {
+                    f.home_object = Some(ctor_proto);
+                }
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn op_get_template_object(
+        &mut self,
+        const_idx: u16,
+        chunk: &BytecodeChunk,
+    ) -> Result<(), VmError> {
+        let (site, quasis_vec, raw_vec) = match chunk.constants.get(const_idx as usize) {
+            Some(Constant::TemplateObject { site, quasis, raw }) => {
+                (*site, quasis.clone(), raw.clone())
+            }
+            _ => return Err(VmError::RuntimeError("Invalid template object constant".into())),
+        };
+
+        let key = (chunk.id, site);
+        if let Some(&cached) = self.template_map.get(&key) {
+            self.push(cached);
+            return Ok(());
+        }
+
+        let mut quasis = Vec::with_capacity(quasis_vec.len());
+        for q in &quasis_vec {
+            match q {
+                Some(s) => quasis.push(self.alloc_string(s.clone())),
+                None => quasis.push(JsValue::undefined()),
+            }
+        }
+
+        let mut raw_quasis = Vec::with_capacity(raw_vec.len());
+        for r in &raw_vec {
+            raw_quasis.push(self.alloc_string(r.clone()));
+        }
+
+        let raw_arr = self.alloc_array(raw_quasis);
+        let prev_temp = self.temp_roots.len();
+        self.temp_roots.push(raw_arr);
+
+        // Freeze raw_arr
+        crate::builtins::object::integrity::set_integrity_level(
+            self,
+            self.temp_roots[prev_temp],
+            crate::builtins::object::integrity::IntegrityLevel::Frozen,
+        )?;
+
+        let template_arr = self.alloc_array(quasis);
+        self.temp_roots.push(template_arr);
+
+        let cur_raw = self.temp_roots[prev_temp];
+        let cur_template = self.temp_roots[prev_temp + 1];
+
+        // Define non-enumerable, non-writable, non-configurable 'raw' property
+        self.define_builtin_property(
+            cur_template,
+            "raw",
+            cur_raw,
+            crate::shape::PropertyAttributes {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+
+        // Freeze template_arr
+        let cur_template = self.temp_roots[prev_temp + 1];
+        crate::builtins::object::integrity::set_integrity_level(
+            self,
+            cur_template,
+            crate::builtins::object::integrity::IntegrityLevel::Frozen,
+        )?;
+
+        let result = self.temp_roots[prev_temp + 1];
+        self.temp_roots.truncate(prev_temp);
+
+        self.template_map.insert(key, result);
+        self.push(result);
         Ok(())
     }
 }

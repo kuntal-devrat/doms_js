@@ -242,6 +242,26 @@ pub enum Expression {
         is_getter: bool,
         accessor: Box<Expression>,
     },
+    OptionalChain(OptionalChain),
+    TaggedTemplate {
+        tag: Box<Expression>,
+        quasis: Vec<Option<String>>,
+        raw_quasis: Vec<String>,
+        exprs: Vec<Expression>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionalChain {
+    pub base: Box<Expression>,
+    pub chain: Vec<ChainElement>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChainElement {
+    Property { name: String, optional: bool },
+    Index { index: Box<Expression>, optional: bool },
+    Call { args: Vec<Expression>, optional: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

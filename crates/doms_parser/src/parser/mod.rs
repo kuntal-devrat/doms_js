@@ -48,6 +48,7 @@ pub struct Parser<'a> {
     pub class_id_counter: usize,
     pub(crate) trailing_comma_after_rest: bool,
     pub(crate) current_params_simple: bool,
+    pub allow_spread: bool,
 }
 
 #[inline]
@@ -96,6 +97,7 @@ impl<'a> Parser<'a> {
             class_id_counter: 0,
             trailing_comma_after_rest: false,
             current_params_simple: true,
+            allow_spread: false,
         })
     }
 
@@ -131,6 +133,7 @@ impl<'a> Parser<'a> {
             class_id_counter: 0,
             trailing_comma_after_rest: false,
             current_params_simple: true,
+            allow_spread: false,
         })
     }
 

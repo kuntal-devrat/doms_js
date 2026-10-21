@@ -56,16 +56,10 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
 
         let realm_eval_fn = vm.alloc_closure_native_function("eval", 1, std::sync::Arc::new(move |vm, _this, args| {
             let code_val = args.first().copied().unwrap_or(JsValue::undefined());
-            let code_str = if let Some(ptr) = code_val.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::String(ref s) = obj.kind {
-                    s.clone()
-                } else {
-                    return Ok(code_val);
-                }
-            } else {
+            if !code_val.is_js_string() {
                 return Ok(code_val);
-            };
+            }
+            let code_str = vm.to_string_value(code_val);
             let program = doms_parser::parse_eval(&code_str, false, false, false)
                 .map_err(|e| VmError::SyntaxError(e.to_string()))?;
             let has_use_strict = program.body.iter()

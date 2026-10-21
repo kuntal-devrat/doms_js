@@ -12,19 +12,38 @@ impl<'a> Lexer<'a> {
         col: usize,
     ) -> Result<TokenKind, LexError> {
         self.advance(); // consume opening '`'
-        let mut quasis = Vec::new();
-        let mut raw_exprs = Vec::new();
+        let mut quasis: Vec<Option<String>> = Vec::new();
+        let mut raw_quasis: Vec<String> = Vec::new();
+        let mut raw_exprs: Vec<String> = Vec::new();
         let mut current_quasi = String::new();
+        let mut current_raw = String::new();
+        let mut current_quasi_valid = true;
 
         while let Some(c) = self.advance() {
             if c == '`' {
                 flush_surrogate(&mut current_quasi);
-                quasis.push(current_quasi);
-                return Ok(TokenKind::TemplateLiteral { quasis, raw_exprs });
+                quasis.push(if current_quasi_valid {
+                    Some(current_quasi)
+                } else {
+                    None
+                });
+                raw_quasis.push(current_raw);
+                return Ok(TokenKind::TemplateLiteral {
+                    quasis,
+                    raw_quasis,
+                    raw_exprs,
+                });
             } else if c == '$' && self.peek() == Some('{') {
                 self.advance(); // consume '{'
                 flush_surrogate(&mut current_quasi);
-                quasis.push(std::mem::take(&mut current_quasi));
+                quasis.push(if current_quasi_valid {
+                    Some(std::mem::take(&mut current_quasi))
+                } else {
+                    current_quasi.clear();
+                    None
+                });
+                raw_quasis.push(std::mem::take(&mut current_raw));
+                current_quasi_valid = true;
 
                 let mut expr_str = String::new();
                 let mut brace_depth = 1;
@@ -152,107 +171,179 @@ impl<'a> Lexer<'a> {
                 }
                 raw_exprs.push(expr_str);
             } else if c == '\\' {
+                current_raw.push('\\');
                 if let Some(escaped) = self.advance() {
+                    current_raw.push(escaped);
                     if is_line_terminator(escaped) {
                         if escaped == '\r' && self.peek() == Some('\n') {
                             self.advance();
+                            current_raw.push('\n');
                         }
                         continue;
                     }
                     match escaped {
                         'n' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\n');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\n');
+                            }
                         }
                         'r' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\r');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\r');
+                            }
                         }
                         't' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\t');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\t');
+                            }
                         }
                         'b' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\x08');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\x08');
+                            }
                         }
                         'f' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\x0C');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\x0C');
+                            }
                         }
                         'v' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\x0B');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\x0B');
+                            }
                         }
                         '0' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\0');
+                            if self.peek().map_or(false, |next| next.is_ascii_digit()) {
+                                current_quasi_valid = false;
+                            } else if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\0');
+                            }
+                        }
+                        '1'..='9' => {
+                            current_quasi_valid = false;
                         }
                         '\\' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\\');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\\');
+                            }
                         }
                         '\'' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('\'');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('\'');
+                            }
                         }
                         '"' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('"');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('"');
+                            }
                         }
                         '`' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('`');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('`');
+                            }
                         }
                         '$' => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push('$');
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push('$');
+                            }
                         }
                         'x' => {
                             let mut hex = String::new();
                             for _ in 0..2 {
-                                if let Some(h) = self.advance() {
+                                if let Some(h) = self.peek() {
                                     if h.is_ascii_hexdigit() {
+                                        self.advance();
+                                        current_raw.push(h);
                                         hex.push(h);
+                                    } else {
+                                        break;
                                     }
                                 }
                             }
-                            if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                push_unicode_code_unit(&mut current_quasi, code);
+                            if hex.len() == 2 && current_quasi_valid {
+                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                    push_unicode_code_unit(&mut current_quasi, code);
+                                } else {
+                                    current_quasi_valid = false;
+                                }
+                            } else {
+                                current_quasi_valid = false;
                             }
                         }
                         'u' => {
                             if self.peek() == Some('{') {
                                 self.advance();
+                                current_raw.push('{');
                                 let mut hex = String::new();
-                                while let Some(ch) = self.advance() {
+                                let mut closed = false;
+                                while let Some(ch) = self.peek() {
                                     if ch == '}' {
+                                        self.advance();
+                                        current_raw.push('}');
+                                        closed = true;
+                                        break;
+                                    } else if ch.is_ascii_hexdigit() {
+                                        self.advance();
+                                        current_raw.push(ch);
+                                        hex.push(ch);
+                                    } else {
                                         break;
                                     }
-                                    if ch.is_ascii_hexdigit() {
-                                        hex.push(ch);
-                                    }
                                 }
-                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                    push_unicode_code_unit(&mut current_quasi, code);
+                                if closed && !hex.is_empty() && current_quasi_valid {
+                                    if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                        if code <= 0x10_FFFF {
+                                            push_unicode_code_unit(&mut current_quasi, code);
+                                        } else {
+                                            current_quasi_valid = false;
+                                        }
+                                    } else {
+                                        current_quasi_valid = false;
+                                    }
+                                } else {
+                                    current_quasi_valid = false;
                                 }
                             } else {
                                 let mut hex = String::new();
                                 for _ in 0..4 {
-                                    if let Some(h) = self.advance() {
+                                    if let Some(h) = self.peek() {
                                         if h.is_ascii_hexdigit() {
+                                            self.advance();
+                                            current_raw.push(h);
                                             hex.push(h);
+                                        } else {
+                                            break;
                                         }
                                     }
                                 }
-                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                    push_unicode_code_unit(&mut current_quasi, code);
+                                if hex.len() == 4 && current_quasi_valid {
+                                    if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                        push_unicode_code_unit(&mut current_quasi, code);
+                                    } else {
+                                        current_quasi_valid = false;
+                                    }
+                                } else {
+                                    current_quasi_valid = false;
                                 }
                             }
                         }
                         other => {
-                            flush_surrogate(&mut current_quasi);
-                            current_quasi.push(other);
+                            if current_quasi_valid {
+                                flush_surrogate(&mut current_quasi);
+                                current_quasi.push(other);
+                            }
                         }
                     }
                 }
@@ -260,11 +351,17 @@ impl<'a> Lexer<'a> {
                 if self.peek() == Some('\n') {
                     self.advance();
                 }
-                flush_surrogate(&mut current_quasi);
-                current_quasi.push('\n');
+                current_raw.push('\n');
+                if current_quasi_valid {
+                    flush_surrogate(&mut current_quasi);
+                    current_quasi.push('\n');
+                }
             } else {
-                flush_surrogate(&mut current_quasi);
-                current_quasi.push(c);
+                current_raw.push(c);
+                if current_quasi_valid {
+                    flush_surrogate(&mut current_quasi);
+                    current_quasi.push(c);
+                }
             }
         }
         Err(LexError::UnterminatedString(line, col))

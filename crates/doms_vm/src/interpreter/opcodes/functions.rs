@@ -15,9 +15,16 @@ impl Vm {
         let upvalues = self.capture_upvalues();
         let home_object =
             if def.is_arrow { self.frames.last().and_then(|f| f.home_object) } else { None };
+        let (lexical_this, lexical_new_target) = if def.is_arrow {
+            let frame = self.frames.last();
+            (frame.map(|f| f.this_val), frame.and_then(|f| f.new_target))
+        } else {
+            (None, None)
+        };
         let js_fn = JsFunction {
             name: def.name.clone(),
             params: def.params.clone(),
+            length: def.length,
             self_slot: def.self_slot,
             local_names: def.local_names.clone(),
             lexical_local_names: def.lexical_local_names.clone(),
@@ -33,6 +40,8 @@ impl Vm {
             is_method: def.is_method,
             is_arrow: def.is_arrow,
             home_object,
+            lexical_this,
+            lexical_new_target,
             prototype: None,
             initial_shape: None,
         };
@@ -53,9 +62,16 @@ impl Vm {
         let upvalues = self.capture_upvalues();
         let home_object =
             if def.is_arrow { self.frames.last().and_then(|f| f.home_object) } else { None };
+        let (lexical_this, lexical_new_target) = if def.is_arrow {
+            let frame = self.frames.last();
+            (frame.map(|f| f.this_val), frame.and_then(|f| f.new_target))
+        } else {
+            (None, None)
+        };
         let js_fn = JsFunction {
             name: def.name.clone(),
             params: def.params.clone(),
+            length: def.length,
             self_slot: def.self_slot,
             local_names: def.local_names.clone(),
             lexical_local_names: def.lexical_local_names.clone(),
@@ -71,6 +87,8 @@ impl Vm {
             is_method: def.is_method,
             is_arrow: def.is_arrow,
             home_object,
+            lexical_this,
+            lexical_new_target,
             prototype: None,
             initial_shape: None,
         };
@@ -91,9 +109,16 @@ impl Vm {
         let upvalues = self.capture_upvalues();
         let home_object =
             if def.is_arrow { self.frames.last().and_then(|f| f.home_object) } else { None };
+        let (lexical_this, lexical_new_target) = if def.is_arrow {
+            let frame = self.frames.last();
+            (frame.map(|f| f.this_val), frame.and_then(|f| f.new_target))
+        } else {
+            (None, None)
+        };
         let js_fn = JsFunction {
             name: def.name.clone(),
             params: def.params.clone(),
+            length: def.length,
             self_slot: def.self_slot,
             local_names: def.local_names.clone(),
             lexical_local_names: def.lexical_local_names.clone(),
@@ -109,6 +134,8 @@ impl Vm {
             is_method: def.is_method,
             is_arrow: def.is_arrow,
             home_object,
+            lexical_this,
+            lexical_new_target,
             prototype: None,
             initial_shape: None,
         };
@@ -129,9 +156,16 @@ impl Vm {
         let upvalues = self.capture_upvalues();
         let home_object =
             if def.is_arrow { self.frames.last().and_then(|f| f.home_object) } else { None };
+        let (lexical_this, lexical_new_target) = if def.is_arrow {
+            let frame = self.frames.last();
+            (frame.map(|f| f.this_val), frame.and_then(|f| f.new_target))
+        } else {
+            (None, None)
+        };
         let js_fn = JsFunction {
             name: def.name.clone(),
             params: def.params.clone(),
+            length: def.length,
             self_slot: def.self_slot,
             local_names: def.local_names.clone(),
             lexical_local_names: def.lexical_local_names.clone(),
@@ -147,6 +181,8 @@ impl Vm {
             is_method: def.is_method,
             is_arrow: def.is_arrow,
             home_object,
+            lexical_this,
+            lexical_new_target,
             prototype: None,
             initial_shape: None,
         };

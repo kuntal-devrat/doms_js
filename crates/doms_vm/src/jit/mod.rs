@@ -349,6 +349,7 @@ mod tests {
         let callee_fn = vm.alloc_function(crate::object::JsFunction {
             name: Some("mod_fn".into()),
             params: vec!["a".into(), "b".into()],
+            length: 2,
             self_slot: None,
             local_names: std::sync::Arc::new(Vec::new()),
             lexical_local_names: std::sync::Arc::new(Vec::new()),
@@ -364,6 +365,8 @@ mod tests {
             is_method: false,
             is_arrow: false,
             home_object: None,
+            lexical_this: None,
+            lexical_new_target: None,
             prototype: None,
             initial_shape: None,
         });
@@ -418,4 +421,26 @@ mod tests {
             .unwrap();
         assert_eq!(res.as_int32().or(res.as_number().map(|n| n as i32)), Some(6765));
     }
+
+    #[test]
+    fn test_cranelift_typed_array_indexed_access() {
+        let mut vm = Vm::new();
+        let res = vm
+            .eval(
+                r#"
+            let arr = new Float64Array(100);
+            for (let i = 0; i < 100; i = i + 1) {
+                arr[i] = i * 2.5;
+            }
+            let sum = 0;
+            for (let i = 0; i < 100; i = i + 1) {
+                sum = sum + arr[i];
+            }
+            sum
+        "#,
+            )
+            .unwrap();
+        assert_eq!(res.as_number(), Some(12375.0));
+    }
 }
+

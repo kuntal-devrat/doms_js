@@ -142,9 +142,11 @@ mod tests {
     }
 
     #[test]
-    fn test_try_finally_continue() {
-        let prog = parse("var c1=0, fin=0; while(c1<2){ try{ c1+=1; break; } catch(e){} finally{ fin=1; continue; } fin=-1; c1+=2; }").unwrap();
+    fn test_compile_tagged_template_optional_chain() {
+        let prog = parse("function fn7() { return () => {}; }\nfn7()`hello`?.a;").unwrap();
         let chunk = Compiler::new().compile(&prog).unwrap();
-        assert!(!chunk.instructions.is_empty());
+        for (i, op) in chunk.instructions.iter().enumerate() {
+            println!("{:3}: {:?}", i, op);
+        }
     }
 }

@@ -18,6 +18,14 @@ fn test_eval_simple_bytecode() {
 }
 
 #[test]
+fn test_tagged_template_opt_chain() {
+    let mut vm = Vm::new();
+    let res = vm.eval("function fn7() { return () => {}; }\nfn7()`hello`?.a;");
+    println!("RES: {:?}", res);
+    assert!(res.is_ok());
+}
+
+#[test]
 fn test_eval_object_and_properties() {
     let mut chunk = BytecodeChunk::new();
     let name_prop = chunk.add_constant(Constant::String("x".into()));
@@ -88,6 +96,7 @@ fn test_jit_hot_loop_tiering() {
     let js_fn = JsFunction {
         name: Some("add".into()),
         params: vec!["a".into(), "b".into()],
+        length: 2,
         self_slot: None,
         local_names: Arc::new(vec!["a".into(), "b".into()]),
         lexical_local_names: Arc::new(Vec::new()),
@@ -103,6 +112,8 @@ fn test_jit_hot_loop_tiering() {
         is_method: false,
         is_arrow: false,
         home_object: None,
+        lexical_this: None,
+        lexical_new_target: None,
         prototype: None,
         initial_shape: None,
     };

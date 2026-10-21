@@ -43,6 +43,73 @@ impl Vm {
             }
         }
 
+        let is_anon = if let Some(f_ptr) = func_val.as_object_ptr() {
+            let f_obj = unsafe { &*(f_ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref f) = f_obj.kind {
+                f.name.as_deref().unwrap_or("").is_empty()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if is_anon {
+            let name_str = match &prop_key {
+                PropertyKeyVal::String(s) => match kind {
+                    2 => format!("get {}", s),
+                    4 => format!("set {}", s),
+                    _ => s.clone(),
+                },
+                PropertyKeyVal::Symbol(sym) => {
+                    let desc = if let Some(ptr) = sym.as_heap_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        if let ObjectKind::Symbol(ref d) = obj.kind {
+                            d.clone().unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    let base = if desc.is_empty() {
+                        String::new()
+                    } else {
+                        format!("[{}]", desc)
+                    };
+                    match kind {
+                        2 => format!("get {}", base),
+                        4 => format!("set {}", base),
+                        _ => base,
+                    }
+                }
+            };
+
+            if let Some(f_ptr) = func_val.as_object_ptr() {
+                let f_obj = unsafe { &mut *(f_ptr as *mut JsObject) };
+                if let ObjectKind::Function(ref mut f) = f_obj.kind {
+                    f.name = Some(name_str.clone());
+                }
+            }
+
+            let prev_temp = self.temp_roots.len();
+            self.temp_roots.push(func_val);
+            self.temp_roots.push(target);
+            let name_val = self.alloc_string(name_str);
+            let cur_func = self.temp_roots[prev_temp];
+            self.define_builtin_property(
+                cur_func,
+                "name",
+                name_val,
+                crate::shape::PropertyAttributes {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+            self.temp_roots.truncate(prev_temp);
+        }
+
         if let Some(target_ptr) = target.as_object_ptr() {
             let target_obj = unsafe { &mut *(target_ptr as *mut JsObject) };
             match kind {

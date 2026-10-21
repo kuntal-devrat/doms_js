@@ -27,9 +27,16 @@ impl Vm {
                 } else {
                     None
                 };
+                let (lexical_this, lexical_new_target) = if f.is_arrow {
+                    let frame = self.frames.last();
+                    (frame.map(|fr| fr.this_val), frame.and_then(|fr| fr.new_target))
+                } else {
+                    (None, None)
+                };
                 let js_fn = JsFunction {
                     name: f.name.clone(),
                     params: f.params.clone(),
+                    length: f.length,
                     self_slot: f.self_slot,
                     local_names: f.local_names.clone(),
                     lexical_local_names: f.lexical_local_names.clone(),
@@ -45,10 +52,17 @@ impl Vm {
                     is_method: f.is_method,
                     is_arrow: f.is_arrow,
                     home_object,
+                    lexical_this,
+                    lexical_new_target,
                     prototype: None,
                     initial_shape: None,
                 };
                 self.alloc_function(js_fn)
+            }
+            Constant::TemplateObject { .. } => {
+                return Err(VmError::RuntimeError(
+                    "TemplateObject constant cannot be loaded via LoadConst".into(),
+                ));
             }
         };
         self.push(val);

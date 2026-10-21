@@ -175,7 +175,9 @@ impl Vm {
                     let func = f.clone();
                     let is_strict_func = func.is_strict;
                     let cur_this = self.temp_roots[prev_temp + 1];
-                    let effective_this = if !is_strict_func {
+                    let effective_this = if func.is_arrow {
+                        func.lexical_this.unwrap_or(self.global_object)
+                    } else if !is_strict_func {
                         if cur_this.is_undefined() || cur_this.is_null() {
                             self.global_object
                         } else {
@@ -310,8 +312,13 @@ impl Vm {
                         }
                     }
 
-                    let new_target =
-                        if self.is_constructing { Some(self.temp_roots[prev_temp]) } else { None };
+                    let new_target = if func.is_arrow {
+                        func.lexical_new_target
+                    } else if self.is_constructing {
+                        self.current_new_target.or(Some(self.temp_roots[prev_temp]))
+                    } else {
+                        None
+                    };
 
                     let mapped_args = if func.is_arrow {
                         None

@@ -1,17 +1,17 @@
 {
   "suite": "Official Test262",
   "total": 51195,
-  "passed": 37299,
-  "failed": 13896,
-  "skipped": 0,
-  "percentage": 72.86,
-  "elapsed_seconds": 0.46,
-  "timestamp": "1792504620-epoch",
+  "passed": 38010,
+  "failed": 13185,
+  "skipped": 531,
+  "percentage": 74.25,
+  "elapsed_seconds": 24.79,
+  "timestamp": "1792547480-epoch",
   "session": {
-    "total": 301,
-    "passed": 274,
-    "failed": 27,
-    "percentage": 91.03
+    "total": 11164,
+    "passed": 9626,
+    "failed": 1007,
+    "percentage": 86.22
   },
   "categories": {
     "annexB/built-ins": { "total": 241, "passed": 183, "failed": 58, "percentage": 75.93 },
@@ -110,7 +110,7 @@
     "language/directive-prologue": { "total": 62, "passed": 62, "failed": 0, "percentage": 100.00 },
     "language/eval-code": { "total": 347, "passed": 316, "failed": 31, "percentage": 91.07 },
     "language/export": { "total": 3, "passed": 3, "failed": 0, "percentage": 100.00 },
-    "language/expressions": { "total": 10633, "passed": 8915, "failed": 1718, "percentage": 83.84 },
+    "language/expressions": { "total": 10633, "passed": 9626, "failed": 1007, "percentage": 90.53 },
     "language/function-code": { "total": 217, "passed": 214, "failed": 3, "percentage": 98.62 },
     "language/future-reserved-words": { "total": 55, "passed": 48, "failed": 7, "percentage": 87.27 },
     "language/global-code": { "total": 42, "passed": 36, "failed": 6, "percentage": 85.71 },

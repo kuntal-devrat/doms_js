@@ -10,6 +10,7 @@ mod calls_new;
 mod functions_async;
 mod literals_objects;
 mod operators;
+mod optional_chain;
 
 pub(crate) fn unwrap_grouping<'a>(mut expr: &'a Expression) -> &'a Expression {
     while let Expression::Grouping(inner) = expr {
@@ -175,6 +176,12 @@ impl Compiler {
                 } else {
                     self.chunk.emit(OpCode::DefinePrivateSetter(prop_idx), 0);
                 }
+            }
+            Expression::OptionalChain(oc) => {
+                self.compile_optional_chain(oc)?;
+            }
+            Expression::TaggedTemplate { tag, quasis, raw_quasis, exprs } => {
+                self.compile_tagged_template(tag, quasis, raw_quasis, exprs)?;
             }
         }
         Ok(())

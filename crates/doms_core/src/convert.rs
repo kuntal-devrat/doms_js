@@ -250,6 +250,21 @@ impl<T: IntoJs> IntoJs for HashMap<String, T> {
     }
 }
 
+impl<T: FromJs> FromJs for HashMap<String, T> {
+    fn from_js(value: JsValue, vm: &mut Vm) -> Result<Self, String> {
+        if !value.is_js_object() {
+            return Err("Expected object".to_string());
+        }
+        let keys = vm.get_enumerable_property_keys(value);
+        let mut map = HashMap::with_capacity(keys.len());
+        for k in keys {
+            let v = vm.get_property(value, &k);
+            map.insert(k, T::from_js(v, vm)?);
+        }
+        Ok(map)
+    }
+}
+
 impl<A: IntoJs, B: IntoJs> IntoJs for (A, B) {
     fn into_js(self, vm: &mut Vm) -> JsValue {
         let a = self.0.into_js(vm);

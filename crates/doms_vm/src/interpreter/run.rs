@@ -207,6 +207,9 @@ impl Vm {
                 OpCode::CreateArray(count) => {
                     self.op_create_array(count)?;
                 }
+                OpCode::GetTemplateObject(idx) => {
+                    self.op_get_template_object(idx, &chunk)?;
+                }
                 OpCode::ArrayPush => {
                     self.op_array_push()?;
                 }
