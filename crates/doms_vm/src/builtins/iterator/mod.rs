@@ -1,6 +1,7 @@
 //! The `Iterator` built-in object and prototype hierarchy.
 
-use crate::interpreter::{Vm, VmError};
+use crate::builtins::regexp::{advance_string_index, reg_exp_exec};
+use crate::interpreter::{PreferredType, Vm, VmError};
 use crate::object::{
     ArrayIterationKind as IterKind, JsObject, MapIterationKind, ObjectKind, SetIterationKind,
 };
@@ -212,6 +213,97 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
         let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
         vm.set_property_non_enumerable(string_iter_proto, key_name.clone());
         vm.set_property_non_writable(string_iter_proto, key_name);
+    }
+
+    // 7b. %RegExpStringIteratorPrototype%
+    let regexp_string_iter_proto = vm.alloc_object_with_exact_proto(Some(iter_proto));
+    vm.regexp_string_iterator_proto = Some(regexp_string_iter_proto);
+
+    let regexp_string_iter_next = vm.alloc_native_function("next", 0, |vm, this, _args| {
+        let (iterating_regexp, iterated_string, global, full_unicode, is_done) = if let Some(ptr) =
+            this.as_object_ptr()
+        {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::RegExpStringIterator {
+                iterating_regexp,
+                iterated_string,
+                global,
+                full_unicode,
+                done,
+            } = &mut obj.kind
+            {
+                (*iterating_regexp, iterated_string.clone(), *global, *full_unicode, *done)
+            } else {
+                return Err(VmError::TypeError(
+                    "%RegExpStringIteratorPrototype%.next called on incompatible receiver".into(),
+                ));
+            }
+        } else {
+            return Err(VmError::TypeError(
+                "%RegExpStringIteratorPrototype%.next called on non-object".into(),
+            ));
+        };
+
+        if is_done {
+            return vm.alloc_iter_result(JsValue::undefined(), true);
+        }
+
+        let match_res = reg_exp_exec(vm, iterating_regexp, &iterated_string)?;
+
+        if match_res.is_null() {
+            if let Some(ptr) = this.as_object_ptr() {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let ObjectKind::RegExpStringIterator { done, .. } = &mut obj.kind {
+                    *done = true;
+                }
+            }
+            return vm.alloc_iter_result(JsValue::undefined(), true);
+        }
+
+        if global {
+            let match_str_val = vm.get_property_result(match_res, "0")?;
+            let match_str_prim = vm.to_primitive(match_str_val, PreferredType::String)?;
+            let match_str = vm.to_string_value(match_str_prim);
+
+            if match_str.is_empty() {
+                let last_index_val = vm.get_property_result(iterating_regexp, "lastIndex")?;
+                let this_index = vm.to_length(last_index_val)?;
+                let next_index = advance_string_index(&iterated_string, this_index, full_unicode);
+                let next_idx_js = if next_index <= i32::MAX as usize {
+                    JsValue::from_int32(next_index as i32)
+                } else {
+                    JsValue::from_double(next_index as f64)
+                };
+                let ok = vm.set_property_with_receiver(
+                    iterating_regexp,
+                    "lastIndex",
+                    next_idx_js,
+                    iterating_regexp,
+                )?;
+                if !ok {
+                    return Err(VmError::TypeError("Cannot set lastIndex on RegExp".into()));
+                }
+            }
+            vm.alloc_iter_result(match_res, false)
+        } else {
+            if let Some(ptr) = this.as_object_ptr() {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                if let ObjectKind::RegExpStringIterator { done, .. } = &mut obj.kind {
+                    *done = true;
+                }
+            }
+            vm.alloc_iter_result(match_res, false)
+        }
+    });
+    vm.set_property(regexp_string_iter_proto, "next", regexp_string_iter_next);
+    vm.set_property_non_enumerable(regexp_string_iter_proto, "next".to_string());
+
+    if let Some(sym_tag) = vm.symbol_to_string_tag {
+        let tag_str = vm.alloc_string("RegExp String Iterator".into());
+        vm.set_symbol_property(regexp_string_iter_proto, sym_tag, tag_str);
+        let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
+        vm.set_property_non_enumerable(regexp_string_iter_proto, key_name.clone());
+        vm.set_property_non_writable(regexp_string_iter_proto, key_name);
     }
 
     // 8. %GeneratorPrototype%

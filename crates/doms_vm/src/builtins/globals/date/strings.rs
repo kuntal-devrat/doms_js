@@ -3,14 +3,25 @@
 use super::calendar::{DAYS, MONTHS, get_date_ms, ms_to_utc};
 use super::*;
 
+fn format_year(y: i32) -> String {
+    if y >= 0 { format!("{:04}", y) } else { format!("-{:04}", y.unsigned_abs()) }
+}
+
 pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)> {
     let date_to_iso_string = vm.alloc_native_function("toISOString", 0, |vm, this, _args| {
         let (_, ms) = get_date_ms(this)?;
         match ms_to_utc(ms) {
             Some((y, m, d, _, h, min, s, ms_part)) => {
+                let y_str = if (0..=9999).contains(&y) {
+                    format!("{:04}", y)
+                } else if y < 0 {
+                    format!("-{:06}", y.unsigned_abs())
+                } else {
+                    format!("+{:06}", y)
+                };
                 let iso = format!(
-                    "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-                    y,
+                    "{}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+                    y_str,
                     m + 1,
                     d,
                     h,
@@ -31,8 +42,14 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
                 let day_name = DAYS.get(w as usize).unwrap_or(&"Sun");
                 let mon_name = MONTHS.get(m as usize).unwrap_or(&"Jan");
                 let utc_str = format!(
-                    "{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
-                    day_name, d, mon_name, y, h, min, s
+                    "{}, {:02} {} {} {:02}:{:02}:{:02} GMT",
+                    day_name,
+                    d,
+                    mon_name,
+                    format_year(y),
+                    h,
+                    min,
+                    s
                 );
                 Ok(vm.alloc_string(utc_str))
             }
@@ -46,7 +63,7 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
             Some((y, m, d, w, _, _, _, _)) => {
                 let day_name = DAYS.get(w as usize).unwrap_or(&"Sun");
                 let mon_name = MONTHS.get(m as usize).unwrap_or(&"Jan");
-                let s = format!("{} {} {:02} {:04}", day_name, mon_name, d, y);
+                let s = format!("{} {} {:02} {}", day_name, mon_name, d, format_year(y));
                 Ok(vm.alloc_string(s))
             }
             None => Ok(vm.alloc_string("Invalid Date".into())),
@@ -72,8 +89,14 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
                 let day_name = DAYS.get(w as usize).unwrap_or(&"Sun");
                 let mon_name = MONTHS.get(m as usize).unwrap_or(&"Jan");
                 let s = format!(
-                    "{} {} {:02} {:04} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
-                    day_name, mon_name, d, y, h, min, s
+                    "{} {} {:02} {} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
+                    day_name,
+                    mon_name,
+                    d,
+                    format_year(y),
+                    h,
+                    min,
+                    s
                 );
                 Ok(vm.alloc_string(s))
             }
@@ -82,13 +105,23 @@ pub(super) fn create_string_methods(vm: &mut Vm) -> Vec<(&'static str, JsValue)>
     });
 
     let date_to_json = vm.alloc_native_function("toJSON", 1, |vm, this, _args| {
-        if let Some(_ptr) = this.as_object_ptr() {
-            let to_iso = vm.get_property(this, "toISOString");
-            if vm.is_callable(to_iso) {
-                return vm.call(to_iso, this, &[]);
+        if this.is_nullish() {
+            return Err(VmError::TypeError(
+                "Date.prototype.toJSON called on null or undefined".into(),
+            ));
+        }
+        let o = vm.to_object_value(this)?;
+        let tv = vm.to_primitive(o, crate::interpreter::PreferredType::Number)?;
+        if let Some(n) = tv.as_double() {
+            if !n.is_finite() {
+                return Ok(JsValue::null());
             }
         }
-        Err(VmError::TypeError("toISOString is not callable".into()))
+        let to_iso = vm.get_property_result(o, "toISOString")?;
+        if !vm.is_callable(to_iso) {
+            return Err(VmError::TypeError("toISOString is not callable".into()));
+        }
+        vm.call(to_iso, o, &[])
     });
     let date_to_locale_string = vm.alloc_native_function("toLocaleString", 0, |vm, this, _args| {
         let (_, ms) = get_date_ms(this)?;

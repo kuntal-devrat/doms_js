@@ -145,6 +145,7 @@ pub fn register_builtins(vm: &mut Vm) {
         vm.map_iterator_proto,
         vm.set_iterator_proto,
         vm.string_iterator_proto,
+        vm.regexp_string_iterator_proto,
         vm.generator_proto,
         vm.wrap_for_valid_iterator_proto,
         vm.iterator_helper_proto,

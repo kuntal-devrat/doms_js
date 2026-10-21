@@ -569,6 +569,45 @@ impl Vm {
                 let this_str_val = vm.alloc_string(this_str);
                 vm.call(exec_fn, re, &[this_str_val])
             })),
+            "matchAll" => Some(self.alloc_native_function("matchAll", 1, |vm, this, args| {
+                if this.is_nullish() {
+                    return Err(VmError::TypeError("String.prototype.matchAll called on null or undefined".into()));
+                }
+                let regexp_arg = args.first().copied().unwrap_or(JsValue::undefined());
+                if regexp_arg.is_js_object() {
+                    if is_regexp(vm, regexp_arg)? {
+                        let flags_val = vm.get_property_result(regexp_arg, "flags")?;
+                        if flags_val.is_nullish() {
+                            return Err(VmError::TypeError("RegExp flags must not be null or undefined".into()));
+                        }
+                        let flags_str = vm.to_string_spec(flags_val)?;
+                        if !flags_str.contains('g') {
+                            return Err(VmError::TypeError("String.prototype.matchAll called with a non-global RegExp argument".into()));
+                        }
+                    }
+                    if let Some(sym_match_all) = vm.symbol_match_all {
+                        let matcher = vm.get_symbol_property_result(regexp_arg, sym_match_all)?;
+                        if !matcher.is_undefined() && !matcher.is_null() {
+                            if !vm.is_callable(matcher) {
+                                return Err(VmError::TypeError("RegExp[Symbol.matchAll] is not a function".into()));
+                            }
+                            return vm.call(matcher, regexp_arg, &[this]);
+                        }
+                    }
+                }
+                let s = vm.to_string_spec(this)?;
+                let s_val = vm.alloc_string(s);
+                let regexp_ctor = vm.globals.get("RegExp").copied().unwrap_or(JsValue::undefined());
+                let g_str = vm.alloc_string("g".to_string());
+                let rx = vm.construct(regexp_ctor, &[regexp_arg, g_str])?;
+                if let Some(sym_match_all) = vm.symbol_match_all {
+                    let matcher = vm.get_symbol_property_result(rx, sym_match_all)?;
+                    if vm.is_callable(matcher) {
+                        return vm.call(matcher, rx, &[s_val]);
+                    }
+                }
+                Err(VmError::TypeError("RegExp[Symbol.matchAll] is not callable".into()))
+            })),
             "search" => Some(self.alloc_native_function("search", 1, |vm, this, args| {
                 if this.is_nullish() {
                     return Err(VmError::TypeError("String.prototype.search called on null or undefined".into()));

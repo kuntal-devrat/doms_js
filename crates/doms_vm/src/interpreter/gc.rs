@@ -375,6 +375,7 @@ impl Vm {
                 self.map_iterator_proto,
                 self.set_iterator_proto,
                 self.string_iterator_proto,
+                self.regexp_string_iterator_proto,
                 self.generator_proto,
                 self.wrap_for_valid_iterator_proto,
                 self.iterator_helper_proto,

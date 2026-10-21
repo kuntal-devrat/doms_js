@@ -311,6 +311,22 @@ impl Vm {
         let _ = self.set_symbol_property_result(target, key, value);
     }
 
+    pub fn define_symbol_property(
+        &mut self,
+        target: JsValue,
+        key: JsValue,
+        value: JsValue,
+        attrs: crate::shape::PropertyAttributes,
+    ) {
+        let _ = self.set_symbol_property_result(target, key, value);
+        if let Some(ptr) = target.as_object_ptr() {
+            if self.is_valid_heap_object(ptr) {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                obj.set_symbol_attributes(key, attrs);
+            }
+        }
+    }
+
     #[inline]
     pub fn is_valid_heap_object(&self, ptr: *const u8) -> bool {
         if ptr.is_null() || (ptr as usize) % std::mem::align_of::<JsObject>() != 0 {

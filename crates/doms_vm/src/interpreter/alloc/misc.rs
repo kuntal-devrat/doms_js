@@ -63,4 +63,26 @@ impl Vm {
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_symbol_ptr(ptr as *mut u8) }
     }
+    pub fn alloc_regexp_string_iterator(
+        &mut self,
+        matcher: JsValue,
+        string: String,
+        global: bool,
+        full_unicode: bool,
+    ) -> JsValue {
+        let proto = self.regexp_string_iterator_proto.or(self.iterator_proto);
+        let obj = JsObject::new_with_kind(
+            ShapeRegistry::ROOT_SHAPE_ID,
+            proto,
+            ObjectKind::RegExpStringIterator {
+                iterating_regexp: matcher,
+                iterated_string: string,
+                global,
+                full_unicode,
+                done: false,
+            },
+        );
+        let ptr = self.allocate_js_object(obj);
+        unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
+    }
 }

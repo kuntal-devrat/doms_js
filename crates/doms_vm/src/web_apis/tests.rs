@@ -88,3 +88,230 @@ fn test_fetch_data_uri_response() {
     let body = vm.globals.get("fetchBody").copied().unwrap();
     assert_eq!(vm.to_string_value(body), "Hello DOMS Fetch");
 }
+
+#[test]
+fn test_web_crypto_random_uuid() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var uuid = crypto.randomUUID();
+        var isString = typeof uuid === "string";
+        var lengthValid = uuid.length === 36;
+        var versionChar = uuid.charAt(14);
+        var variantChar = uuid.charAt(19);
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    assert_eq!(vm.globals.get("isString").map(|v| v.is_truthy()), Some(true));
+    assert_eq!(vm.globals.get("lengthValid").map(|v| v.is_truthy()), Some(true));
+    assert_eq!(vm.to_string_value(vm.globals.get("versionChar").copied().unwrap()), "4");
+    let variant = vm.to_string_value(vm.globals.get("variantChar").copied().unwrap());
+    assert!(["8", "9", "a", "b"].contains(&variant.as_str()));
+}
+
+#[test]
+fn test_web_crypto_get_random_values() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var arr = new Uint8Array(32);
+        crypto.getRandomValues(arr);
+        var sum = 0;
+        for (var i = 0; i < arr.length; i++) {
+            sum += arr[i];
+        }
+        var hasNonZero = sum > 0;
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    assert_eq!(vm.globals.get("hasNonZero").map(|v| v.is_truthy()), Some(true));
+}
+
+#[test]
+fn test_web_crypto_subtle_digest_sha256() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var digestHex = null;
+        var encoder = new TextEncoder();
+        var data = encoder.encode("hello world");
+        crypto.subtle.digest("SHA-256", data).then(function(buf) {
+            var bytes = new Uint8Array(buf);
+            var hex = "";
+            for (var i = 0; i < bytes.length; i++) {
+                var b = bytes[i].toString(16);
+                if (b.length < 2) b = "0" + b;
+                hex += b;
+            }
+            digestHex = hex;
+        });
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+    let hex = vm.globals.get("digestHex").copied().unwrap();
+    // Known SHA-256 test vector for "hello world"
+    assert_eq!(
+        vm.to_string_value(hex),
+        "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    );
+}
+
+#[test]
+fn test_readable_stream_and_reader() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var stream = new ReadableStream({
+            start: function(controller) {
+                controller.enqueue("chunk1");
+                controller.enqueue("chunk2");
+                controller.close();
+            }
+        });
+
+        var chunks = [];
+        var reader = stream.getReader();
+        reader.read().then(function(r1) {
+            chunks.push(r1.value);
+            reader.read().then(function(r2) {
+                chunks.push(r2.value);
+                reader.read().then(function(r3) {
+                    chunks.push(r3.done);
+                });
+            });
+        });
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+    let chunks_val = vm.globals.get("chunks").copied().unwrap();
+    let c0 = vm.get_element(chunks_val, 0);
+    assert_eq!(vm.to_string_value(c0), "chunk1");
+    let c1 = vm.get_element(chunks_val, 1);
+    assert_eq!(vm.to_string_value(c1), "chunk2");
+    let c2 = vm.get_element(chunks_val, 2);
+    assert!(c2.is_truthy());
+}
+
+#[test]
+fn test_readable_stream_piping() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var received = [];
+        var rs = new ReadableStream({
+            start: function(controller) {
+                controller.enqueue(10);
+                controller.enqueue(20);
+                controller.close();
+            }
+        });
+        var ws = new WritableStream({
+            write: function(chunk) {
+                received.push(chunk);
+            }
+        });
+        var pipeFinished = false;
+        rs.pipeTo(ws).then(function() {
+            pipeFinished = true;
+        });
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+    assert_eq!(vm.globals.get("pipeFinished").map(|v| v.is_truthy()), Some(true));
+    let rec_val = vm.globals.get("received").copied().unwrap();
+    assert_eq!(vm.get_element(rec_val, 0).to_int32(), Some(10));
+    assert_eq!(vm.get_element(rec_val, 1).to_int32(), Some(20));
+}
+
+#[test]
+fn test_transform_stream() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var ts = new TransformStream({
+            transform: function(chunk, controller) {
+                controller.enqueue(chunk * 2);
+            }
+        });
+
+        var results = [];
+        var reader = ts.readable.getReader();
+        var writer = ts.writable.getWriter();
+
+        writer.write(5);
+        writer.write(15);
+        writer.close();
+
+        reader.read().then(function(r1) {
+            results.push(r1.value);
+            return reader.read();
+        }).then(function(r2) {
+            results.push(r2.value);
+        });
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+    let res = vm.globals.get("results").copied().unwrap();
+    assert_eq!(vm.get_element(res, 0).to_int32(), Some(10));
+    assert_eq!(vm.get_element(res, 1).to_int32(), Some(30));
+}
+
+#[test]
+fn test_headers_methods() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var h = new Headers({ "Content-Type": "application/json" });
+        h.append("Accept", "text/html");
+        h.append("Accept", "application/xhtml+xml");
+        var ct = h.get("content-type");
+        var accept = h.get("accept");
+        var hasAuth = h.has("authorization");
+        h.set("Authorization", "Bearer token123");
+        var hasAuthNow = h.has("authorization");
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    assert_eq!(vm.to_string_value(vm.globals.get("ct").copied().unwrap()), "application/json");
+    assert_eq!(
+        vm.to_string_value(vm.globals.get("accept").copied().unwrap()),
+        "text/html, application/xhtml+xml"
+    );
+    assert_eq!(vm.globals.get("hasAuth").map(|v| v.is_truthy()), Some(false));
+    assert_eq!(vm.globals.get("hasAuthNow").map(|v| v.is_truthy()), Some(true));
+}
+
+#[test]
+fn test_abort_controller_and_signal() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var controller = new AbortController();
+        var signal = controller.signal;
+        var wasAbortedBefore = signal.aborted;
+        var eventFired = false;
+        signal.addEventListener("abort", function() {
+            eventFired = true;
+        });
+        controller.abort("manual abort");
+        var wasAbortedAfter = signal.aborted;
+        var reason = signal.reason;
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    assert_eq!(vm.globals.get("wasAbortedBefore").map(|v| v.is_truthy()), Some(false));
+    assert_eq!(vm.globals.get("wasAbortedAfter").map(|v| v.is_truthy()), Some(true));
+    assert_eq!(vm.globals.get("eventFired").map(|v| v.is_truthy()), Some(true));
+    assert_eq!(vm.to_string_value(vm.globals.get("reason").copied().unwrap()), "manual abort");
+}
+
+#[test]
+fn test_response_json_and_clone() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var resp = Response.json({ status: "success", count: 42 });
+        var status = resp.status;
+        var ok = resp.ok;
+        var jsonResult = null;
+        resp.json().then(function(data) {
+            jsonResult = data;
+        });
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+    assert_eq!(vm.globals.get("status").and_then(|v| v.to_int32()), Some(200));
+    assert_eq!(vm.globals.get("ok").map(|v| v.is_truthy()), Some(true));
+    let jr = vm.globals.get("jsonResult").copied().unwrap();
+    let status_prop = vm.get_property(jr, "status");
+    assert_eq!(vm.to_string_value(status_prop), "success");
+    let count_prop = vm.get_property(jr, "count");
+    assert_eq!(count_prop.to_int32(), Some(42));
+}

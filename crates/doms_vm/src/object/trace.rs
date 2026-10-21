@@ -396,6 +396,11 @@ impl Trace for JsObject {
                 }
             }
             ObjectKind::StringIterator { .. } => {}
+            ObjectKind::RegExpStringIterator { iterating_regexp, .. } => {
+                if let Some(p) = iterating_regexp.as_heap_ptr() {
+                    tracer.trace_ref(p);
+                }
+            }
             _ => {}
         }
     }
@@ -702,6 +707,9 @@ impl JsObject {
                 }
             }
             ObjectKind::StringIterator { .. } => {}
+            ObjectKind::RegExpStringIterator { iterating_regexp, .. } => {
+                visitor(iterating_regexp);
+            }
             ObjectKind::DataView { buffer_val, .. } => {
                 visitor(buffer_val);
             }

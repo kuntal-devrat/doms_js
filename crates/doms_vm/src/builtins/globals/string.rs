@@ -182,6 +182,7 @@ pub(super) fn register_string_global(vm: &mut Vm) {
         "toWellFormed",
         "replace",
         "match",
+        "matchAll",
         "search",
         "lastIndexOf",
         "split",

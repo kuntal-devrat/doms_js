@@ -24,5 +24,8 @@ cranelift-frontend.workspace = true
 cranelift-jit.workspace = true
 cranelift-module.workspace = true
 cranelift-native.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]

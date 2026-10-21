@@ -50,75 +50,90 @@ pub(super) fn register_events(vm: &mut Vm) {
     });
     vm.globals.insert("CustomEvent".to_string(), custom_event_ctor);
 
+    let event_target_proto = vm.alloc_object();
+
+    let add_fn = vm.alloc_native_function("addEventListener", 2, |vm, this, args| {
+        let event_type = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let listener = args.get(1).copied().unwrap_or(JsValue::undefined());
+        let mut listeners = vm.get_property(this, "__listeners__");
+        if !listeners.is_object() {
+            listeners = vm.alloc_object();
+            vm.set_property(this, "__listeners__", listeners);
+        }
+        let arr_val = vm.get_property(listeners, &event_type);
+        let arr = if arr_val.is_object() {
+            arr_val
+        } else {
+            let new_arr = vm.alloc_array(Vec::new());
+            vm.set_property(listeners, &event_type, new_arr);
+            new_arr
+        };
+        if let Some(ptr) = arr.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::Array(elements) = &mut obj.kind {
+                elements.push(listener);
+            }
+        }
+        Ok(JsValue::undefined())
+    });
+    vm.set_property(event_target_proto, "addEventListener", add_fn);
+
+    let remove_fn = vm.alloc_native_function("removeEventListener", 2, |vm, this, args| {
+        let event_type = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+        let listener = args.get(1).copied().unwrap_or(JsValue::undefined());
+        let listeners = vm.get_property(this, "__listeners__");
+        if !listeners.is_object() {
+            return Ok(JsValue::undefined());
+        }
+        let arr_val = vm.get_property(listeners, &event_type);
+        if let Some(ptr) = arr_val.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::Array(elements) = &mut obj.kind {
+                elements.retain(|&e| e.raw_bits() != listener.raw_bits());
+            }
+        }
+        Ok(JsValue::undefined())
+    });
+    vm.set_property(event_target_proto, "removeEventListener", remove_fn);
+
+    let dispatch_fn = vm.alloc_native_function("dispatchEvent", 1, |vm, this, args| {
+        let event = args.first().copied().unwrap_or(JsValue::undefined());
+        if !event.is_object() {
+            return Err(VmError::TypeError("Event must be an object".into()));
+        }
+        vm.set_property(event, "target", this);
+        let type_val = vm.get_property(event, "type");
+        let event_type = vm.to_string_value(type_val);
+        let listeners = vm.get_property(this, "__listeners__");
+        if !listeners.is_object() {
+            return Ok(JsValue::from_boolean(true));
+        }
+        let arr_val = vm.get_property(listeners, &event_type);
+
+        let mut callbacks = Vec::new();
+        if let Some(ptr) = arr_val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Array(elements) = &obj.kind {
+                callbacks = elements.clone();
+            }
+        }
+        for cb in callbacks {
+            let _ = vm.call(cb, this, &[event]);
+        }
+        let def_prevented = vm.get_property(event, "defaultPrevented").is_truthy();
+        Ok(JsValue::from_boolean(!def_prevented))
+    });
+    vm.set_property(event_target_proto, "dispatchEvent", dispatch_fn);
+
     let event_target_ctor = vm.alloc_native_function("EventTarget", 0, |vm, _this, _args| {
+        let ctor = vm.globals.get("EventTarget").copied().unwrap_or(JsValue::undefined());
+        let proto = vm.get_property(ctor, "prototype");
         let instance = vm.alloc_object();
+        vm.set_prototype(instance, proto);
         let listeners_obj = vm.alloc_object();
         vm.set_property(instance, "__listeners__", listeners_obj);
-
-        let add_fn = vm.alloc_native_function("addEventListener", 2, |vm, this, args| {
-            let event_type = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
-            let listener = args.get(1).copied().unwrap_or(JsValue::undefined());
-            let listeners = vm.get_property(this, "__listeners__");
-            let arr_val = vm.get_property(listeners, &event_type);
-            let arr = if arr_val.is_object() {
-                arr_val
-            } else {
-                let new_arr = vm.alloc_array(Vec::new());
-                vm.set_property(listeners, &event_type, new_arr);
-                new_arr
-            };
-            if let Some(ptr) = arr.as_object_ptr() {
-                let obj = unsafe { &mut *(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &mut obj.kind {
-                    elements.push(listener);
-                }
-            }
-            Ok(JsValue::undefined())
-        });
-        vm.set_property(instance, "addEventListener", add_fn);
-
-        let remove_fn = vm.alloc_native_function("removeEventListener", 2, |vm, this, args| {
-            let event_type = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
-            let listener = args.get(1).copied().unwrap_or(JsValue::undefined());
-            let listeners = vm.get_property(this, "__listeners__");
-            let arr_val = vm.get_property(listeners, &event_type);
-            if let Some(ptr) = arr_val.as_object_ptr() {
-                let obj = unsafe { &mut *(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &mut obj.kind {
-                    elements.retain(|&e| e.raw_bits() != listener.raw_bits());
-                }
-            }
-            Ok(JsValue::undefined())
-        });
-        vm.set_property(instance, "removeEventListener", remove_fn);
-
-        let dispatch_fn = vm.alloc_native_function("dispatchEvent", 1, |vm, this, args| {
-            let event = args.first().copied().unwrap_or(JsValue::undefined());
-            if !event.is_object() {
-                return Err(VmError::TypeError("Event must be an object".into()));
-            }
-            vm.set_property(event, "target", this);
-            let type_val = vm.get_property(event, "type");
-            let event_type = vm.to_string_value(type_val);
-            let listeners = vm.get_property(this, "__listeners__");
-            let arr_val = vm.get_property(listeners, &event_type);
-
-            let mut callbacks = Vec::new();
-            if let Some(ptr) = arr_val.as_object_ptr() {
-                let obj = unsafe { &*(ptr as *mut JsObject) };
-                if let ObjectKind::Array(elements) = &obj.kind {
-                    callbacks = elements.clone();
-                }
-            }
-            for cb in callbacks {
-                let _ = vm.call(cb, this, &[event]);
-            }
-            let def_prevented = vm.get_property(event, "defaultPrevented").is_truthy();
-            Ok(JsValue::from_boolean(!def_prevented))
-        });
-        vm.set_property(instance, "dispatchEvent", dispatch_fn);
-
         Ok(instance)
     });
+    vm.set_property(event_target_ctor, "prototype", event_target_proto);
     vm.globals.insert("EventTarget".to_string(), event_target_ctor);
 }

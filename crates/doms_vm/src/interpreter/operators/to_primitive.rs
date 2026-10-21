@@ -3,6 +3,52 @@
 use super::*;
 
 impl Vm {
+    pub fn ordinary_to_primitive(
+        &mut self,
+        val: JsValue,
+        hint: PreferredType,
+    ) -> Result<JsValue, VmError> {
+        if self.is_primitive_value(val) {
+            return Ok(val);
+        }
+
+        if let Some(ptr) = val.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if matches!(obj.kind, ObjectKind::String(_) | ObjectKind::ConsString { .. }) {
+                return Ok(val);
+            }
+            let has_own_props = obj.accessors.as_ref().map_or(false, |a| !a.is_empty())
+                || obj.shape_id != ShapeRegistry::ROOT_SHAPE_ID;
+            if !has_own_props {
+                match &obj.kind {
+                    ObjectKind::StringObject(s) => return Ok(self.alloc_string(s.clone())),
+                    ObjectKind::NumberObject(n) => return Ok(JsValue::from_double(*n)),
+                    ObjectKind::BooleanObject(b) => return Ok(JsValue::from_boolean(*b)),
+                    ObjectKind::BigIntObject(b) => return Ok(self.alloc_bigint(b.clone())),
+                    _ => {}
+                }
+            }
+
+            let methods = if hint == PreferredType::String {
+                ["toString", "valueOf"]
+            } else {
+                ["valueOf", "toString"]
+            };
+            for m in methods {
+                let fn_val = self.get_property_result(val, m)?;
+                if self.is_callable(fn_val) {
+                    let res = self.call(fn_val, val, &[])?;
+                    if self.is_primitive_value(res) {
+                        return Ok(res);
+                    }
+                }
+            }
+            Err(VmError::TypeError("Cannot convert object to primitive value".into()))
+        } else {
+            Ok(val)
+        }
+    }
+
     pub fn to_primitive(&mut self, val: JsValue, hint: PreferredType) -> Result<JsValue, VmError> {
         if self.is_primitive_value(val) {
             return Ok(val);
@@ -31,60 +77,8 @@ impl Vm {
             }
         }
 
-        if let Some(ptr) = val.as_object_ptr() {
-            let obj = unsafe { &*(ptr as *mut JsObject) };
-            if matches!(obj.kind, ObjectKind::String(_) | ObjectKind::ConsString { .. }) {
-                return Ok(val);
-            }
-            let has_own_props = obj.accessors.as_ref().map_or(false, |a| !a.is_empty())
-                || obj.shape_id != ShapeRegistry::ROOT_SHAPE_ID;
-            if !has_own_props {
-                match &obj.kind {
-                    ObjectKind::StringObject(s) => return Ok(self.alloc_string(s.clone())),
-                    ObjectKind::NumberObject(n) => return Ok(JsValue::from_double(*n)),
-                    ObjectKind::BooleanObject(b) => return Ok(JsValue::from_boolean(*b)),
-                    ObjectKind::BigIntObject(b) => return Ok(self.alloc_bigint(b.clone())),
-                    _ => {}
-                }
-            }
-            if matches!(obj.kind, ObjectKind::Date(_)) {
-                let actual_hint =
-                    if hint == PreferredType::Default { PreferredType::String } else { hint };
-                let methods = if actual_hint == PreferredType::String {
-                    ["toString", "valueOf"]
-                } else {
-                    ["valueOf", "toString"]
-                };
-                for m in methods {
-                    let fn_val = self.get_property_result(val, m)?;
-                    if self.is_callable(fn_val) {
-                        let res = self.call(fn_val, val, &[])?;
-                        if self.is_primitive_value(res) {
-                            return Ok(res);
-                        }
-                    }
-                }
-                return Err(VmError::TypeError("Cannot convert Date to primitive value".into()));
-            }
-
-            let methods = if hint == PreferredType::String {
-                ["toString", "valueOf"]
-            } else {
-                ["valueOf", "toString"]
-            };
-            for m in methods {
-                let fn_val = self.get_property_result(val, m)?;
-                if self.is_callable(fn_val) {
-                    let res = self.call(fn_val, val, &[])?;
-                    if self.is_primitive_value(res) {
-                        return Ok(res);
-                    }
-                }
-            }
-            Err(VmError::TypeError("Cannot convert object to primitive value".into()))
-        } else {
-            Ok(val)
-        }
+        let actual_hint = if hint == PreferredType::Default { PreferredType::Number } else { hint };
+        self.ordinary_to_primitive(val, actual_hint)
     }
 
     /// ECMAScript `ToString(argument)` abstract operation.

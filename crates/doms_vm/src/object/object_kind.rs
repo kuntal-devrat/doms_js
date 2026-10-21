@@ -96,6 +96,13 @@ pub enum ObjectKind {
         string: String,
         index: usize,
     },
+    RegExpStringIterator {
+        iterating_regexp: JsValue,
+        iterated_string: String,
+        global: bool,
+        full_unicode: bool,
+        done: bool,
+    },
 }
 
 #[derive(Debug, Clone)]

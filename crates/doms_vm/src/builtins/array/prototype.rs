@@ -171,7 +171,12 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
             if let Some(ptr) = obj.as_object_ptr() {
                 let js_obj = unsafe { &mut *(ptr as *mut JsObject) };
                 if let ObjectKind::Array(elements) = &mut js_obj.kind {
-                    return Ok(elements.pop().unwrap_or(JsValue::undefined()));
+                    let res = elements.pop().unwrap_or(JsValue::undefined());
+                    let new_len = elements.len();
+                    if let Some(info) = vm.shapes.get_property_info(js_obj.shape_id, "length") {
+                        let _ = js_obj.set_slot(info.offset, JsValue::from_double(new_len as f64));
+                    }
+                    return Ok(res);
                 }
             }
         }
@@ -225,7 +230,13 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
                 let js_obj = unsafe { &mut *(ptr as *mut JsObject) };
                 if let ObjectKind::Array(elements) = &mut js_obj.kind {
                     if !elements.is_empty() {
-                        return Ok(elements.remove(0));
+                        let res = elements.remove(0);
+                        let new_len = elements.len();
+                        if let Some(info) = vm.shapes.get_property_info(js_obj.shape_id, "length") {
+                            let _ =
+                                js_obj.set_slot(info.offset, JsValue::from_double(new_len as f64));
+                        }
+                        return Ok(res);
                     }
                 }
             }
