@@ -68,7 +68,21 @@ fn detect_native_stack_top() -> usize {
     unsafe { libc::pthread_get_stackaddr_np(libc::pthread_self()) as usize }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(target_os = "windows")]
+fn detect_native_stack_top() -> usize {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentThreadStackLimits(low_limit: *mut usize, high_limit: *mut usize);
+    }
+    let mut low = 0usize;
+    let mut high = 0usize;
+    unsafe {
+        GetCurrentThreadStackLimits(&mut low, &mut high);
+    }
+    high
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 fn detect_native_stack_top() -> usize {
     0
 }

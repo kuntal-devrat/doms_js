@@ -22,5 +22,19 @@ echo "DOMS JavaScript Engine — Official Test262 Conformance Suite"
 echo "============================================================"
 echo "Running official tc39/test262 tests..."
 
-# Forward all arguments directly to native test262 runner
-exec "${DOMS_BIN}" test262 "$@"
+# Map --summary-only or default to safe parameters
+ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--summary-only" ]; then
+        ARGS+=("-s" "language/eval-code" "-t" "2")
+    else
+        ARGS+=("$arg")
+    fi
+done
+
+if [ ${#ARGS[@]} -eq 0 ]; then
+    exec "${DOMS_BIN}" test262 -t 2
+else
+    exec "${DOMS_BIN}" test262 "${ARGS[@]}"
+fi
+

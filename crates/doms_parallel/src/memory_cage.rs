@@ -14,21 +14,20 @@ use std::sync::{Arc, Mutex};
 pub const DEFAULT_CAGE_SIZE: usize = 4 * 1024 * 1024 * 1024; // 4 GiB
 
 #[cfg(unix)]
-unsafe extern "C" {
-    fn mmap(addr: *mut u8, len: usize, prot: i32, flags: i32, fd: i32, offset: i64) -> *mut u8;
-    fn munmap(addr: *mut u8, len: usize) -> i32;
+fn get_unix_mmap_flags() -> libc::c_int {
+    #[cfg(target_os = "linux")]
+    {
+        libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE
+    }
+    #[cfg(target_os = "macos")]
+    {
+        libc::MAP_PRIVATE | libc::MAP_ANON
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        libc::MAP_PRIVATE | libc::MAP_ANON
+    }
 }
-
-#[cfg(unix)]
-const PROT_READ: i32 = 1;
-#[cfg(unix)]
-const PROT_WRITE: i32 = 2;
-#[cfg(unix)]
-const MAP_PRIVATE: i32 = 0x02;
-#[cfg(unix)]
-const MAP_ANONYMOUS: i32 = 0x20;
-#[cfg(unix)]
-const MAP_NORESERVE: i32 = 0x4000;
 
 /// An allocated slice within the memory sandbox cage.
 #[derive(Debug, Clone)]
@@ -58,12 +57,18 @@ impl MemoryCage {
     pub fn new(size: usize) -> Self {
         #[cfg(unix)]
         {
-            let map_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
+            let map_flags = get_unix_mmap_flags();
             let ptr = unsafe {
-                mmap(std::ptr::null_mut(), size, PROT_READ | PROT_WRITE, map_flags, -1, 0)
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    size,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    map_flags,
+                    -1,
+                    0,
+                )
             };
-            let map_failed = usize::MAX as *mut u8;
-            if ptr != map_failed && !ptr.is_null() {
+            if ptr != libc::MAP_FAILED && !ptr.is_null() {
                 return Self {
                     cage_base: ptr as usize,
                     cage_size: size,
@@ -158,7 +163,7 @@ impl Drop for MemoryCage {
         #[cfg(unix)]
         if self.is_mmap && self.cage_base != 0 {
             unsafe {
-                munmap(self.cage_base as *mut u8, self.cage_size);
+                libc::munmap(self.cage_base as *mut libc::c_void, self.cage_size);
             }
         }
     }
@@ -288,7 +293,7 @@ mod tests {
         let cage = MemoryCage::with_defaults();
         assert_eq!(cage.cage_size(), DEFAULT_CAGE_SIZE);
         assert_eq!(cage.allocated_bytes(), 0);
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         assert!(cage.is_virtual_mmap());
     }
 

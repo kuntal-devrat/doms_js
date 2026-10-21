@@ -806,6 +806,7 @@ fn test_weak_pruning_and_liveness_after_gc() {
 #[test]
 fn test_tiny_heap_stack_locals_survive_gc() {
     use doms_gc::heap::HeapConfig;
+    crate::interpreter::gc::register_stack_base();
     // A tiny heap forces collection on nearly every allocation. Values that
     // only exist in Rust locals / machine registers while engine code runs
     // (builtin construction, embedder callbacks) must be found by the
