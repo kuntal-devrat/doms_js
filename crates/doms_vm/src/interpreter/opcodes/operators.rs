@@ -368,6 +368,39 @@ impl Vm {
         Ok(())
     }
 
+    pub(crate) fn op_inc(&mut self) -> Result<(), VmError> {
+        let v = self.pop()?;
+        let num = self.to_numeric(v)?;
+        if let Some(bi) = self.as_bigint_val(num) {
+            let res = self.alloc_bigint(&bi + 1);
+            self.push(res);
+        } else {
+            let n = self.to_number_value(num)?;
+            self.push(JsValue::from_double(n + 1.0));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn op_dec(&mut self) -> Result<(), VmError> {
+        let v = self.pop()?;
+        let num = self.to_numeric(v)?;
+        if let Some(bi) = self.as_bigint_val(num) {
+            let res = self.alloc_bigint(&bi - 1);
+            self.push(res);
+        } else {
+            let n = self.to_number_value(num)?;
+            self.push(JsValue::from_double(n - 1.0));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn op_to_numeric(&mut self) -> Result<(), VmError> {
+        let v = self.pop()?;
+        let num = self.to_numeric(v)?;
+        self.push(num);
+        Ok(())
+    }
+
     pub(crate) fn op_neg(&mut self) -> Result<(), VmError> {
         let v = self.pop()?;
         if let Some(bi) = self.as_bigint_val(v) {
@@ -577,31 +610,62 @@ impl Vm {
         Ok(())
     }
 
+    pub fn ordinary_has_instance(&mut self, c: JsValue, o: JsValue) -> Result<bool, VmError> {
+        if !self.is_callable(c) {
+            return Ok(false);
+        }
+        if !o.is_object() {
+            return Ok(false);
+        }
+        let proto = self.get_property_result(c, "prototype")?;
+        if !proto.is_object() {
+            return Err(VmError::TypeError(
+                "Function has non-object prototype in instanceof check".into(),
+            ));
+        }
+        let mut curr_val = self.get_prototype_of_val(o)?;
+        while curr_val.is_object() {
+            if curr_val == proto {
+                return Ok(true);
+            }
+            curr_val = self.get_prototype_of_val(curr_val)?;
+        }
+        Ok(false)
+    }
+
     pub(crate) fn op_instanceof(&mut self) -> Result<(), VmError> {
         let rhs = self.pop()?;
         let lhs = self.pop()?;
-        if !lhs.is_object() {
-            self.push(JsValue::from_boolean(false));
-        } else if let Some(rhs_ptr) = rhs.as_object_ptr() {
-            let _rhs_obj = unsafe { &*(rhs_ptr as *mut JsObject) };
-            let proto = self.get_property(rhs, "prototype");
-            let mut is_instance = false;
-            if proto.is_object() {
-                let mut curr_val = self.get_prototype_of_val(lhs)?;
-                while curr_val.is_object() {
-                    if curr_val == proto {
-                        is_instance = true;
-                        break;
-                    }
-                    curr_val = self.get_prototype_of_val(curr_val)?;
-                }
-            }
-            self.push(JsValue::from_boolean(is_instance));
-        } else {
+
+        if !rhs.is_js_object() {
             return Err(VmError::TypeError(
                 "Right-hand side of 'instanceof' is not an object".into(),
             ));
         }
+
+        if let Some(has_instance_sym) = self.symbol_has_instance {
+            let handler = self.get_symbol_property_result(rhs, has_instance_sym)?;
+            if !handler.is_undefined() && !handler.is_null() {
+                if !self.is_callable(handler) {
+                    return Err(VmError::TypeError(
+                        "Symbol.hasInstance handler is not callable".into(),
+                    ));
+                }
+                let res = self.call(handler, rhs, &[lhs])?;
+                let b = res.is_truthy();
+                self.push(JsValue::from_boolean(b));
+                return Ok(());
+            }
+        }
+
+        if !self.is_callable(rhs) {
+            return Err(VmError::TypeError(
+                "Right-hand side of 'instanceof' is not callable".into(),
+            ));
+        }
+
+        let is_instance = self.ordinary_has_instance(rhs, lhs)?;
+        self.push(JsValue::from_boolean(is_instance));
         Ok(())
     }
 

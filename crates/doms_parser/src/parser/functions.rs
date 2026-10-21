@@ -251,11 +251,7 @@ impl<'a> Parser<'a> {
                 self.current.col,
             )?;
         } else if self.in_generator || self.in_async || !self.current_params_simple {
-            Self::validate_duplicate_params(
-                params,
-                self.current.line,
-                self.current.col,
-            )?;
+            Self::validate_duplicate_params(params, self.current.line, self.current.col)?;
         }
         let mut body = Vec::new();
         let mut in_directive_prologue = true;

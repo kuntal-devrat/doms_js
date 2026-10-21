@@ -5,6 +5,7 @@ impl<'a> Parser<'a> {
         let prev_in = self.allow_in;
         self.allow_in = true;
         let mut props = Vec::new();
+        let mut has_proto_colon = false;
         while !self.check(&TokenKind::RBrace) && self.current.kind != TokenKind::Eof {
             // Check for spread: ...expr
             if self.match_token(&TokenKind::DotDotDot)? {
@@ -33,14 +34,20 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RParen)?;
                 let prev_ctor = self.in_derived_constructor;
                 let prev_method = self.in_method;
+                let prev_gen = self.in_generator;
+                let prev_async = self.in_async;
                 self.in_method = true;
                 self.in_derived_constructor = false;
+                self.in_generator = false;
+                self.in_async = false;
                 let body = self.parse_function_body(&[], None)?;
                 self.in_method = prev_method;
                 self.in_derived_constructor = prev_ctor;
+                self.in_generator = prev_gen;
+                self.in_async = prev_async;
                 props.push(ObjectProperty::Getter(
                     key,
-                    Expression::FunctionExpr { name: None, params: vec![], body },
+                    Expression::MethodExpr { name: None, params: vec![], body },
                 ));
                 if self.check(&TokenKind::Comma) {
                     self.advance()?;
@@ -61,13 +68,19 @@ impl<'a> Parser<'a> {
                 self.in_static_block = false;
                 let prev_ctor = self.in_derived_constructor;
                 let prev_method = self.in_method;
+                let prev_gen = self.in_generator;
+                let prev_async = self.in_async;
                 self.in_method = true;
                 self.in_derived_constructor = false;
+                self.in_generator = false;
+                self.in_async = false;
                 let (params, defaults) = self.parse_formal_parameters()?;
                 if params.len() != 1 || params[0].starts_with("...") {
                     self.in_method = prev_method;
                     self.in_derived_constructor = prev_ctor;
                     self.in_static_block = prev_in_static;
+                    self.in_generator = prev_gen;
+                    self.in_async = prev_async;
                     return Err(ParseError::General(
                         "Setter must have exactly one formal parameter".to_string(),
                     ));
@@ -76,10 +89,12 @@ impl<'a> Parser<'a> {
                 self.in_method = prev_method;
                 self.in_derived_constructor = prev_ctor;
                 self.in_static_block = prev_in_static;
+                self.in_generator = prev_gen;
+                self.in_async = prev_async;
                 Self::apply_parameter_defaults(&mut body, defaults);
                 props.push(ObjectProperty::Setter(
                     key,
-                    Expression::FunctionExpr { name: None, params, body },
+                    Expression::MethodExpr { name: None, params, body },
                 ));
                 if self.check(&TokenKind::Comma) {
                     self.advance()?;
@@ -94,13 +109,19 @@ impl<'a> Parser<'a> {
                 self.in_static_block = false;
                 let prev_ctor = self.in_derived_constructor;
                 let prev_method = self.in_method;
+                let prev_gen = self.in_generator;
+                let prev_async = self.in_async;
                 self.in_method = true;
                 self.in_derived_constructor = false;
+                self.in_generator = true;
+                self.in_async = false;
                 let (params, defaults) = self.parse_formal_parameters()?;
                 let mut body = self.parse_function_body(&params, None)?;
                 self.in_method = prev_method;
                 self.in_derived_constructor = prev_ctor;
                 self.in_static_block = prev_in_static;
+                self.in_generator = prev_gen;
+                self.in_async = prev_async;
                 Self::apply_parameter_defaults(&mut body, defaults);
                 let fn_name = match &key {
                     PropertyKey::Literal(s) => Some(s.clone()),
@@ -130,13 +151,19 @@ impl<'a> Parser<'a> {
                 self.in_static_block = false;
                 let prev_ctor = self.in_derived_constructor;
                 let prev_method = self.in_method;
+                let prev_gen = self.in_generator;
+                let prev_async = self.in_async;
                 self.in_method = true;
                 self.in_derived_constructor = false;
+                self.in_generator = is_gen;
+                self.in_async = true;
                 let (params, defaults) = self.parse_formal_parameters()?;
                 let mut body = self.parse_function_body(&params, None)?;
                 self.in_method = prev_method;
                 self.in_derived_constructor = prev_ctor;
                 self.in_static_block = prev_in_static;
+                self.in_generator = prev_gen;
+                self.in_async = prev_async;
                 Self::apply_parameter_defaults(&mut body, defaults);
                 let fn_name = match &key {
                     PropertyKey::Literal(s) => Some(s.clone()),
@@ -160,13 +187,36 @@ impl<'a> Parser<'a> {
             }
 
             let (key, is_ident) = self.parse_property_name_meta()?;
-            let val = if self.match_token(&TokenKind::Colon)? {
-                self.parse_expression(1)?
+            if let PropertyKey::Literal(ref s) = key {
+                if s.starts_with('#') {
+                    self.allow_in = prev_in;
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::PrivateIdent(s[1..].to_string()),
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+            }
+            if self.match_token(&TokenKind::Colon)? {
+                if let PropertyKey::Literal(ref s) = key {
+                    if s == "__proto__" {
+                        if has_proto_colon {
+                            self.allow_in = prev_in;
+                            return Err(ParseError::General(
+                                "Duplicate __proto__ fields are not allowed in object literals"
+                                    .into(),
+                            ));
+                        }
+                        has_proto_colon = true;
+                    }
+                }
+                let val = self.parse_expression(1)?;
+                props.push(ObjectProperty::KeyValue(key, val));
             } else if self.match_token(&TokenKind::Eq)? {
                 let default_expr = self.parse_expression(1)?;
                 match &key {
                     PropertyKey::Literal(id) => {
-                        Expression::Assignment { target: id.clone(), value: Box::new(default_expr) }
+                        props.push(ObjectProperty::CoverInitializedName(id.clone(), default_expr));
                     }
                     _ => {
                         self.allow_in = prev_in;
@@ -183,24 +233,32 @@ impl<'a> Parser<'a> {
                 self.in_static_block = false;
                 let prev_ctor = self.in_derived_constructor;
                 let prev_method = self.in_method;
+                let prev_gen = self.in_generator;
+                let prev_async = self.in_async;
                 self.in_method = true;
                 self.in_derived_constructor = false;
+                self.in_generator = false;
+                self.in_async = false;
                 let (params, defaults) = self.parse_formal_parameters()?;
                 let mut body = self.parse_function_body(&params, None)?;
                 self.in_method = prev_method;
                 self.in_derived_constructor = prev_ctor;
                 self.in_static_block = prev_in_static;
+                self.in_generator = prev_gen;
+                self.in_async = prev_async;
                 Self::apply_parameter_defaults(&mut body, defaults);
                 let fn_name = match &key {
                     PropertyKey::Literal(s) => Some(s.clone()),
                     PropertyKey::Computed(_) => None,
                 };
-                Expression::MethodExpr { name: fn_name, params, body }
+                let val = Expression::MethodExpr { name: fn_name, params, body };
+                props.push(ObjectProperty::KeyValue(key, val));
             } else if is_ident {
-                match &key {
+                let val = match &key {
                     PropertyKey::Literal(id) => Expression::Identifier(id.clone()),
                     _ => unreachable!(),
-                }
+                };
+                props.push(ObjectProperty::KeyValue(key, val));
             } else {
                 self.allow_in = prev_in;
                 return Err(ParseError::UnexpectedToken(
@@ -208,9 +266,8 @@ impl<'a> Parser<'a> {
                     self.current.line,
                     self.current.col,
                 ));
-            };
+            }
 
-            props.push(ObjectProperty::KeyValue(key, val));
             if !self.match_token(&TokenKind::Comma)? || self.check(&TokenKind::RBrace) {
                 break;
             }

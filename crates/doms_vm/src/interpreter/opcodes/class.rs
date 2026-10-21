@@ -72,11 +72,7 @@ impl Vm {
                     } else {
                         String::new()
                     };
-                    let base = if desc.is_empty() {
-                        String::new()
-                    } else {
-                        format!("[{}]", desc)
-                    };
+                    let base = if desc.is_empty() { String::new() } else { format!("[{}]", desc) };
                     match kind {
                         2 => format!("get {}", base),
                         4 => format!("set {}", base),

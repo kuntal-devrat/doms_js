@@ -34,4 +34,5 @@ scratch/
 __pycache__/
 *.pyc
 examples/c_embedding/embed_demo
+examples/cpp_embedding/doms_cpp_example
 

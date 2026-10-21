@@ -187,6 +187,7 @@ impl Default for Accessor {
 
 #[derive(Debug, Clone)]
 pub enum PrivateElement {
-    Value(JsValue),
+    Field(JsValue),
+    Method(JsValue),
     Accessor(Accessor),
 }

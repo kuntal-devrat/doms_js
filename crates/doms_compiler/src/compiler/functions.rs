@@ -24,6 +24,41 @@ impl Compiler {
         is_arrow: bool,
         is_method: bool,
     ) -> Result<FunctionDef, CompileError> {
+        Self::compile_function_internal(
+            name,
+            params,
+            body,
+            outer_is_strict,
+            is_generator,
+            is_arrow,
+            is_method,
+            false,
+            false,
+        )
+    }
+
+    pub fn compile_class_constructor(
+        name: Option<String>,
+        params: Vec<String>,
+        body: &[Statement],
+        is_derived: bool,
+    ) -> Result<FunctionDef, CompileError> {
+        Self::compile_function_internal(
+            name, params, body, true, false, false, false, true, is_derived,
+        )
+    }
+
+    pub fn compile_function_internal(
+        name: Option<String>,
+        params: Vec<String>,
+        body: &[Statement],
+        outer_is_strict: bool,
+        is_generator: bool,
+        is_arrow: bool,
+        is_method: bool,
+        is_class_constructor: bool,
+        is_derived_constructor: bool,
+    ) -> Result<FunctionDef, CompileError> {
         let has_directive = body.iter()
             .take_while(|s| matches!(s, Statement::Expression(Expression::Literal(Literal::String { .. }))))
             .any(|s| matches!(s, Statement::Expression(Expression::Literal(Literal::String { value, has_escape: false, .. })) if value == "use strict"));
@@ -55,6 +90,7 @@ impl Compiler {
                 self_slot = Some(slot);
             }
         }
+        compiler.self_slot = self_slot;
 
         let mut lexical_local_names = Vec::new();
         collect_lexical_names(body, &mut lexical_local_names);
@@ -79,6 +115,30 @@ impl Compiler {
         }
 
         for stmt in &body[..idx] {
+            if let Statement::If { condition, then_branch, else_branch: None } = stmt {
+                if let Expression::Binary { op: BinaryOp::StrictEq, left, right } = condition {
+                    if let (Expression::Identifier(id), Expression::Literal(Literal::Undefined)) =
+                        (&**left, &**right)
+                    {
+                        if let Statement::Expression(Expression::Assignment { target, value }) =
+                            &**then_branch
+                        {
+                            if id == target {
+                                if let Some(slot) = compiler.symbols.resolve_local(target) {
+                                    let jump_lbl =
+                                        compiler.chunk.emit(OpCode::JumpIfLocalDefined(slot, 0), 0);
+                                    compiler.compile_expression(value)?;
+                                    compiler.chunk.emit(OpCode::SetLocal(slot), 0);
+                                    compiler.chunk.emit(OpCode::Pop, 0);
+                                    let target = compiler.chunk.instructions.len() as i32;
+                                    compiler.chunk.patch_jump(jump_lbl, target);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             compiler.compile_statement(stmt, false)?;
         }
 
@@ -132,8 +192,10 @@ impl Compiler {
             let is_param_with_default = body.iter().any(|s| {
                 if let Statement::If { condition, .. } = s {
                     if let Expression::Binary { op: BinaryOp::StrictEq, left, right } = condition {
-                        if let (Expression::Identifier(id), Expression::Literal(Literal::Undefined)) =
-                            (&**left, &**right)
+                        if let (
+                            Expression::Identifier(id),
+                            Expression::Literal(Literal::Undefined),
+                        ) = (&**left, &**right)
                         {
                             if id == p {
                                 return true;
@@ -162,6 +224,8 @@ impl Compiler {
             is_generator,
             is_arrow,
             is_method,
+            is_class_constructor,
+            is_derived_constructor,
         })
     }
 }

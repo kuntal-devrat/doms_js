@@ -167,6 +167,12 @@ impl Compiler {
                 let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
                 self.chunk.emit(OpCode::DefinePrivateField(prop_idx), 0);
             }
+            Expression::DefinePrivateMethod { target, property, value } => {
+                self.compile_expression(target)?;
+                self.compile_expression(value)?;
+                let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                self.chunk.emit(OpCode::DefinePrivateMethod(prop_idx), 0);
+            }
             Expression::DefinePrivateAccessor { target, property, is_getter, accessor } => {
                 self.compile_expression(target)?;
                 self.compile_expression(accessor)?;

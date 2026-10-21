@@ -16,7 +16,7 @@ fn index_to_js_value(k: i64) -> JsValue {
 }
 
 pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
-    let array_proto = vm.alloc_object();
+    let array_proto = vm.alloc_array(Vec::new());
     vm.array_proto = Some(array_proto);
     vm.set_property(array_proto, "length", JsValue::from_int32(0));
     vm.set_property_non_enumerable(array_proto, "length".to_string());
@@ -24,12 +24,12 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
 
     let map_fn = vm.alloc_native_function("map", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("map callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let a = vm.array_species_create(obj, len)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
@@ -398,20 +398,23 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
             k = 0;
         }
 
-        // Fast path for native Array without accessors
+        // Fast path for native Array without accessors and without holes
         if let Some(ptr) = obj.as_object_ptr() {
             let js_obj = unsafe { &*(ptr as *mut JsObject) };
             if js_obj.accessors.is_none() {
                 if let ObjectKind::Array(elements) = &js_obj.kind {
+                    let has_holes = elements.iter().any(|v| v.is_hole());
                     let actual_len = (elements.len() as i64).min(len);
-                    while k < actual_len {
-                        let el = elements[k as usize];
-                        if !el.is_hole() && crate::object::js_strict_equal(el, search) {
-                            return Ok(index_to_js_value(k));
+                    if !has_holes && actual_len >= len {
+                        while k < actual_len {
+                            let el = elements[k as usize];
+                            if crate::object::js_strict_equal(el, search) {
+                                return Ok(index_to_js_value(k));
+                            }
+                            k += 1;
                         }
-                        k += 1;
+                        return Ok(JsValue::from_int32(-1));
                     }
-                    return Ok(JsValue::from_int32(-1));
                 }
             }
         }
@@ -524,23 +527,23 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
 
         let mut k = if from_index >= 0 { from_index.min(len - 1) } else { len + from_index };
 
-        // Fast path for native Array without accessors
+        // Fast path for native Array without accessors and without holes
         if let Some(ptr) = obj.as_object_ptr() {
             let js_obj = unsafe { &*(ptr as *mut JsObject) };
             if js_obj.accessors.is_none() {
                 if let ObjectKind::Array(elements) = &js_obj.kind {
+                    let has_holes = elements.iter().any(|v| v.is_hole());
                     let actual_len = elements.len() as i64;
-                    if k >= actual_len {
-                        k = actual_len - 1;
-                    }
-                    while k >= 0 {
-                        let el = elements[k as usize];
-                        if !el.is_hole() && crate::object::js_strict_equal(el, search) {
-                            return Ok(index_to_js_value(k));
+                    if !has_holes && actual_len >= len {
+                        while k >= 0 {
+                            let el = elements[k as usize];
+                            if crate::object::js_strict_equal(el, search) {
+                                return Ok(index_to_js_value(k));
+                            }
+                            k -= 1;
                         }
-                        k -= 1;
+                        return Ok(JsValue::from_int32(-1));
                     }
-                    return Ok(JsValue::from_int32(-1));
                 }
             }
         }
@@ -847,6 +850,169 @@ pub(super) fn register_prototype_methods(vm: &mut Vm) -> JsValue {
         Ok(vm.alloc_array(new_elements))
     });
     vm.set_property(array_proto, "with", with_fn);
+
+    let copy_within_fn = vm.alloc_native_function("copyWithin", 2, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)? as i64;
+        let relative_target = if let Some(arg) = args.first() {
+            let n = vm.to_number_value(*arg)?;
+            if n.is_nan() {
+                0i64
+            } else if n <= -9007199254740991.0 {
+                -9007199254740991i64
+            } else if n >= 9007199254740991.0 {
+                9007199254740991i64
+            } else {
+                n.trunc() as i64
+            }
+        } else {
+            0i64
+        };
+        let mut to = if relative_target < 0 {
+            (len + relative_target).max(0)
+        } else {
+            relative_target.min(len)
+        };
+
+        let relative_start = if let Some(arg) = args.get(1) {
+            let n = vm.to_number_value(*arg)?;
+            if n.is_nan() {
+                0i64
+            } else if n <= -9007199254740991.0 {
+                -9007199254740991i64
+            } else if n >= 9007199254740991.0 {
+                9007199254740991i64
+            } else {
+                n.trunc() as i64
+            }
+        } else {
+            0i64
+        };
+        let mut from = if relative_start < 0 {
+            (len + relative_start).max(0)
+        } else {
+            relative_start.min(len)
+        };
+
+        let relative_end = if let Some(arg) = args.get(2) {
+            if arg.is_undefined() {
+                len
+            } else {
+                let n = vm.to_number_value(*arg)?;
+                if n.is_nan() {
+                    0i64
+                } else if n <= -9007199254740991.0 {
+                    -9007199254740991i64
+                } else if n >= 9007199254740991.0 {
+                    9007199254740991i64
+                } else {
+                    n.trunc() as i64
+                }
+            }
+        } else {
+            len
+        };
+        let final_end =
+            if relative_end < 0 { (len + relative_end).max(0) } else { relative_end.min(len) };
+
+        let mut count = (final_end - from).min(len - to);
+        let direction = if from < to && to < from + count {
+            from = from + count - 1;
+            to = to + count - 1;
+            -1i64
+        } else {
+            1i64
+        };
+
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(obj);
+
+        while count > 0 {
+            let cur_this = vm.temp_roots[prev_temp];
+            let from_key = from.to_string();
+            let to_key = to.to_string();
+            let from_present = vm.has_property(cur_this, &from_key)?;
+            if from_present {
+                let from_val = vm.get_property_result(cur_this, &from_key)?;
+                vm.temp_roots.push(from_val);
+                let cur_this = vm.temp_roots[prev_temp];
+                let cur_val = vm.temp_roots.pop().unwrap();
+                vm.set_property_result(cur_this, &to_key, cur_val)?;
+            } else {
+                vm.delete_property_or_throw(cur_this, &to_key)?;
+            }
+            from += direction;
+            to += direction;
+            count -= 1;
+        }
+
+        vm.temp_roots.truncate(prev_temp);
+        Ok(obj)
+    });
+    vm.set_property(array_proto, "copyWithin", copy_within_fn);
+
+    let fill_fn = vm.alloc_native_function("fill", 1, |vm, this, args| {
+        let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)? as i64;
+        let value = args.first().copied().unwrap_or(JsValue::undefined());
+
+        let relative_start = if let Some(arg) = args.get(1) {
+            let n = vm.to_number_value(*arg)?;
+            if n.is_nan() {
+                0i64
+            } else if n <= -9007199254740991.0 {
+                -9007199254740991i64
+            } else if n >= 9007199254740991.0 {
+                9007199254740991i64
+            } else {
+                n.trunc() as i64
+            }
+        } else {
+            0i64
+        };
+        let mut k = if relative_start < 0 {
+            (len + relative_start).max(0)
+        } else {
+            relative_start.min(len)
+        };
+
+        let relative_end = if let Some(arg) = args.get(2) {
+            if arg.is_undefined() {
+                len
+            } else {
+                let n = vm.to_number_value(*arg)?;
+                if n.is_nan() {
+                    0i64
+                } else if n <= -9007199254740991.0 {
+                    -9007199254740991i64
+                } else if n >= 9007199254740991.0 {
+                    9007199254740991i64
+                } else {
+                    n.trunc() as i64
+                }
+            }
+        } else {
+            len
+        };
+        let final_end =
+            if relative_end < 0 { (len + relative_end).max(0) } else { relative_end.min(len) };
+
+        let prev_temp = vm.temp_roots.len();
+        vm.temp_roots.push(obj);
+        vm.temp_roots.push(value);
+
+        while k < final_end {
+            let cur_this = vm.temp_roots[prev_temp];
+            let cur_val = vm.temp_roots[prev_temp + 1];
+            let pk = k.to_string();
+            vm.set_property_result(cur_this, &pk, cur_val)?;
+            k += 1;
+        }
+
+        vm.temp_roots.truncate(prev_temp);
+        Ok(obj)
+    });
+    vm.set_property(array_proto, "fill", fill_fn);
 
     array_proto
 }

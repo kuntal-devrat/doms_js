@@ -495,6 +495,15 @@ impl<'a> Parser<'a> {
             }
 
             let (prop_key, is_ident) = self.parse_property_name_meta()?;
+            if let PropertyKey::Literal(ref s) = prop_key {
+                if s.starts_with('#') {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::PrivateIdent(s[1..].to_string()),
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+            }
             let (key_expr, key_str) = match prop_key {
                 PropertyKey::Computed(expr) => (Some(expr), None),
                 PropertyKey::Literal(s) => (None, Some(s)),
@@ -1235,6 +1244,40 @@ impl<'a> Parser<'a> {
                                     self.desugar_assignment_destructuring(value, prop_rhs, out);
                                 }
                             }
+                        }
+                        ObjectProperty::CoverInitializedName(target, def) => {
+                            let prop_rhs = Expression::Member {
+                                object: Box::new(Expression::Identifier(tmp_var.clone())),
+                                property: target.clone(),
+                            };
+                            excluded_keys.push(Expression::Literal(Literal::String {
+                                value: target.clone(),
+                                has_escape: false,
+                                has_legacy_escape: false,
+                            }));
+                            let val_var = format!("@val_{}", self.destruct_counter);
+                            self.destruct_counter += 1;
+                            out.push(Statement::VarDecl {
+                                kind: VarKind::Let,
+                                declarations: vec![VarDeclarator {
+                                    name: val_var.clone(),
+                                    init: Some(prop_rhs),
+                                }],
+                            });
+                            let cond_expr = Expression::Conditional {
+                                condition: Box::new(Expression::Binary {
+                                    op: BinaryOp::StrictEq,
+                                    left: Box::new(Expression::Identifier(val_var.clone())),
+                                    right: Box::new(Expression::Literal(Literal::Undefined)),
+                                }),
+                                then_expr: Box::new(def.clone()),
+                                else_expr: Box::new(Expression::Identifier(val_var)),
+                            };
+                            self.desugar_assignment_destructuring(
+                                &Expression::Identifier(target.clone()),
+                                cond_expr,
+                                out,
+                            );
                         }
                         _ => {}
                     }

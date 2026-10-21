@@ -18,6 +18,31 @@ fn test_eval_simple_bytecode() {
 }
 
 #[test]
+fn test_debug_return_add() {
+    let mut vm = Vm::new();
+    let res = vm.eval("function test(a, b) { return a + b; } test('hello', 'world');").unwrap();
+    assert_eq!(vm.to_string_value(res), "helloworld");
+    let res2 = vm.eval("test('foo', 'bar');").unwrap();
+    assert_eq!(vm.to_string_value(res2), "foobar");
+    let res3 = vm.eval("test(10, 20);").unwrap();
+    assert_eq!(vm.to_string_value(res3), "30");
+    let res4 =
+        vm.eval("function f(p, c) { return p + c; } ['1', '2', '3', '4', '5'].reduce(f);").unwrap();
+    assert_eq!(vm.to_string_value(res4), "12345");
+}
+
+#[test]
+fn test_debug_array_proto_in() {
+    let mut vm = Vm::new();
+    let res = vm.eval("Object.defineProperty(Array.prototype, '0', { get: function() { return 11; }, configurable: true }); '0' in Array.prototype;").unwrap();
+    assert_eq!(res.as_boolean(), Some(true));
+    let res2 = vm.eval("'0' in [, , , ];").unwrap();
+    assert_eq!(res2.as_boolean(), Some(true));
+    let res3 = vm.eval("function callbackfn(val, idx, obj) { if (idx === 0) return val !== 11; return true; } [, , , ].every(callbackfn);").unwrap();
+    assert_eq!(res3.as_boolean(), Some(false));
+}
+
+#[test]
 fn test_tagged_template_opt_chain() {
     let mut vm = Vm::new();
     let res = vm.eval("function fn7() { return () => {}; }\nfn7()`hello`?.a;");
@@ -116,6 +141,8 @@ fn test_jit_hot_loop_tiering() {
         lexical_new_target: None,
         prototype: None,
         initial_shape: None,
+        is_class_constructor: false,
+        is_derived_constructor: false,
     };
     let fn_val = vm.alloc_function(js_fn);
 

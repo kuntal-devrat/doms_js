@@ -1,7 +1,7 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    pub(crate) fn parse_prefix(&mut self) -> Result<Expression, ParseError> {
+    pub(crate) fn parse_prefix(&mut self, min_bp: u8) -> Result<Expression, ParseError> {
         let tok = self.advance()?;
         match tok.kind {
             TokenKind::Number(n) => Ok(Expression::Literal(Literal::Number(n))),
@@ -84,7 +84,34 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Delete => {
                 let expr = self.parse_expression(22)?;
-                if self.is_strict && matches!(&expr, Expression::Identifier(_)) {
+                fn is_ident_ref(e: &Expression) -> bool {
+                    match e {
+                        Expression::Grouping(inner) => is_ident_ref(inner),
+                        Expression::Identifier(_) => true,
+                        _ => false,
+                    }
+                }
+                fn is_private_access(e: &Expression) -> bool {
+                    match e {
+                        Expression::Grouping(inner) => is_private_access(inner),
+                        Expression::Member { property, .. } => property.starts_with('#'),
+                        Expression::OptionalChain(oc) => {
+                            oc.chain.last().map_or(false, |elem| match elem {
+                                ChainElement::Property { name, .. } => name.starts_with('#'),
+                                _ => false,
+                            })
+                        }
+                        _ => false,
+                    }
+                }
+                if self.is_strict && is_ident_ref(&expr) {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Delete,
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+                if is_private_access(&expr) {
                     return Err(ParseError::UnexpectedToken(
                         TokenKind::Delete,
                         self.current.line,
@@ -129,10 +156,16 @@ impl<'a> Parser<'a> {
                     }
                     return self.parse_identifier_expr("yield".to_string(), tok.line, tok.col);
                 }
-                if self.match_token(&TokenKind::Star)? {
-                    let expr = self.parse_expression(0)?;
+                if min_bp > 1 {
+                    return Err(ParseError::UnexpectedToken(TokenKind::Yield, tok.line, tok.col));
+                }
+                if !self.current.has_preceding_line_terminator
+                    && self.match_token(&TokenKind::Star)?
+                {
+                    let expr = self.parse_expression(1)?;
                     Ok(Expression::YieldStar(Box::new(expr)))
-                } else if self.check(&TokenKind::Semicolon)
+                } else if self.current.has_preceding_line_terminator
+                    || self.check(&TokenKind::Semicolon)
                     || self.check(&TokenKind::RParen)
                     || self.check(&TokenKind::RBracket)
                     || self.check(&TokenKind::RBrace)
@@ -142,7 +175,7 @@ impl<'a> Parser<'a> {
                 {
                     Ok(Expression::Yield(None))
                 } else {
-                    let expr = self.parse_expression(0)?;
+                    let expr = self.parse_expression(1)?;
                     Ok(Expression::Yield(Some(Box::new(expr))))
                 }
             }
@@ -154,7 +187,11 @@ impl<'a> Parser<'a> {
             }
             TokenKind::DotDotDot => {
                 if !self.allow_spread {
-                    return Err(ParseError::UnexpectedToken(TokenKind::DotDotDot, tok.line, tok.col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::DotDotDot,
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 let prev_spread = self.allow_spread;
                 self.allow_spread = false;
@@ -166,6 +203,7 @@ impl<'a> Parser<'a> {
                 let prop = format!("#{}", s);
                 let scoped = match self.resolve_private_name(&prop) {
                     Some(n) => n,
+                    None if self.is_eval => prop,
                     None => {
                         return Err(ParseError::UnexpectedToken(
                             TokenKind::PrivateIdent(s),

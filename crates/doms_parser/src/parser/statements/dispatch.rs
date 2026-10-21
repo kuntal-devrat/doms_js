@@ -5,7 +5,7 @@ impl<'a> Parser<'a> {
         let is_top = self.is_top_level;
         self.is_top_level = false;
         match self.current.kind {
-            TokenKind::Class => self.parse_class_decl(),
+            TokenKind::Class => self.parse_class_decl(false),
             TokenKind::Let => {
                 if !self.is_strict {
                     if self.peeked.kind == TokenKind::LBracket {

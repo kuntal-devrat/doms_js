@@ -22,17 +22,9 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.advance() {
             if c == '`' {
                 flush_surrogate(&mut current_quasi);
-                quasis.push(if current_quasi_valid {
-                    Some(current_quasi)
-                } else {
-                    None
-                });
+                quasis.push(if current_quasi_valid { Some(current_quasi) } else { None });
                 raw_quasis.push(current_raw);
-                return Ok(TokenKind::TemplateLiteral {
-                    quasis,
-                    raw_quasis,
-                    raw_exprs,
-                });
+                return Ok(TokenKind::TemplateLiteral { quasis, raw_quasis, raw_exprs });
             } else if c == '$' && self.peek() == Some('{') {
                 self.advance(); // consume '{'
                 flush_surrogate(&mut current_quasi);

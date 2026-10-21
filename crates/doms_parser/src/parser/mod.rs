@@ -44,6 +44,7 @@ pub struct Parser<'a> {
     pub in_param: bool,
     pub in_single_statement_context: bool,
     pub in_static_block: bool,
+    pub is_eval: bool,
     pub private_names_stack: Vec<std::collections::HashMap<String, String>>,
     pub class_id_counter: usize,
     pub(crate) trailing_comma_after_rest: bool,
@@ -93,6 +94,7 @@ impl<'a> Parser<'a> {
             in_param: false,
             in_single_statement_context: false,
             in_static_block: false,
+            is_eval: false,
             private_names_stack: Vec::new(),
             class_id_counter: 0,
             trailing_comma_after_rest: false,
@@ -129,6 +131,7 @@ impl<'a> Parser<'a> {
             in_param: false,
             in_single_statement_context: false,
             in_static_block: false,
+            is_eval: false,
             private_names_stack: Vec::new(),
             class_id_counter: 0,
             trailing_comma_after_rest: false,
@@ -147,6 +150,7 @@ impl<'a> Parser<'a> {
         p.in_method = in_method;
         p.in_function = in_function;
         p.in_non_arrow_function = in_function;
+        p.is_eval = true;
         Ok(p)
     }
 

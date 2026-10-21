@@ -104,6 +104,37 @@ pub(super) fn register_function_builtins(vm: &mut Vm) {
     vm.set_property(function_proto, "bind", bind_fn);
     vm.set_property(function_proto, "toString", to_string_fn);
 
+    if let Some(has_instance_sym) = vm.symbol_has_instance {
+        let has_instance_fn =
+            vm.alloc_native_function("[Symbol.hasInstance]", 1, |vm, this, args| {
+                let v = args.first().copied().unwrap_or(JsValue::undefined());
+                let res = vm.ordinary_has_instance(this, v)?;
+                Ok(JsValue::from_boolean(res))
+            });
+        let _ = vm.set_symbol_property(function_proto, has_instance_sym, has_instance_fn);
+    }
+
+    let thrower = vm.alloc_native_function("%ThrowTypeError%", 0, |_vm, _this, _args| {
+        Err(VmError::TypeError("'arguments' or 'caller' cannot be accessed in strict mode".into()))
+    });
+    if let Some(ptr) = function_proto.as_object_ptr() {
+        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+        obj.define_getter("arguments".into(), thrower);
+        obj.define_setter("arguments".into(), thrower);
+        obj.define_getter("caller".into(), thrower);
+        obj.define_setter("caller".into(), thrower);
+        if let Some(accs) = &mut obj.accessors {
+            if let Some(acc) = accs.get_mut("arguments") {
+                acc.enumerable = false;
+                acc.configurable = true;
+            }
+            if let Some(acc) = accs.get_mut("caller") {
+                acc.enumerable = false;
+                acc.configurable = true;
+            }
+        }
+    }
+
     let function_constructor = vm.alloc_native_function("Function", 1, |vm, _this, args| {
         let (params_str, body_str) = if args.is_empty() {
             (String::new(), String::new())

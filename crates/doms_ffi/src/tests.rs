@@ -171,13 +171,7 @@ fn test_ffi_global_and_native_callback() {
 
     // Register native multiply function globally
     let s_reg = unsafe {
-        doms_set_global_function(
-            ctx,
-            c"multiply".as_ptr(),
-            8,
-            native_multiply,
-            ptr::null_mut(),
-        )
+        doms_set_global_function(ctx, c"multiply".as_ptr(), 8, native_multiply, ptr::null_mut())
     };
     assert!(matches!(s_reg, doms_status_t::Ok));
 
@@ -253,4 +247,3 @@ fn test_ffi_array_operations() {
         doms_engine_destroy(engine);
     }
 }
-

@@ -78,6 +78,14 @@ _LIB.doms_value_to_number.argtypes = [
 ]
 _LIB.doms_value_to_number.restype = c_status
 
+_LIB.doms_value_to_boolean.argtypes = [
+    c_context_p,
+    c_value_p,
+    ctypes.POINTER(ctypes.c_int),
+]
+_LIB.doms_value_to_boolean.restype = c_status
+
+
 _LIB.doms_value_is_null.argtypes = [c_value_p]
 _LIB.doms_value_is_null.restype = ctypes.c_int
 _LIB.doms_value_is_undefined.argtypes = [c_value_p]
@@ -263,9 +271,10 @@ class DomsEngine:
         if not val_p or _LIB.doms_value_is_null(val_p) or _LIB.doms_value_is_undefined(val_p):
             return None
         if _LIB.doms_value_is_boolean(val_p):
-            n = ctypes.c_double()
-            _LIB.doms_value_to_number(self._ctx, val_p, ctypes.byref(n))
-            return bool(n.value != 0.0)
+            b = ctypes.c_int()
+            _LIB.doms_value_to_boolean(self._ctx, val_p, ctypes.byref(b))
+            return bool(b.value != 0)
+
         if _LIB.doms_value_is_number(val_p):
             n = ctypes.c_double()
             _LIB.doms_value_to_number(self._ctx, val_p, ctypes.byref(n))

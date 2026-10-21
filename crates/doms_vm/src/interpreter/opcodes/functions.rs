@@ -44,6 +44,8 @@ impl Vm {
             lexical_new_target,
             prototype: None,
             initial_shape: None,
+            is_class_constructor: def.is_class_constructor,
+            is_derived_constructor: def.is_derived_constructor,
         };
         let func_val = self.alloc_function(js_fn);
         self.push(func_val);
@@ -91,6 +93,8 @@ impl Vm {
             lexical_new_target,
             prototype: None,
             initial_shape: None,
+            is_class_constructor: false,
+            is_derived_constructor: false,
         };
         let func_val = self.alloc_function(js_fn);
         self.push(func_val);
@@ -138,6 +142,8 @@ impl Vm {
             lexical_new_target,
             prototype: None,
             initial_shape: None,
+            is_class_constructor: false,
+            is_derived_constructor: false,
         };
         let func_val = self.alloc_function(js_fn);
         self.push(func_val);
@@ -185,6 +191,8 @@ impl Vm {
             lexical_new_target,
             prototype: None,
             initial_shape: None,
+            is_class_constructor: false,
+            is_derived_constructor: false,
         };
         let func_val = self.alloc_function(js_fn);
         self.push(func_val);

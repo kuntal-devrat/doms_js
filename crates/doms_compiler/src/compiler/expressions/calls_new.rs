@@ -66,21 +66,14 @@ impl Compiler {
                     }
                 }
                 Expression::Super => {
-                    if let Some(slot) = self.symbols.resolve_local("super") {
-                        self.chunk.emit(OpCode::GetLocal(slot), 0);
-                        self.compile_spread_args(args)?;
-                        self.chunk.emit(OpCode::CallSpread, 0);
-                        self.chunk.emit(OpCode::SetThis, 0);
-                    } else {
-                        self.chunk.emit(OpCode::This, 0);
-                        self.chunk.emit(OpCode::LoadSuper, 0);
-                        self.compile_spread_args(args)?;
-                        self.chunk.emit(OpCode::CallWithThisSpread, 0);
-                        self.chunk.emit(OpCode::SetThis, 0);
-                    }
+                    self.compile_spread_args(args)?;
+                    self.chunk.emit(OpCode::SuperCallSpread, 0);
                 }
                 Expression::OptionalChain(oc)
-                    if oc.chain.last().map_or(false, |e| matches!(e, ChainElement::Property { .. })) =>
+                    if oc
+                        .chain
+                        .last()
+                        .map_or(false, |e| matches!(e, ChainElement::Property { .. })) =>
                 {
                     if let Some(ChainElement::Property { name, optional }) = oc.chain.last() {
                         let prefix_oc = OptionalChain {
@@ -163,22 +156,10 @@ impl Compiler {
                     }
                 }
                 Expression::Super => {
-                    if let Some(slot) = self.symbols.resolve_local("super") {
-                        self.chunk.emit(OpCode::GetLocal(slot), 0);
-                        for arg in args {
-                            self.compile_expression(arg)?;
-                        }
-                        self.chunk.emit(OpCode::Call(args.len() as u8), 0);
-                        self.chunk.emit(OpCode::SetThis, 0);
-                    } else {
-                        self.chunk.emit(OpCode::This, 0);
-                        self.chunk.emit(OpCode::LoadSuper, 0);
-                        for arg in args {
-                            self.compile_expression(arg)?;
-                        }
-                        self.chunk.emit(OpCode::CallWithThis(args.len() as u8), 0);
-                        self.chunk.emit(OpCode::SetThis, 0);
+                    for arg in args {
+                        self.compile_expression(arg)?;
                     }
+                    self.chunk.emit(OpCode::SuperCall(args.len() as u8), 0);
                 }
                 Expression::OptionalChain(oc)
                     if oc.chain.last().map_or(false, |e| {
@@ -199,7 +180,8 @@ impl Compiler {
                             if *optional {
                                 let j_nullish = self.emit_nullish_short_circuit(1);
                                 self.chunk.emit(OpCode::Dup, 0);
-                                let prop_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                                let prop_idx =
+                                    self.chunk.add_constant(Constant::String(name.clone()));
                                 self.chunk.emit(OpCode::GetProp(prop_idx), 0);
                                 let j_after = self.chunk.emit(OpCode::Jump(0), 0);
 
@@ -211,7 +193,8 @@ impl Compiler {
                                 self.chunk.patch_jump(j_after, target_after);
                             } else {
                                 self.chunk.emit(OpCode::Dup, 0);
-                                let prop_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                                let prop_idx =
+                                    self.chunk.add_constant(Constant::String(name.clone()));
                                 self.chunk.emit(OpCode::GetProp(prop_idx), 0);
                             }
                             for arg in args {

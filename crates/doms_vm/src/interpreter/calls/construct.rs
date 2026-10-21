@@ -113,12 +113,17 @@ impl Vm {
                             }
                         }
                     }
-                    let shape_id = if new_target_val == cur_callee {
-                        f.initial_shape.unwrap_or(ShapeRegistry::ROOT_SHAPE_ID)
+                    let is_derived = f.is_derived_constructor;
+                    let this_obj = if is_derived {
+                        JsValue::uninitialized()
                     } else {
-                        ShapeRegistry::ROOT_SHAPE_ID
+                        let shape_id = if new_target_val == cur_callee {
+                            f.initial_shape.unwrap_or(ShapeRegistry::ROOT_SHAPE_ID)
+                        } else {
+                            ShapeRegistry::ROOT_SHAPE_ID
+                        };
+                        self.alloc_object_with_shape_and_proto(shape_id, proto_obj)
                     };
-                    let this_obj = self.alloc_object_with_shape_and_proto(shape_id, proto_obj);
                     self.temp_roots.push(this_obj);
                     let cur_callee = self.temp_roots[prev_temp];
                     let cur_this = self.temp_roots[args_start + args_len + 1];
@@ -203,7 +208,24 @@ impl Vm {
                     }
 
                     self.temp_roots.truncate(prev_temp);
-                    if val.is_object() { Ok(val) } else { Ok(cur_this) }
+                    if is_derived {
+                        if val.is_object() {
+                            Ok(val)
+                        } else if !val.is_undefined() {
+                            Err(VmError::TypeError(
+                                "Derived constructor may only return object or undefined".into(),
+                            ))
+                        } else {
+                            Err(VmError::ReferenceError(
+                                "Must call super constructor in derived class before returning"
+                                    .into(),
+                            ))
+                        }
+                    } else if val.is_object() {
+                        Ok(val)
+                    } else {
+                        Ok(cur_this)
+                    }
                 }
                 _ => {
                     let cur_callee = self.temp_roots[prev_temp];

@@ -51,4 +51,11 @@ mod tests {
         let prog = parse(code).unwrap();
         assert_eq!(prog.body.len(), 3);
     }
+
+    #[test]
+    fn test_yield_star_ast() {
+        let code = "class A {\n  *g() {\n    yield\n    * 1\n  }\n}";
+        let res = parse(code);
+        assert!(res.is_err());
+    }
 }

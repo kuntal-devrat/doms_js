@@ -44,6 +44,7 @@ impl Compiler {
                         self.compile_class_definition_with_name(
                             class_def,
                             inferred_name.map(|s| s.to_string()),
+                            false,
                         )?;
                     }
                     _ => {

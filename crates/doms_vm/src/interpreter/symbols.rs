@@ -410,6 +410,11 @@ impl Vm {
                             return true;
                         }
                         if let Ok(idx) = key.parse::<usize>() {
+                            if let Some(accs) = &obj.accessors {
+                                if accs.contains_key(key) {
+                                    return true;
+                                }
+                            }
                             if let Some(elem) = elements.get(idx) {
                                 return !elem.is_hole();
                             }

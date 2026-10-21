@@ -104,6 +104,8 @@ impl<'a> Parser<'a> {
                 && self.peeked.kind != TokenKind::RBrace
                 && self.peeked.kind != TokenKind::Colon
                 && self.peeked.kind != TokenKind::Eq
+                && self.peeked.kind != TokenKind::Star
+                && !self.peeked.has_preceding_line_terminator
             {
                 let is_getter = self.check_ident("get");
                 self.advance()?; // 'get' or 'set'
@@ -165,6 +167,14 @@ impl<'a> Parser<'a> {
                     self.in_async = prev_async;
                     self.in_method = prev_method;
                     self.in_derived_constructor = prev_ctor;
+                    let priv_func_name = if matches!(&key, PropertyKey::Literal(k) if k.starts_with('#'))
+                    {
+                        let PropertyKey::Literal(k) = &key else { unreachable!() };
+                        let priv_name = k.split('@').next().unwrap_or(k);
+                        Some(format!("get {}", priv_name))
+                    } else {
+                        None
+                    };
                     if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
                         if let PropertyKey::Literal(k) = &key {
                             instance_fields.push(Statement::Expression(
@@ -172,8 +182,8 @@ impl<'a> Parser<'a> {
                                     target: Box::new(Expression::This),
                                     property: k.clone(),
                                     is_getter: true,
-                                    accessor: Box::new(Expression::FunctionExpr {
-                                        name: None,
+                                    accessor: Box::new(Expression::MethodExpr {
+                                        name: priv_func_name.clone(),
                                         params: vec![],
                                         body: body.clone(),
                                     }),
@@ -184,8 +194,8 @@ impl<'a> Parser<'a> {
                     elements.push(ClassElement {
                         is_static,
                         key,
-                        kind: ClassElementKind::Getter(Expression::FunctionExpr {
-                            name: None,
+                        kind: ClassElementKind::Getter(Expression::MethodExpr {
+                            name: priv_func_name,
                             params: vec![],
                             body,
                         }),
@@ -211,6 +221,14 @@ impl<'a> Parser<'a> {
                     self.in_method = prev_method;
                     self.in_derived_constructor = prev_ctor;
                     Self::apply_parameter_defaults(&mut body, defaults);
+                    let priv_func_name = if matches!(&key, PropertyKey::Literal(k) if k.starts_with('#'))
+                    {
+                        let PropertyKey::Literal(k) = &key else { unreachable!() };
+                        let priv_name = k.split('@').next().unwrap_or(k);
+                        Some(format!("set {}", priv_name))
+                    } else {
+                        None
+                    };
                     if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
                         if let PropertyKey::Literal(k) = &key {
                             instance_fields.push(Statement::Expression(
@@ -218,8 +236,8 @@ impl<'a> Parser<'a> {
                                     target: Box::new(Expression::This),
                                     property: k.clone(),
                                     is_getter: false,
-                                    accessor: Box::new(Expression::FunctionExpr {
-                                        name: None,
+                                    accessor: Box::new(Expression::MethodExpr {
+                                        name: priv_func_name.clone(),
                                         params: params.clone(),
                                         body: body.clone(),
                                     }),
@@ -230,8 +248,8 @@ impl<'a> Parser<'a> {
                     elements.push(ClassElement {
                         is_static,
                         key,
-                        kind: ClassElementKind::Setter(Expression::FunctionExpr {
-                            name: None,
+                        kind: ClassElementKind::Setter(Expression::MethodExpr {
+                            name: priv_func_name,
                             params,
                             body,
                         }),
@@ -324,22 +342,31 @@ impl<'a> Parser<'a> {
                 self.in_derived_constructor = prev_ctor;
                 self.in_method = prev_method;
                 Self::apply_parameter_defaults(&mut body, defaults);
-                let method_expr = if is_async && is_generator {
-                    Expression::AsyncGeneratorExpr { name: None, params, body }
-                } else if is_async {
-                    Expression::AsyncFunctionExpr { name: None, params, body }
-                } else if is_generator {
-                    Expression::GeneratorExpr { name: None, params, body }
+                let priv_func_name = if matches!(&key, PropertyKey::Literal(k) if k.starts_with('#'))
+                {
+                    let PropertyKey::Literal(k) = &key else { unreachable!() };
+                    Some(k.split('@').next().unwrap_or(k).to_string())
                 } else {
-                    Expression::MethodExpr { name: None, params, body }
+                    None
+                };
+                let method_expr = if is_async && is_generator {
+                    Expression::AsyncGeneratorExpr { name: priv_func_name, params, body }
+                } else if is_async {
+                    Expression::AsyncFunctionExpr { name: priv_func_name, params, body }
+                } else if is_generator {
+                    Expression::GeneratorExpr { name: priv_func_name, params, body }
+                } else {
+                    Expression::MethodExpr { name: priv_func_name, params, body }
                 };
                 if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
                     if let PropertyKey::Literal(k) = &key {
-                        instance_fields.push(Statement::Expression(Expression::DefineField {
-                            target: Box::new(Expression::This),
-                            property: k.clone(),
-                            value: Box::new(method_expr.clone()),
-                        }));
+                        instance_fields.push(Statement::Expression(
+                            Expression::DefinePrivateMethod {
+                                target: Box::new(Expression::This),
+                                property: k.clone(),
+                                value: Box::new(method_expr.clone()),
+                            },
+                        ));
                     }
                 }
                 elements.push(ClassElement {
@@ -349,11 +376,24 @@ impl<'a> Parser<'a> {
                 });
             } else {
                 let init_opt = if self.match_token(&TokenKind::Eq)? {
-                    Some(self.parse_expression(0)?)
+                    let expr = self.parse_expression(0)?;
+                    self.check_field_initializer(&expr)?;
+                    Some(expr)
                 } else {
                     None
                 };
-                let _ = self.match_token(&TokenKind::Semicolon)?;
+                if !self.match_token(&TokenKind::Semicolon)? {
+                    if !self.check(&TokenKind::RBrace)
+                        && !self.check(&TokenKind::Eof)
+                        && !self.current.has_preceding_line_terminator
+                    {
+                        return Err(ParseError::UnexpectedToken(
+                            self.current.kind.clone(),
+                            self.current.line,
+                            self.current.col,
+                        ));
+                    }
+                }
                 elements.push(ClassElement {
                     is_static,
                     key: key.clone(),
@@ -613,6 +653,9 @@ impl<'a> Parser<'a> {
                             }
                             self.check_static_block_expr(val)?;
                         }
+                        ObjectProperty::CoverInitializedName(_, val) => {
+                            self.check_static_block_expr(val)?;
+                        }
                         ObjectProperty::Spread(inner) => {
                             self.check_static_block_expr(inner)?;
                         }
@@ -643,6 +686,310 @@ impl<'a> Parser<'a> {
                 }
                 Ok(())
             }
+            Expression::ArrowExpr { params, body } => {
+                for p in params {
+                    if p == "arguments" {
+                        return Err(ParseError::General("cannot use 'arguments'".into()));
+                    }
+                }
+                fn arrow_contains_args_stmt(stmt: &Statement) -> bool {
+                    match stmt {
+                        Statement::Expression(e)
+                        | Statement::Return(Some(e))
+                        | Statement::Throw(e) => arrow_contains_args_expr(e),
+                        Statement::Block(stmts) => stmts.iter().any(arrow_contains_args_stmt),
+                        Statement::If { condition, then_branch, else_branch } => {
+                            arrow_contains_args_expr(condition)
+                                || arrow_contains_args_stmt(then_branch)
+                                || else_branch
+                                    .as_ref()
+                                    .map_or(false, |b| arrow_contains_args_stmt(b))
+                        }
+                        Statement::While { condition, body }
+                        | Statement::DoWhile { condition, body } => {
+                            arrow_contains_args_expr(condition) || arrow_contains_args_stmt(body)
+                        }
+                        _ => false,
+                    }
+                }
+                fn arrow_contains_args_expr(expr: &Expression) -> bool {
+                    match expr {
+                        Expression::Identifier(name) if name == "arguments" => true,
+                        Expression::Binary { left, right, .. } => {
+                            arrow_contains_args_expr(left) || arrow_contains_args_expr(right)
+                        }
+                        Expression::Unary { expr, .. } => arrow_contains_args_expr(expr),
+                        Expression::Assignment { target, value } => {
+                            target == "arguments" || arrow_contains_args_expr(value)
+                        }
+                        Expression::Call { callee, args } | Expression::New { callee, args } => {
+                            arrow_contains_args_expr(callee)
+                                || args.iter().any(arrow_contains_args_expr)
+                        }
+                        Expression::Member { object, .. } => arrow_contains_args_expr(object),
+                        Expression::Index { object, index } => {
+                            arrow_contains_args_expr(object) || arrow_contains_args_expr(index)
+                        }
+                        Expression::Array(elements) => {
+                            elements.iter().any(arrow_contains_args_expr)
+                        }
+                        Expression::Object(props) => props.iter().any(|p| match p {
+                            ObjectProperty::KeyValue(key, val) => {
+                                (match key {
+                                    PropertyKey::Computed(k) => arrow_contains_args_expr(k),
+                                    _ => false,
+                                }) || arrow_contains_args_expr(val)
+                            }
+                            ObjectProperty::CoverInitializedName(_, val) => {
+                                arrow_contains_args_expr(val)
+                            }
+                            ObjectProperty::Spread(inner) => arrow_contains_args_expr(inner),
+                            _ => false,
+                        }),
+                        Expression::Grouping(inner) => arrow_contains_args_expr(inner),
+                        Expression::Conditional { condition, then_expr, else_expr } => {
+                            arrow_contains_args_expr(condition)
+                                || arrow_contains_args_expr(then_expr)
+                                || arrow_contains_args_expr(else_expr)
+                        }
+                        _ => false,
+                    }
+                }
+                for s in body {
+                    if arrow_contains_args_stmt(s) {
+                        return Err(ParseError::General("cannot use 'arguments'".into()));
+                    }
+                }
+                Ok(())
+            }
+            Expression::TaggedTemplate { tag, exprs, .. } => {
+                self.check_static_block_expr(tag)?;
+                for e in exprs {
+                    self.check_static_block_expr(e)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub(crate) fn check_field_initializer(&self, expr: &Expression) -> Result<(), ParseError> {
+        self.check_field_expr(expr)
+    }
+
+    fn check_field_expr(&self, expr: &Expression) -> Result<(), ParseError> {
+        match expr {
+            Expression::Identifier(name) if name == "arguments" => {
+                Err(ParseError::General("Class field initializer cannot use 'arguments'".into()))
+            }
+            Expression::Super => {
+                Err(ParseError::General("Class field initializer cannot call super()".into()))
+            }
+            Expression::Binary { left, right, .. } => {
+                self.check_field_expr(left)?;
+                self.check_field_expr(right)
+            }
+            Expression::Unary { expr, .. } => self.check_field_expr(expr),
+            Expression::Assignment { target, value } => {
+                if target == "arguments" {
+                    return Err(ParseError::General(
+                        "Class field initializer cannot assign to 'arguments'".into(),
+                    ));
+                }
+                self.check_field_expr(value)
+            }
+            Expression::MemberAssignment { object, value, .. } => {
+                self.check_field_expr(object)?;
+                self.check_field_expr(value)
+            }
+            Expression::IndexAssignment { object, index, value } => {
+                self.check_field_expr(object)?;
+                self.check_field_expr(index)?;
+                self.check_field_expr(value)
+            }
+            Expression::Call { callee, args } | Expression::New { callee, args } => {
+                if matches!(callee.as_ref(), Expression::Super) {
+                    return Err(ParseError::General(
+                        "Class field initializer cannot call super()".into(),
+                    ));
+                }
+                self.check_field_expr(callee)?;
+                for a in args {
+                    self.check_field_expr(a)?;
+                }
+                Ok(())
+            }
+            Expression::Member { object, .. } => self.check_field_expr(object),
+            Expression::Index { object, index } => {
+                self.check_field_expr(object)?;
+                self.check_field_expr(index)
+            }
+            Expression::Array(elements) => {
+                for el in elements {
+                    self.check_field_expr(el)?;
+                }
+                Ok(())
+            }
+            Expression::Object(props) => {
+                for prop in props {
+                    match prop {
+                        ObjectProperty::KeyValue(key, val) => {
+                            if let PropertyKey::Computed(k) = key {
+                                self.check_field_expr(k)?;
+                            }
+                            self.check_field_expr(val)?;
+                        }
+                        ObjectProperty::Spread(inner) => {
+                            self.check_field_expr(inner)?;
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
+            }
+            Expression::Conditional { condition, then_expr, else_expr } => {
+                self.check_field_expr(condition)?;
+                self.check_field_expr(then_expr)?;
+                self.check_field_expr(else_expr)
+            }
+            Expression::Sequence(exprs) => {
+                for e in exprs {
+                    self.check_field_expr(e)?;
+                }
+                Ok(())
+            }
+            Expression::Grouping(inner) => self.check_field_expr(inner),
+            Expression::Spread(inner) => self.check_field_expr(inner),
+            Expression::Update { expr, .. } => self.check_field_expr(expr),
+            Expression::ArrowExpr { params, body } => {
+                for p in params {
+                    if p == "arguments" {
+                        return Err(ParseError::General(
+                            "Class field initializer cannot use 'arguments'".into(),
+                        ));
+                    }
+                }
+                for s in body {
+                    self.check_field_stmt(s)?;
+                }
+                Ok(())
+            }
+            Expression::TaggedTemplate { tag, exprs, .. } => {
+                self.check_field_expr(tag)?;
+                for e in exprs {
+                    self.check_field_expr(e)?;
+                }
+                Ok(())
+            }
+            Expression::ClassExpr(class_def) => {
+                for elem in &class_def.elements {
+                    if let PropertyKey::Computed(k) = &elem.key {
+                        self.check_field_expr(k)?;
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn check_field_stmt(&self, stmt: &Statement) -> Result<(), ParseError> {
+        match stmt {
+            Statement::Expression(expr) => self.check_field_expr(expr),
+            Statement::Return(Some(expr)) => self.check_field_expr(expr),
+            Statement::Block(inner) => {
+                for s in inner {
+                    self.check_field_stmt(s)?;
+                }
+                Ok(())
+            }
+            Statement::If { condition, then_branch, else_branch } => {
+                self.check_field_expr(condition)?;
+                self.check_field_stmt(then_branch)?;
+                if let Some(eb) = else_branch {
+                    self.check_field_stmt(eb)?;
+                }
+                Ok(())
+            }
+            Statement::While { condition, body } => {
+                self.check_field_expr(condition)?;
+                self.check_field_stmt(body)
+            }
+            Statement::DoWhile { body, condition } => {
+                self.check_field_stmt(body)?;
+                self.check_field_expr(condition)
+            }
+            Statement::For { init, condition, update, body } => {
+                if let Some(init_s) = init {
+                    self.check_field_stmt(init_s)?;
+                }
+                if let Some(c) = condition {
+                    self.check_field_expr(c)?;
+                }
+                if let Some(u) = update {
+                    self.check_field_expr(u)?;
+                }
+                self.check_field_stmt(body)
+            }
+            Statement::ForIn { left, right, body, .. } => {
+                if left == "arguments" {
+                    return Err(ParseError::General(
+                        "Class field initializer cannot use 'arguments'".into(),
+                    ));
+                }
+                self.check_field_expr(right)?;
+                self.check_field_stmt(body)
+            }
+            Statement::ForOf { left, right, body, .. } => {
+                if left == "arguments" {
+                    return Err(ParseError::General(
+                        "Class field initializer cannot use 'arguments'".into(),
+                    ));
+                }
+                self.check_field_expr(right)?;
+                self.check_field_stmt(body)
+            }
+            Statement::VarDecl { declarations, .. } => {
+                for d in declarations {
+                    if d.name == "arguments" {
+                        return Err(ParseError::General(
+                            "Class field initializer cannot declare 'arguments'".into(),
+                        ));
+                    }
+                    if let Some(ref init) = d.init {
+                        self.check_field_expr(init)?;
+                    }
+                }
+                Ok(())
+            }
+            Statement::Switch { discriminant, cases } => {
+                self.check_field_expr(discriminant)?;
+                for c in cases {
+                    if let Some(ref test) = c.test {
+                        self.check_field_expr(test)?;
+                    }
+                    for s in &c.consequent {
+                        self.check_field_stmt(s)?;
+                    }
+                }
+                Ok(())
+            }
+            Statement::TryCatch { try_block, catch_param, catch_block, finally_block } => {
+                if catch_param.as_deref() == Some("arguments") {
+                    return Err(ParseError::General(
+                        "Class field initializer cannot bind 'arguments'".into(),
+                    ));
+                }
+                self.check_field_stmt(try_block)?;
+                if let Some(cb) = catch_block {
+                    self.check_field_stmt(cb)?;
+                }
+                if let Some(fb) = finally_block {
+                    self.check_field_stmt(fb)?;
+                }
+                Ok(())
+            }
+            Statement::Throw(expr) => self.check_field_expr(expr),
             _ => Ok(()),
         }
     }

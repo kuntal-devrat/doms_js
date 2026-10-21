@@ -203,6 +203,116 @@ mod tests {
     }
 
     #[test]
+    fn test_jit_monomorphic_set_prop_and_get_prop_direct_lowering() {
+        let mut vm = Vm::new();
+        let obj = vm.alloc_object();
+        vm.set_property(obj, "val", JsValue::from_int32(42));
+
+        let ptr = obj.as_object_ptr().unwrap();
+        let jsobj = unsafe { &*(ptr as *const crate::object::JsObject) };
+        let shape = jsobj.shape_id;
+        let offset = vm.shapes.lookup_offset(shape, "val").unwrap();
+
+        // Bytecode function: function(o, v) { o.val = v; return o.val; }
+        let mut chunk = BytecodeChunk::new();
+        let c_val = chunk.add_constant(Constant::String("val".to_string()));
+        chunk.emit(OpCode::GetLocal(0), 1);
+        chunk.emit(OpCode::GetLocal(1), 1);
+        chunk.emit(OpCode::SetProp(c_val), 1); // ip = 2
+        chunk.emit(OpCode::Pop, 1);
+        chunk.emit(OpCode::GetLocal(0), 1);
+        chunk.emit(OpCode::GetProp(c_val), 1); // ip = 5
+        chunk.emit(OpCode::Return, 1);
+
+        // Record monomorphic feedback for SetProp (ip = 2) and GetProp (ip = 5)
+        chunk.record_feedback_shape(2, shape, offset);
+        chunk.record_feedback_shape(5, shape, offset);
+
+        let jit_fn = JitCompiler::compile_native(&chunk)
+            .expect("Expected native compile with direct IR lowered SetProp/GetProp");
+        assert!(jit_fn.is_native());
+
+        // Execute natively: updates obj.val to 999 and returns 999
+        let res =
+            jit_fn.call(&mut vm, JsValue::undefined(), &[obj, JsValue::from_int32(999)]).unwrap();
+        assert_eq!(res.as_number(), Some(999.0));
+
+        // Verify the object's in-object slot was actually updated directly in native IR
+        let jsobj_after = unsafe { &*(ptr as *const crate::object::JsObject) };
+        assert_eq!(jsobj_after.get_slot(offset).unwrap().as_number(), Some(999.0));
+    }
+
+    #[test]
+    fn test_jit_polymorphic_inline_cache_direct_ir_lowering() {
+        let mut vm = Vm::new();
+
+        // 3 objects with distinct shapes:
+        // obj_a: { x: 10, a: 1 } (x at offset 0)
+        let obj_a = vm.alloc_object();
+        vm.set_property(obj_a, "x", JsValue::from_int32(10));
+        vm.set_property(obj_a, "a", JsValue::from_int32(1));
+        let shape_a = unsafe {
+            (*(obj_a.as_object_ptr().unwrap() as *const crate::object::JsObject)).shape_id
+        };
+        let offset_a = vm.shapes.lookup_offset(shape_a, "x").unwrap();
+
+        // obj_b: { y: 2, x: 20 } (x at offset 1)
+        let obj_b = vm.alloc_object();
+        vm.set_property(obj_b, "y", JsValue::from_int32(2));
+        vm.set_property(obj_b, "x", JsValue::from_int32(20));
+        let shape_b = unsafe {
+            (*(obj_b.as_object_ptr().unwrap() as *const crate::object::JsObject)).shape_id
+        };
+        let offset_b = vm.shapes.lookup_offset(shape_b, "x").unwrap();
+
+        // obj_c: { z: 3, w: 4, x: 30 } (x at offset 2)
+        let obj_c = vm.alloc_object();
+        vm.set_property(obj_c, "z", JsValue::from_int32(3));
+        vm.set_property(obj_c, "w", JsValue::from_int32(4));
+        vm.set_property(obj_c, "x", JsValue::from_int32(30));
+        let shape_c = unsafe {
+            (*(obj_c.as_object_ptr().unwrap() as *const crate::object::JsObject)).shape_id
+        };
+        let offset_c = vm.shapes.lookup_offset(shape_c, "x").unwrap();
+
+        // Bytecode function: function(o) { return o.x; }
+        let mut chunk = BytecodeChunk::new();
+        let c_x = chunk.add_constant(Constant::String("x".to_string()));
+        chunk.emit(OpCode::GetLocal(0), 1);
+        chunk.emit(OpCode::GetProp(c_x), 1); // ip = 1
+        chunk.emit(OpCode::Return, 1);
+
+        // Record polymorphic feedback at GetProp instruction (ip = 1) for all 3 shapes
+        chunk.record_feedback_shape(1, shape_a, offset_a);
+        chunk.record_feedback_shape(1, shape_b, offset_b);
+        chunk.record_feedback_shape(1, shape_c, offset_c);
+
+        let jit_fn = JitCompiler::compile_native(&chunk)
+            .expect("Expected native compile with Polymorphic Inline Cache direct IR lowering");
+        assert!(jit_fn.is_native());
+
+        // Test all 3 polymorphic shapes execute directly in Cranelift IR!
+        let res_a = jit_fn.call(&mut vm, JsValue::undefined(), &[obj_a]).unwrap();
+        assert_eq!(res_a.as_number(), Some(10.0));
+
+        let res_b = jit_fn.call(&mut vm, JsValue::undefined(), &[obj_b]).unwrap();
+        assert_eq!(res_b.as_number(), Some(20.0));
+
+        let res_c = jit_fn.call(&mut vm, JsValue::undefined(), &[obj_c]).unwrap();
+        assert_eq!(res_c.as_number(), Some(30.0));
+
+        // Unknown 4th shape: { m: 9, n: 8, p: 7, x: 40 } -> safely deopts and resumes
+        let obj_d = vm.alloc_object();
+        vm.set_property(obj_d, "m", JsValue::from_int32(9));
+        vm.set_property(obj_d, "n", JsValue::from_int32(8));
+        vm.set_property(obj_d, "p", JsValue::from_int32(7));
+        vm.set_property(obj_d, "x", JsValue::from_int32(40));
+
+        let res_d = jit_fn.call(&mut vm, JsValue::undefined(), &[obj_d]).unwrap();
+        assert_eq!(res_d.as_number(), Some(40.0));
+    }
+
+    #[test]
     fn test_jit_dense_array_access() {
         let mut vm = Vm::new();
         let arr = vm.alloc_array(vec![
@@ -369,6 +479,8 @@ mod tests {
             lexical_new_target: None,
             prototype: None,
             initial_shape: None,
+            is_class_constructor: false,
+            is_derived_constructor: false,
         });
 
         let call_res = jit_caller
@@ -443,4 +555,3 @@ mod tests {
         assert_eq!(res.as_number(), Some(12375.0));
     }
 }
-

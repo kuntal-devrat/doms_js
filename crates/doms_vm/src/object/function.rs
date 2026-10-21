@@ -26,4 +26,6 @@ pub struct JsFunction {
     pub lexical_new_target: Option<JsValue>,
     pub prototype: Option<JsValue>,
     pub initial_shape: Option<ShapeId>,
+    pub is_class_constructor: bool,
+    pub is_derived_constructor: bool,
 }

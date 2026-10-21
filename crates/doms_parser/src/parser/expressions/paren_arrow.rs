@@ -106,14 +106,22 @@ impl<'a> Parser<'a> {
             let mut seen = std::collections::HashSet::new();
             for name in &all_bound_names {
                 if !seen.insert(name.as_str()) {
-                    return Err(ParseError::UnexpectedToken(TokenKind::Ident(name.clone()), line, col));
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Ident(name.clone()),
+                        line,
+                        col,
+                    ));
                 }
             }
 
             if self.is_strict {
                 for name in &all_bound_names {
                     if is_strict_reserved_word(name) || name == "eval" || name == "arguments" {
-                        return Err(ParseError::UnexpectedToken(TokenKind::Ident(name.clone()), line, col));
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Ident(name.clone()),
+                            line,
+                            col,
+                        ));
                     }
                 }
             }
@@ -294,7 +302,9 @@ impl<'a> Parser<'a> {
 fn contains_yield_expr(e: &Expression) -> bool {
     match e {
         Expression::Yield(_) | Expression::YieldStar(_) => true,
-        Expression::Binary { left, right, .. } => contains_yield_expr(left) || contains_yield_expr(right),
+        Expression::Binary { left, right, .. } => {
+            contains_yield_expr(left) || contains_yield_expr(right)
+        }
         Expression::Unary { expr, .. } => contains_yield_expr(expr),
         Expression::Assignment { value, .. } => contains_yield_expr(value),
         Expression::DestructuringAssignment { value, .. } => contains_yield_expr(value),
@@ -323,7 +333,10 @@ fn validate_arrow_param_pattern(
                     if trailing_comma_after_rest {
                         return Err(ParseError::UnexpectedToken(TokenKind::Comma, line, col));
                     }
-                    if matches!(&**inner, Expression::Assignment { .. }) {
+                    if matches!(
+                        &**inner,
+                        Expression::Assignment { .. } | Expression::DestructuringAssignment { .. }
+                    ) {
                         return Err(ParseError::UnexpectedToken(TokenKind::Eq, line, col));
                     }
                     validate_arrow_param_pattern(inner, line, col, false)?;
@@ -339,9 +352,17 @@ fn validate_arrow_param_pattern(
                 match prop {
                     ObjectProperty::Spread(inner) => {
                         if idx + 1 != total {
-                            return Err(ParseError::UnexpectedToken(TokenKind::DotDotDot, line, col));
+                            return Err(ParseError::UnexpectedToken(
+                                TokenKind::DotDotDot,
+                                line,
+                                col,
+                            ));
                         }
-                        if matches!(inner, Expression::Assignment { .. }) {
+                        if matches!(
+                            inner,
+                            Expression::Assignment { .. }
+                                | Expression::DestructuringAssignment { .. }
+                        ) {
                             return Err(ParseError::UnexpectedToken(TokenKind::Eq, line, col));
                         }
                         validate_arrow_param_pattern(inner, line, col, false)?;
@@ -349,6 +370,7 @@ fn validate_arrow_param_pattern(
                     ObjectProperty::KeyValue(_, val) => {
                         validate_arrow_param_pattern(val, line, col, false)?;
                     }
+                    ObjectProperty::CoverInitializedName(_, _) => {}
                     _ => {}
                 }
             }
@@ -362,7 +384,10 @@ fn validate_arrow_param_pattern(
             validate_arrow_param_pattern(value, line, col, false)
         }
         Expression::Spread(inner) => {
-            if matches!(&**inner, Expression::Assignment { .. }) {
+            if matches!(
+                &**inner,
+                Expression::Assignment { .. } | Expression::DestructuringAssignment { .. }
+            ) {
                 return Err(ParseError::UnexpectedToken(TokenKind::Eq, line, col));
             }
             validate_arrow_param_pattern(inner, line, col, false)
@@ -398,6 +423,7 @@ fn collect_arrow_bound_names(e: &Expression, out: &mut Vec<String>) {
             for prop in props {
                 match prop {
                     ObjectProperty::KeyValue(_, val) => collect_arrow_bound_names(val, out),
+                    ObjectProperty::CoverInitializedName(name, _) => out.push(name.clone()),
                     ObjectProperty::Spread(inner) => collect_arrow_bound_names(inner, out),
                     _ => {}
                 }

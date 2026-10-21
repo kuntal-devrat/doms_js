@@ -95,6 +95,17 @@ pub(super) fn register_error_types(vm: &mut Vm) {
                     None
                 };
                 let err_val = vm.alloc_error_opt(err_name_c.clone(), msg);
+                if let Some(nt) = vm.current_new_target {
+                    if nt.is_object() {
+                        let p = vm.get_property(nt, "prototype");
+                        if p.is_object() {
+                            if let Some(ptr) = err_val.as_object_ptr() {
+                                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                                obj.prototype = Some(p);
+                            }
+                        }
+                    }
+                }
                 if err_name_c == "AggregateError" {
                     let mut elements = Vec::new();
                     if let Some(errs_arg) = args.first().copied() {

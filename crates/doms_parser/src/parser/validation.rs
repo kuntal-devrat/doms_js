@@ -296,6 +296,11 @@ impl<'a> Parser<'a> {
             Expression::Object(props) => {
                 for p in props {
                     match p {
+                        ObjectProperty::CoverInitializedName(..) => {
+                            return Err(ParseError::General(
+                                "Invalid shorthand property initializer".into(),
+                            ));
+                        }
                         ObjectProperty::KeyValue(key, val)
                         | ObjectProperty::Getter(key, val)
                         | ObjectProperty::Setter(key, val) => {
@@ -599,6 +604,15 @@ impl<'a> Parser<'a> {
                         ));
                     }
                     match prop {
+                        ObjectProperty::CoverInitializedName(target, _val) => {
+                            if self.is_strict && (target == "eval" || target == "arguments") {
+                                return Err(ParseError::UnexpectedToken(
+                                    TokenKind::Ident(target.clone()),
+                                    self.current.line,
+                                    self.current.col,
+                                ));
+                            }
+                        }
                         ObjectProperty::KeyValue(_key, val) => {
                             if matches!(val, Expression::MethodExpr { .. }) {
                                 return Err(ParseError::General(

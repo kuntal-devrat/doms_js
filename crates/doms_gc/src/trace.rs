@@ -211,11 +211,11 @@ impl Default for TypeRegistry {
 mod tests {
     use super::*;
 
-    struct MockObj {
+    struct SampleTraceableNode {
         refs: Vec<*mut u8>,
     }
 
-    impl Trace for MockObj {
+    impl Trace for SampleTraceableNode {
         fn trace(&self, tracer: &mut Tracer) {
             for r in &self.refs {
                 tracer.trace_ref(*r);
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_trace_counts() {
-        let obj = MockObj { refs: vec![std::ptr::null_mut(); 3] };
+        let obj = SampleTraceableNode { refs: vec![std::ptr::null_mut(); 3] };
         assert_eq!(obj.reference_count_hint(), 3);
     }
 

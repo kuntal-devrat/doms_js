@@ -63,6 +63,9 @@ impl Vm {
                                 }
                             }
                         }
+                        if self.shapes.has_property(proto_obj.shape_id, key) {
+                            break;
+                        }
                         curr_proto = proto_obj.prototype;
                     } else {
                         break;
@@ -353,6 +356,9 @@ impl Vm {
     }
 
     pub fn delete_property(&mut self, target: JsValue, key: &str) -> Result<bool, VmError> {
+        if target.is_null() || target.is_undefined() {
+            return Err(VmError::TypeError("Cannot delete property of null or undefined".into()));
+        }
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &mut *(ptr as *mut JsObject) };
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
@@ -384,7 +390,6 @@ impl Vm {
                 if let Ok(idx) = key.parse::<usize>() {
                     if idx < elements.len() {
                         elements[idx] = JsValue::hole();
-                        return Ok(true);
                     }
                 }
             }

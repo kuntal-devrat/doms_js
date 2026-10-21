@@ -74,6 +74,16 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
+        self.compile_generator_expr_full(name, params, body, false)
+    }
+
+    pub(crate) fn compile_generator_expr_full(
+        &mut self,
+        name: &Option<String>,
+        params: &[String],
+        body: &[Statement],
+        is_method: bool,
+    ) -> Result<(), CompileError> {
         let def = Self::compile_function_full(
             name.clone(),
             params.to_vec(),
@@ -81,7 +91,7 @@ impl Compiler {
             self.is_strict,
             true,
             false,
-            false,
+            is_method,
         )?;
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateGenerator(const_idx), 0);
@@ -94,6 +104,16 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
+        self.compile_async_generator_expr_full(name, params, body, false)
+    }
+
+    pub(crate) fn compile_async_generator_expr_full(
+        &mut self,
+        name: &Option<String>,
+        params: &[String],
+        body: &[Statement],
+        is_method: bool,
+    ) -> Result<(), CompileError> {
         let def = Self::compile_function_full(
             name.clone(),
             params.to_vec(),
@@ -101,7 +121,7 @@ impl Compiler {
             self.is_strict,
             true,
             false,
-            false,
+            is_method,
         )?;
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateAsyncGenerator(const_idx), 0);

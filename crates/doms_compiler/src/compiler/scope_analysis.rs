@@ -160,6 +160,7 @@ pub(crate) fn is_param_default_stmt(stmt: &Statement) -> bool {
                 || d.name.starts_with("__param_")
                 || d.name.starts_with("@param_")
                 || d.name.starts_with("@dstr_")
+                || d.name.starts_with('@')
         }),
         _ => false,
     }

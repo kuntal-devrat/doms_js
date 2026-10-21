@@ -125,4 +125,80 @@ impl Vm {
         self.execute_construct(callee, &args, target_depth)?;
         Ok(())
     }
+
+    pub(crate) fn op_super_call(
+        &mut self,
+        args: &[JsValue],
+        target_depth: usize,
+    ) -> Result<(), VmError> {
+        let ctor_frame_idx = match self.frames.iter().rposition(|f| !f.is_arrow) {
+            Some(i) => i,
+            None => {
+                self.handle_exception_at_depth(
+                    VmError::ReferenceError("super() called outside of constructor".into()),
+                    target_depth,
+                )?;
+                return Ok(());
+            }
+        };
+
+        let callee_val = match self.frames[ctor_frame_idx].callee_val {
+            Some(v) => v,
+            None => {
+                self.handle_exception_at_depth(
+                    VmError::TypeError("Super constructor is not a constructor".into()),
+                    target_depth,
+                )?;
+                return Ok(());
+            }
+        };
+
+        let super_ctor = if let Some(callee_ptr) = callee_val.as_object_ptr() {
+            let callee_obj = unsafe { &*(callee_ptr as *mut JsObject) };
+            callee_obj.prototype.unwrap_or(JsValue::null())
+        } else {
+            JsValue::null()
+        };
+
+        let is_valid_super = self.is_constructor(super_ctor) || {
+            if let Some(sym_ctor) = self.globals.get("Symbol") {
+                super_ctor == *sym_ctor
+            } else {
+                false
+            }
+        };
+        if !is_valid_super {
+            self.handle_exception_at_depth(
+                VmError::TypeError("Super constructor is not a constructor".into()),
+                target_depth,
+            )?;
+            return Ok(());
+        }
+
+        let new_target = self.frames[ctor_frame_idx].new_target.unwrap_or(callee_val);
+
+        let res = self.construct_with_new_target(super_ctor, args, new_target);
+        match res {
+            Ok(instance) => {
+                if self.frames[ctor_frame_idx].this_val != JsValue::uninitialized() {
+                    self.handle_exception_at_depth(
+                        VmError::ReferenceError("Super constructor may only be called once".into()),
+                        target_depth,
+                    )?;
+                    return Ok(());
+                }
+                for f in &mut self.frames[ctor_frame_idx..] {
+                    if f.is_arrow || f.this_val == JsValue::uninitialized() {
+                        f.this_val = instance;
+                    }
+                }
+                self.push(instance);
+                Ok(())
+            }
+            Err(err) => {
+                self.handle_exception_at_depth(err, target_depth)?;
+                Ok(())
+            }
+        }
+    }
 }

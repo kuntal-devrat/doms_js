@@ -1,9 +1,9 @@
 //! Typed callback traits for binding Rust closures to JavaScript functions.
 
-use crate::convert::{FromJs, IntoJs};
 use crate::JsValue;
-use doms_vm::interpreter::VmError;
+use crate::convert::{FromJs, IntoJs};
 use doms_vm::Vm;
+use doms_vm::interpreter::VmError;
 use std::fmt::Display;
 
 /// Trait for return types of native callbacks: supports both plain `T: IntoJs`

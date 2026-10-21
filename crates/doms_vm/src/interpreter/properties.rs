@@ -97,15 +97,23 @@ impl Vm {
     /// Returns `false` when the value is not a valid array length (the caller
     /// decides whether that is a `RangeError`).
     fn assign_array_length(&mut self, obj: &mut JsObject, value: JsValue) -> bool {
-        if !obj.is_array_length_writable() {
-            return false;
-        }
+        let n1 = match self.to_number_value(value) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+        let u32_len = if n1.is_nan() || n1.is_infinite() || n1 == 0.0 {
+            0u32
+        } else {
+            n1.rem_euclid(4294967296.0) as u32
+        };
         let num = match self.to_number_value(value) {
             Ok(n) => n,
             Err(_) => return false,
         };
-        let u32_len = num as u32;
         if (u32_len as f64) != num || num.is_nan() || num.is_sign_negative() {
+            return false;
+        }
+        if !obj.is_array_length_writable() {
             return false;
         }
         let new_len = u32_len as usize;
@@ -421,19 +429,21 @@ impl Vm {
 
             // Check non-configurable: CreateDataProperty requires configurable: true.
             // If property is already non-configurable, redefining it as configurable fails.
-            if !self.is_own_property_configurable(target, key) {
+            if self.has_own_property(target, key) && !self.is_own_property_configurable(target, key)
+            {
                 return Ok(false);
             }
 
-            // CreateDataProperty must fail on a non-writable data property or
-            // an accessor property rather than silently overwriting it.
+            // CreateDataProperty must fail on a non-writable data property only if non-configurable
             if self.has_own_property(target, key) {
-                if !self.is_own_property_writable(target, key) {
+                if !self.is_own_property_writable(target, key)
+                    && !self.is_own_property_configurable(target, key)
+                {
                     return Ok(false);
                 }
                 let is_accessor = matches!(
                     unsafe { &*(ptr as *const JsObject) }.accessors.as_deref(),
-                    Some(accs) if accs.contains_key(key)
+                    Some(accs) if accs.contains_key(key) && !self.is_own_property_configurable(target, key)
                 );
                 if is_accessor {
                     return Ok(false);
@@ -443,6 +453,20 @@ impl Vm {
             // Check non-extensible
             if !self.is_extensible_object(target) && !self.has_own_property(target, key) {
                 return Ok(false);
+            }
+        }
+
+        if let Some(ptr) = target.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let Some(info) = self.shapes.get_property_info(obj.shape_id, key) {
+                let attrs = crate::shape::PropertyAttributes {
+                    writable: true,
+                    enumerable: true,
+                    configurable: true,
+                };
+                if info.attributes != attrs {
+                    obj.shape_id = self.shapes.transition_redefine(obj.shape_id, key, attrs);
+                }
             }
         }
 

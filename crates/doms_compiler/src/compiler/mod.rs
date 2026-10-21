@@ -61,6 +61,8 @@ pub struct Compiler {
     pub is_strict: bool,
     pub is_eval: bool,
     pub touched_bindings: std::collections::HashSet<String>,
+    pub self_slot: Option<u16>,
+    pub shadowed_class_names: Vec<String>,
 }
 
 impl Compiler {
@@ -80,6 +82,8 @@ impl Compiler {
             is_strict: false,
             is_eval: false,
             touched_bindings: std::collections::HashSet::new(),
+            self_slot: None,
+            shadowed_class_names: Vec::new(),
         }
     }
 

@@ -82,7 +82,7 @@ impl<'a> Parser<'a> {
 
         if self.match_token(&TokenKind::Default)? {
             if self.check(&TokenKind::Class) {
-                let decl = self.parse_class_decl()?;
+                let decl = self.parse_class_decl(true)?;
                 return Ok(Statement::Export {
                     decl: Some(Box::new(decl)),
                     is_default: true,

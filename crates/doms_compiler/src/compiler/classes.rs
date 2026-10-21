@@ -1,5 +1,5 @@
 use super::Compiler;
-use crate::bytecode::{Constant, OpCode};
+use crate::bytecode::{Constant, FunctionDef, OpCode};
 use crate::compiler::CompileError;
 use doms_parser::ast::*;
 use std::sync::Arc;
@@ -9,55 +9,99 @@ impl Compiler {
         &mut self,
         class_def: &ClassDefinition,
     ) -> Result<(), CompileError> {
-        self.compile_class_definition_with_name(class_def, None)
+        self.compile_class_definition_with_name(class_def, None, false)
+    }
+
+    pub(crate) fn compile_class_decl(
+        &mut self,
+        class_def: &ClassDefinition,
+    ) -> Result<(), CompileError> {
+        self.compile_class_definition_with_name(class_def, None, true)
     }
 
     pub(crate) fn compile_class_definition_with_name(
         &mut self,
         class_def: &ClassDefinition,
         override_name: Option<String>,
+        is_declaration: bool,
+    ) -> Result<(), CompileError> {
+        let prev_strict = self.is_strict;
+        self.is_strict = true;
+        let res = self.compile_class_definition_inner(class_def, override_name, is_declaration);
+        self.is_strict = prev_strict;
+        res
+    }
+
+    fn compile_class_definition_inner(
+        &mut self,
+        class_def: &ClassDefinition,
+        override_name: Option<String>,
+        is_declaration: bool,
     ) -> Result<(), CompileError> {
         let name = override_name.or_else(|| class_def.name.clone());
-        let mut def = Self::compile_function(
-            name,
-            class_def.ctor_params.clone(),
-            &class_def.ctor_body,
-            self.is_strict,
-        )?;
-        if class_def.super_class.is_some() {
-            let len = def.chunk.instructions.len();
-            if len >= 2
-                && def.chunk.instructions[len - 2] == OpCode::LoadUndefined
-                && def.chunk.instructions[len - 1] == OpCode::Return
-            {
-                def.chunk.instructions[len - 2] = OpCode::This;
-            }
+
+        if let Some(ref n) = class_def.name {
+            self.shadowed_class_names.push(n.clone());
         }
+
+        let class_scope_name_idx = if let Some(ref n) = class_def.name {
+            let idx = self.chunk.add_constant(Constant::String(n.clone()));
+            self.chunk.emit(OpCode::PushClassScope(idx), 0);
+            Some(idx)
+        } else {
+            None
+        };
+
+        let super_slot = if let Some(ref sup) = class_def.super_class {
+            self.compile_expression(sup)?;
+            let slot =
+                self.symbols.define_local(format!("@super_{}", self.chunk.instructions.len()));
+            self.chunk.emit(OpCode::SetLocal(slot), 0);
+            self.chunk.emit(OpCode::Pop, 0);
+            Some(slot)
+        } else {
+            None
+        };
+
+        let is_derived = class_def.super_class.is_some();
+        let def = if is_derived && !class_def.has_constructor {
+            let mut chunk = crate::bytecode::BytecodeChunk::new();
+            chunk.emit(OpCode::SuperCallForward, 0);
+            chunk.emit(OpCode::Return, 0);
+            FunctionDef {
+                name,
+                params: Vec::new(),
+                length: 0,
+                self_slot: None,
+                local_names: Arc::new(Vec::new()),
+                lexical_local_names: Arc::new(Vec::new()),
+                chunk,
+                is_strict: true,
+                has_param_exprs: false,
+                is_generator: false,
+                is_arrow: false,
+                is_method: false,
+                is_class_constructor: true,
+                is_derived_constructor: true,
+            }
+        } else {
+            Self::compile_class_constructor(
+                name,
+                class_def.ctor_params.clone(),
+                &class_def.ctor_body,
+                is_derived,
+            )?
+        };
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
 
-        if let Some(ref sup) = class_def.super_class {
-            self.compile_expression(sup)?;
+        if let Some(slot) = super_slot {
+            self.chunk.emit(OpCode::GetLocal(slot), 0);
             self.chunk.emit(OpCode::InheritClass, 0);
         }
 
-        if let Some(ref n) = class_def.name {
-            if self.symbols.scope_depth > 0 {
-                let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(n) {
-                    local.is_declared = true;
-                    local.slot
-                } else {
-                    self.symbols.define_local(n.clone())
-                };
-                self.chunk.emit(OpCode::Dup, 0);
-                self.chunk.emit(OpCode::SetLocal(slot), 0);
-                self.chunk.emit(OpCode::Pop, 0);
-            } else {
-                let name_idx = self.chunk.add_constant(Constant::String(n.clone()));
-                self.chunk.emit(OpCode::Dup, 0);
-                self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
-                self.chunk.emit(OpCode::Pop, 0);
-            }
+        if let Some(idx) = class_scope_name_idx {
+            self.chunk.emit(OpCode::InitClassBinding(idx), 0);
         }
 
         for element in &class_def.elements {
@@ -169,7 +213,7 @@ impl Compiler {
                         } else if matches!(&element.kind, ClassElementKind::Setter(_)) {
                             self.chunk.emit(OpCode::DefinePrivateSetter(const_idx), 0);
                         } else {
-                            self.chunk.emit(OpCode::DefinePrivateField(const_idx), 0);
+                            self.chunk.emit(OpCode::DefinePrivateMethod(const_idx), 0);
                         }
                         self.chunk.emit(OpCode::Pop, 0);
                         continue;
@@ -209,6 +253,33 @@ impl Compiler {
                 }
             }
         }
+
+        if class_scope_name_idx.is_some() {
+            self.chunk.emit(OpCode::PopScope, 0);
+            self.shadowed_class_names.pop();
+        }
+
+        if is_declaration {
+            if let Some(ref n) = class_def.name {
+                if self.symbols.scope_depth > 0 {
+                    let slot = if let Some(local) = self.symbols.get_local_in_current_scope_mut(n) {
+                        local.is_declared = true;
+                        local.slot
+                    } else {
+                        self.symbols.define_local(n.clone())
+                    };
+                    self.chunk.emit(OpCode::Dup, 0);
+                    self.chunk.emit(OpCode::SetLocal(slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                } else {
+                    let name_idx = self.chunk.add_constant(Constant::String(n.clone()));
+                    self.chunk.emit(OpCode::Dup, 0);
+                    self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                }
+            }
+        }
+
         Ok(())
     }
 }

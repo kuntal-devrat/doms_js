@@ -46,6 +46,7 @@ impl Vm {
                         "Symbol",
                         "escape",
                         "unescape",
+                        "fromAsync",
                     ];
                     if NON_CONSTRUCTORS.contains(&n.name.as_str()) || n.name.contains('.') {
                         return false;

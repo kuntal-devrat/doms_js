@@ -100,6 +100,24 @@ pub fn define_property_internal(
         if is_array {
             if let PropertyKeyVal::String(s) = &prop_key {
                 if s == "length" {
+                    let mut validated_len = None;
+                    if has_val {
+                        let val = vm.get_property(desc, "value");
+                        let n1 = vm.to_number_value(val)?;
+                        let u32_len = if n1.is_nan() || n1.is_infinite() || n1 == 0.0 {
+                            0u32
+                        } else {
+                            n1.rem_euclid(4294967296.0) as u32
+                        };
+                        let number_len = vm.to_number_value(val)?;
+                        if (u32_len as f64) != number_len
+                            || number_len.is_nan()
+                            || number_len.is_sign_negative()
+                        {
+                            return Err(VmError::RangeError("Invalid array length".into()));
+                        }
+                        validated_len = Some((u32_len, number_len));
+                    }
                     if has_get || has_set {
                         return Err(VmError::TypeError(
                             "Cannot make array length an accessor".into(),
@@ -115,23 +133,30 @@ pub fn define_property_internal(
                             "Cannot make array length enumerable".into(),
                         ));
                     }
-                    if has_val {
-                        let val = vm.get_property(desc, "value");
-                        let num = vm.to_number_value(val)?;
-                        let u32_len = num as u32;
-                        if (u32_len as f64) != num || num.is_nan() || num.is_sign_negative() {
-                            return Err(VmError::RangeError("Invalid array length".into()));
-                        }
-                        if !is_length_writable {
-                            return Err(VmError::TypeError(
-                                "Cannot change length of array with non-writable length".into(),
-                            ));
-                        }
+
+                    let is_length_writable = if let Some(ptr) = target.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        obj.is_array_length_writable()
+                    } else {
+                        true
+                    };
+
+                    if let Some((u32_len, num)) = validated_len {
+                        let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                        let old_len = if let ObjectKind::Array(elements) = &obj.kind {
+                            elements.len()
+                        } else {
+                            0
+                        };
                         let new_len = u32_len as usize;
-                        let mut non_conf_conflict: Option<usize> = None;
-                        if let ObjectKind::Array(elements) = &mut obj.kind {
-                            let old_len = elements.len();
-                            if new_len >= old_len {
+
+                        if new_len >= old_len {
+                            if !is_length_writable && new_len != old_len {
+                                return Err(VmError::TypeError(
+                                    "Cannot change length of array with non-writable length".into(),
+                                ));
+                            }
+                            if let ObjectKind::Array(elements) = &mut obj.kind {
                                 if new_len < 100_000 {
                                     elements.resize(new_len, JsValue::hole());
                                 } else {
@@ -141,31 +166,41 @@ pub fn define_property_internal(
                                         JsValue::from_double(num),
                                     );
                                 }
-                            } else {
-                                for i in (new_len..old_len).rev() {
-                                    if !vm.is_own_property_configurable(target, &i.to_string()) {
-                                        non_conf_conflict = Some(i);
-                                        break;
-                                    }
+                            }
+                        } else {
+                            if !is_length_writable {
+                                return Err(VmError::TypeError(
+                                    "Cannot change length of array with non-writable length".into(),
+                                ));
+                            }
+                            let mut non_conf_conflict: Option<usize> = None;
+                            for i in (new_len..old_len).rev() {
+                                if !vm.is_own_property_configurable(target, &i.to_string()) {
+                                    non_conf_conflict = Some(i);
+                                    break;
                                 }
+                            }
+                            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                            if let ObjectKind::Array(elements) = &mut obj.kind {
                                 if let Some(i) = non_conf_conflict {
                                     elements.truncate(i + 1);
                                 } else {
                                     elements.truncate(new_len);
                                 }
                             }
-                        }
-                        if non_conf_conflict.is_some() {
-                            if has_writ && !vm.get_property(desc, "writable").is_truthy() {
-                                obj.set_array_length_non_writable();
+                            if non_conf_conflict.is_some() {
+                                if has_writ && !vm.get_property(desc, "writable").is_truthy() {
+                                    obj.set_array_length_non_writable();
+                                }
+                                return Err(VmError::TypeError(
+                                    "Cannot delete non-configurable array element".into(),
+                                ));
                             }
-                            return Err(VmError::TypeError(
-                                "Cannot delete non-configurable array element".into(),
-                            ));
                         }
                     }
                     if has_writ {
                         let w = vm.get_property(desc, "writable").is_truthy();
+                        let obj = unsafe { &mut *(ptr as *mut JsObject) };
                         if !w {
                             obj.set_array_length_non_writable();
                         } else if !is_length_writable {

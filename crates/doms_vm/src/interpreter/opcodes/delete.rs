@@ -14,6 +14,16 @@ impl Vm {
             _ => return Err(VmError::TypeError("Property name must be string".into())),
         };
         let target = self.pop()?;
+        if target.is_null() || target.is_undefined() {
+            self.handle_exception_at_depth(
+                VmError::TypeError(format!(
+                    "Cannot delete property '{}' of null or undefined",
+                    prop
+                )),
+                target_depth,
+            )?;
+            return Ok(None);
+        }
         let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
         match self.delete_property(target, &prop) {
             Ok(true) => {
@@ -45,6 +55,13 @@ impl Vm {
     ) -> Result<Option<JsValue>, VmError> {
         let key_val = self.pop()?;
         let target = self.pop()?;
+        if target.is_null() || target.is_undefined() {
+            self.handle_exception_at_depth(
+                VmError::TypeError("Cannot delete property of null or undefined".into()),
+                target_depth,
+            )?;
+            return Ok(None);
+        }
         let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
         let prop_key = match self.to_property_key(key_val) {
             Ok(k) => k,

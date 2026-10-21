@@ -79,6 +79,7 @@ fn detect_native_stack_top() -> usize {
 /// - a raw `*mut JsObject` (exact payload start), and
 /// - a NaN-boxed [`JsValue`] whose tag selects the object/string/symbol pointer
 ///   stored in its 48-bit payload.
+#[allow(dead_code)]
 #[inline]
 fn gc_mark_word(
     word: usize,

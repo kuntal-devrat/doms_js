@@ -40,7 +40,9 @@ fn main() {
     ctx.set_property(config, "debugMode", true);
     ctx.set_method(config, "status", || "Running normally");
     ctx.set_global("appConfig", config);
-    println!("[3] Injected Rust object: appConfig = {{ appName, workerCount, debugMode, status() }}");
+    println!(
+        "[3] Injected Rust object: appConfig = {{ appName, workerCount, debugMode, status() }}"
+    );
 
     // 4. Create an array and process in JS
     let list = ctx.create_array(vec![10_i64, 20, 30, 40]);
@@ -55,9 +57,8 @@ fn main() {
     println!("[5] Evaluated JS array directly into Vec<i64>: {:?}", squares);
     assert_eq!(squares, vec![1, 4, 9, 16, 25]);
 
-    let headers: HashMap<String, String> = ctx.eval_as(
-        "({ 'content-type': 'application/json', 'x-custom-engine': 'DOMS' })"
-    ).unwrap();
+    let headers: HashMap<String, String> =
+        ctx.eval_as("({ 'content-type': 'application/json', 'x-custom-engine': 'DOMS' })").unwrap();
     println!("[6] Evaluated JS object directly into HashMap<String, String>:");
     for (k, v) in &headers {
         println!("    {}: {}", k, v);

@@ -2,11 +2,21 @@ use super::*;
 
 impl<'a> Parser<'a> {
     pub fn parse_expression(&mut self, min_bp: u8) -> Result<Expression, ParseError> {
-        let mut lhs = self.parse_prefix()?;
+        let mut lhs = self.parse_prefix(min_bp)?;
 
         loop {
+            // Unparenthesized Yield expressions cannot be followed by any postfix or infix operator except Comma
+            if matches!(lhs, Expression::Yield(_) | Expression::YieldStar(_)) {
+                if min_bp == 0 && self.current.kind == TokenKind::Comma {
+                    // comma sequence expression allowed
+                } else {
+                    break;
+                }
+            }
+
             // Postfix / Infix operations
-            if let TokenKind::TemplateLiteral { quasis, raw_quasis, raw_exprs } = &self.current.kind {
+            if let TokenKind::TemplateLiteral { quasis, raw_quasis, raw_exprs } = &self.current.kind
+            {
                 if matches!(lhs, Expression::OptionalChain(_)) {
                     return Err(ParseError::UnexpectedToken(
                         self.current.kind.clone(),
@@ -23,12 +33,7 @@ impl<'a> Parser<'a> {
                     let sub = Parser::new(raw)?.parse_expression(0)?;
                     exprs.push(sub);
                 }
-                lhs = Expression::TaggedTemplate {
-                    tag: Box::new(lhs),
-                    quasis,
-                    raw_quasis,
-                    exprs,
-                };
+                lhs = Expression::TaggedTemplate { tag: Box::new(lhs), quasis, raw_quasis, exprs };
                 continue;
             }
 
@@ -66,6 +71,7 @@ impl<'a> Parser<'a> {
                     if prop.starts_with('#') {
                         prop = match self.resolve_private_name(&prop) {
                             Some(scoped) => scoped,
+                            None if self.is_eval => prop,
                             None => {
                                 return Err(ParseError::UnexpectedToken(
                                     prop_tok.kind,
@@ -138,8 +144,16 @@ impl<'a> Parser<'a> {
                     }
                 };
                 if prop.starts_with('#') {
+                    if matches!(&lhs, Expression::Super) {
+                        return Err(ParseError::UnexpectedToken(
+                            prop_tok.kind,
+                            prop_tok.line,
+                            prop_tok.col,
+                        ));
+                    }
                     prop = match self.resolve_private_name(&prop) {
                         Some(scoped) => scoped,
+                        None if self.is_eval => prop,
                         None => {
                             return Err(ParseError::UnexpectedToken(
                                 prop_tok.kind,
@@ -177,7 +191,8 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RBracket)?;
                 match lhs {
                     Expression::OptionalChain(ref mut oc) => {
-                        oc.chain.push(ChainElement::Index { index: Box::new(index), optional: false });
+                        oc.chain
+                            .push(ChainElement::Index { index: Box::new(index), optional: false });
                     }
                     _ => {
                         lhs = Expression::Index { object: Box::new(lhs), index: Box::new(index) };
@@ -212,8 +227,9 @@ impl<'a> Parser<'a> {
 
             if self.check(&TokenKind::PlusPlus) && !self.current.has_preceding_line_terminator {
                 self.advance()?;
+                let target = unwrap_grouping(&lhs);
                 if !matches!(
-                    &lhs,
+                    target,
                     Expression::Identifier(_)
                         | Expression::Member { .. }
                         | Expression::Index { .. }
@@ -224,7 +240,7 @@ impl<'a> Parser<'a> {
                         self.current.col,
                     ));
                 }
-                if let Expression::Identifier(ref name) = lhs {
+                if let Expression::Identifier(name) = target {
                     if self.is_strict && (name == "eval" || name == "arguments") {
                         return Err(ParseError::UnexpectedToken(
                             TokenKind::Ident(name.clone()),
@@ -240,8 +256,9 @@ impl<'a> Parser<'a> {
 
             if self.check(&TokenKind::MinusMinus) && !self.current.has_preceding_line_terminator {
                 self.advance()?;
+                let target = unwrap_grouping(&lhs);
                 if !matches!(
-                    &lhs,
+                    target,
                     Expression::Identifier(_)
                         | Expression::Member { .. }
                         | Expression::Index { .. }
@@ -252,7 +269,7 @@ impl<'a> Parser<'a> {
                         self.current.col,
                     ));
                 }
-                if let Expression::Identifier(ref name) = lhs {
+                if let Expression::Identifier(name) = target {
                     if self.is_strict && (name == "eval" || name == "arguments") {
                         return Err(ParseError::UnexpectedToken(
                             TokenKind::Ident(name.clone()),
@@ -399,7 +416,10 @@ impl<'a> Parser<'a> {
 
             // ES Spec: cannot mix ?? with && or || without parentheses
             if op == BinaryOp::NullishCoalescing {
-                if matches!(lhs, Expression::Binary { op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr, .. }) {
+                if matches!(
+                    lhs,
+                    Expression::Binary { op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr, .. }
+                ) {
                     return Err(ParseError::UnexpectedToken(
                         TokenKind::QuestionQuestion,
                         self.current.line,
@@ -408,7 +428,11 @@ impl<'a> Parser<'a> {
                 }
             } else if op == BinaryOp::LogicalAnd || op == BinaryOp::LogicalOr {
                 if matches!(lhs, Expression::Binary { op: BinaryOp::NullishCoalescing, .. }) {
-                    let tok = if op == BinaryOp::LogicalAnd { TokenKind::AmpAmp } else { TokenKind::PipePipe };
+                    let tok = if op == BinaryOp::LogicalAnd {
+                        TokenKind::AmpAmp
+                    } else {
+                        TokenKind::PipePipe
+                    };
                     return Err(ParseError::UnexpectedToken(
                         tok,
                         self.current.line,
@@ -421,7 +445,10 @@ impl<'a> Parser<'a> {
             let rhs = self.parse_expression(r_bp)?;
 
             if op == BinaryOp::NullishCoalescing {
-                if matches!(rhs, Expression::Binary { op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr, .. }) {
+                if matches!(
+                    rhs,
+                    Expression::Binary { op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr, .. }
+                ) {
                     return Err(ParseError::UnexpectedToken(
                         TokenKind::QuestionQuestion,
                         self.current.line,
@@ -430,7 +457,11 @@ impl<'a> Parser<'a> {
                 }
             } else if op == BinaryOp::LogicalAnd || op == BinaryOp::LogicalOr {
                 if matches!(rhs, Expression::Binary { op: BinaryOp::NullishCoalescing, .. }) {
-                    let tok = if op == BinaryOp::LogicalAnd { TokenKind::AmpAmp } else { TokenKind::PipePipe };
+                    let tok = if op == BinaryOp::LogicalAnd {
+                        TokenKind::AmpAmp
+                    } else {
+                        TokenKind::PipePipe
+                    };
                     return Err(ParseError::UnexpectedToken(
                         tok,
                         self.current.line,

@@ -613,7 +613,7 @@ impl Vm {
             _ => return Err(VmError::TypeError("Property name must be string".into())),
         };
         let getter = self.pop()?;
-        let obj = self.pop()?;
+        let obj = *self.stack.last().ok_or(VmError::StackUnderflow)?;
         if let Some(val_ptr) = getter.as_object_ptr() {
             let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
             if let ObjectKind::Function(ref mut f) = val_obj.kind {
@@ -637,7 +637,7 @@ impl Vm {
             _ => return Err(VmError::TypeError("Property name must be string".into())),
         };
         let setter = self.pop()?;
-        let obj = self.pop()?;
+        let obj = *self.stack.last().ok_or(VmError::StackUnderflow)?;
         if let Some(val_ptr) = setter.as_object_ptr() {
             let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
             if let ObjectKind::Function(ref mut f) = val_obj.kind {
@@ -654,7 +654,7 @@ impl Vm {
     pub(crate) fn op_define_computed_getter(&mut self, target_depth: usize) -> Result<(), VmError> {
         let getter_val = self.pop()?;
         let key_val = self.pop()?;
-        let obj_val = self.pop()?;
+        let obj_val = *self.stack.last().ok_or(VmError::StackUnderflow)?;
         let prop_key = match self.to_property_key(key_val) {
             Ok(k) => k,
             Err(err) => {
@@ -688,7 +688,7 @@ impl Vm {
     pub(crate) fn op_define_computed_setter(&mut self, target_depth: usize) -> Result<(), VmError> {
         let setter_val = self.pop()?;
         let key_val = self.pop()?;
-        let obj_val = self.pop()?;
+        let obj_val = *self.stack.last().ok_or(VmError::StackUnderflow)?;
         let prop_key = match self.to_property_key(key_val) {
             Ok(k) => k,
             Err(err) => {
@@ -719,24 +719,115 @@ impl Vm {
         Ok(())
     }
 
+    pub(crate) fn op_set_function_name_from_key(
+        &mut self,
+        prefix_kind: u8,
+        _target_depth: usize,
+    ) -> Result<(), VmError> {
+        let val = self.peek().copied()?;
+        let stack_len = self.stack.len();
+        if stack_len < 2 {
+            return Ok(());
+        }
+        let key_val = self.stack[stack_len - 2];
+        let name_str = if key_val.is_symbol() {
+            let desc = if let Some(ptr) = key_val.as_symbol_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                if let ObjectKind::Symbol(d) = &obj.kind { d.clone() } else { None }
+            } else {
+                None
+            };
+            let formatted = match desc {
+                Some(d) => format!("[{}]", d),
+                None => "".to_string(),
+            };
+            match prefix_kind {
+                1 => format!("get {}", formatted),
+                2 => format!("set {}", formatted),
+                _ => formatted,
+            }
+        } else {
+            let s = self.to_string_value(key_val);
+            match prefix_kind {
+                1 => format!("get {}", s),
+                2 => format!("set {}", s),
+                _ => s,
+            }
+        };
+
+        if let Some(ptr) = val.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref mut func) = obj.kind {
+                func.name = Some(name_str.clone());
+            }
+            let name_val = self.alloc_string(name_str);
+            self.define_builtin_property(
+                val,
+                "name",
+                name_val,
+                crate::shape::PropertyAttributes {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        Ok(())
+    }
+
     pub(crate) fn op_inherit_class(&mut self) -> Result<(), VmError> {
         let super_ctor = self.pop()?;
         let ctor = *self.stack.last().ok_or(VmError::StackUnderflow)?;
 
-        if let Some(_super_ptr) = super_ctor.as_object_ptr() {
+        let ctor_proto = self.get_property(ctor, "prototype");
+
+        if super_ctor.is_null() {
             if let Some(ctor_ptr) = ctor.as_object_ptr() {
                 let ctor_obj = unsafe { &mut *(ctor_ptr as *mut JsObject) };
-                ctor_obj.prototype = Some(super_ctor);
-
-                let ctor_proto = self.get_property(ctor, "prototype");
-                let super_proto = self.get_property(super_ctor, "prototype");
+                if let Some(fn_ctor) = self.globals.get("Function") {
+                    let fn_proto = self.get_property(*fn_ctor, "prototype");
+                    ctor_obj.prototype = Some(fn_proto);
+                }
                 if let Some(ctor_proto_ptr) = ctor_proto.as_object_ptr() {
                     let ctor_proto_obj = unsafe { &mut *(ctor_proto_ptr as *mut JsObject) };
-                    ctor_proto_obj.prototype = Some(super_proto);
+                    ctor_proto_obj.prototype = None;
                 }
                 if let ObjectKind::Function(ref mut f) = ctor_obj.kind {
                     f.home_object = Some(ctor_proto);
                 }
+            }
+            return Ok(());
+        }
+
+        let is_valid_super = self.is_constructor(super_ctor) || {
+            if let Some(sym_ctor) = self.globals.get("Symbol") {
+                super_ctor == *sym_ctor
+            } else {
+                false
+            }
+        };
+        if !is_valid_super {
+            return Err(VmError::TypeError("Superclass is not a constructor".into()));
+        }
+
+        let super_proto = self.get_property(super_ctor, "prototype");
+        if !super_proto.is_js_object() && !super_proto.is_null() {
+            return Err(VmError::TypeError(
+                "Superclass prototype must be an object or null".into(),
+            ));
+        }
+
+        if let Some(ctor_ptr) = ctor.as_object_ptr() {
+            let ctor_obj = unsafe { &mut *(ctor_ptr as *mut JsObject) };
+            ctor_obj.prototype = Some(super_ctor);
+
+            if let Some(ctor_proto_ptr) = ctor_proto.as_object_ptr() {
+                let ctor_proto_obj = unsafe { &mut *(ctor_proto_ptr as *mut JsObject) };
+                ctor_proto_obj.prototype =
+                    if super_proto.is_null() { None } else { Some(super_proto) };
+            }
+            if let ObjectKind::Function(ref mut f) = ctor_obj.kind {
+                f.home_object = Some(ctor_proto);
             }
         }
         Ok(())

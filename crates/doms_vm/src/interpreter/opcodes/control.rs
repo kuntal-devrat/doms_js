@@ -13,6 +13,23 @@ impl Vm {
                 break;
             }
         }
+        let ret_val = if finished.callee_func.as_ref().map_or(false, |f| f.is_derived_constructor) {
+            if ret_val.is_object() {
+                ret_val
+            } else if !ret_val.is_undefined() {
+                return Err(VmError::TypeError(
+                    "Derived constructor may only return object or undefined".into(),
+                ));
+            } else if finished.this_val == JsValue::uninitialized() {
+                return Err(VmError::ReferenceError(
+                    "Must call super constructor in derived class before returning".into(),
+                ));
+            } else {
+                finished.this_val
+            }
+        } else {
+            ret_val
+        };
         if let Some(g_val) = finished.gen_val {
             if let Some(g_ptr) = g_val.as_object_ptr() {
                 let g_obj = unsafe { &mut *(g_ptr as *mut JsObject) };

@@ -123,6 +123,11 @@ doms_status_t   doms_value_to_number(doms_context_t* ctx,
                                      doms_value_t* val,
                                      double* out);
 
+doms_status_t   doms_value_to_boolean(doms_context_t* ctx,
+                                      doms_value_t* val,
+                                      int* out);
+
+
 int             doms_value_is_null(doms_value_t* val);
 int             doms_value_is_undefined(doms_value_t* val);
 int             doms_value_is_boolean(doms_value_t* val);

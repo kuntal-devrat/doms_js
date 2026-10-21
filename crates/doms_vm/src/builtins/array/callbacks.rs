@@ -15,12 +15,12 @@ fn index_to_js_value(idx: usize) -> JsValue {
 pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     let for_each_fn = vm.alloc_native_function("forEach", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("forEach callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
@@ -50,12 +50,12 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let filter_fn = vm.alloc_native_function("filter", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("filter callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let a = vm.array_species_create(obj, 0)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
@@ -230,11 +230,11 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let reduce_fn = vm.alloc_native_function("reduce", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("reduce callback must be callable".into()));
         }
-        let len = vm.length_of_array_like(obj)?;
 
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
@@ -306,12 +306,12 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let some_fn = vm.alloc_native_function("some", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("some callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
@@ -349,12 +349,12 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let every_fn = vm.alloc_native_function("every", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError("every callback must be callable".into()));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
@@ -392,6 +392,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let find_fn = vm.alloc_native_function("find", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError(
@@ -399,7 +400,6 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             ));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
@@ -438,6 +438,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let find_index_fn = vm.alloc_native_function("findIndex", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError(
@@ -445,7 +446,6 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             ));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
@@ -483,6 +483,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let find_last_fn = vm.alloc_native_function("findLast", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError(
@@ -490,7 +491,6 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             ));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
@@ -529,6 +529,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let find_last_index_fn = vm.alloc_native_function("findLastIndex", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError(
@@ -536,7 +537,6 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             ));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let len = vm.length_of_array_like(obj)?;
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
         vm.temp_roots.push(cb);
@@ -596,6 +596,7 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let flat_map_fn = vm.alloc_native_function("flatMap", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let source_len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError(
@@ -603,7 +604,6 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
             ));
         }
         let this_arg = args.get(1).copied().unwrap_or(JsValue::undefined());
-        let source_len = vm.length_of_array_like(obj)?;
         let target = vm.array_species_create(obj, 0)?;
         flatten_into_array(vm, target, obj, source_len, 0, 1, Some(cb), this_arg)?;
         Ok(target)
@@ -627,44 +627,39 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
         let cur_this = vm.temp_roots[prev_temp];
         let len = vm.length_of_array_like(cur_this)?;
-        let elements_start = vm.temp_roots.len();
-        let cur_this = vm.temp_roots[prev_temp];
-        for i in 0..len {
-            let el = vm.get_element_result(cur_this, i)?;
-            vm.temp_roots.push(el);
+        let items_start = vm.temp_roots.len();
+        for k in 0..len {
+            let pk = k.to_string();
+            let cur_this = vm.temp_roots[prev_temp];
+            if vm.has_property(cur_this, &pk)? {
+                let cur_this = vm.temp_roots[prev_temp];
+                let k_val = vm.get_element_result(cur_this, k)?;
+                vm.temp_roots.push(k_val);
+            }
         }
+        let item_count = vm.temp_roots.len() - items_start;
 
-        let res = sort_rooted_elements(vm, elements_start, len, prev_temp + 1);
-        if let Err(e) = res {
+        let mut items = vm.temp_roots[items_start..].to_vec();
+        let cur_cb = vm.temp_roots[prev_temp + 1];
+        let sort_res = sort_slice(&mut items, vm, cur_cb);
+        if let Err(e) = sort_res {
             vm.temp_roots.truncate(prev_temp);
             return Err(e);
         }
+        vm.temp_roots[items_start..].copy_from_slice(&items);
 
-        let cur_this = vm.temp_roots[prev_temp];
-        if let Some(ptr) = cur_this.as_object_ptr() {
-            let obj = unsafe { &mut *(ptr as *mut JsObject) };
-            if obj.accessors.is_none() && !matches!(obj.kind, ObjectKind::Proxy { .. }) {
-                if let ObjectKind::Array(elements) = &mut obj.kind {
-                    elements.clear();
-                    for i in 0..len {
-                        elements.push(vm.temp_roots[elements_start + i]);
-                    }
-                    vm.temp_roots.truncate(prev_temp);
-                    return Ok(cur_this);
-                }
-            }
-        }
-
-        for i in 0..len {
-            let el = vm.temp_roots[elements_start + i];
-            let key = i.to_string();
+        for j in 0..item_count {
+            let pk = j.to_string();
+            let val = vm.temp_roots[items_start + j];
             let cur_this = vm.temp_roots[prev_temp];
-            if el.is_hole() {
-                vm.delete_property_or_throw(cur_this, &key)?;
-            } else {
-                vm.set_property_throw(cur_this, &key, el)?;
-            }
+            vm.set_property_throw(cur_this, &pk, val)?;
         }
+        for j in item_count..len {
+            let pk = j.to_string();
+            let cur_this = vm.temp_roots[prev_temp];
+            vm.delete_property_or_throw(cur_this, &pk)?;
+        }
+
         let cur_this = vm.temp_roots[prev_temp];
         vm.temp_roots.truncate(prev_temp);
         Ok(cur_this)
@@ -686,41 +681,27 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
         let compare_fn_rooted = compare_fn.unwrap_or(JsValue::undefined());
         vm.temp_roots.push(compare_fn_rooted);
 
-        let len_val = vm.get_property(obj, "length");
-        let len_num = vm.to_number_value(len_val)?;
-        if len_num > 4294967295.0 {
-            vm.temp_roots.truncate(prev_temp);
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let len = if len_num.is_nan() || len_num <= 0.0 {
-            0usize
-        } else {
-            (len_num.trunc() as i64).min(4294967295) as usize
-        };
-        if len > 50_000_000 {
-            vm.temp_roots.truncate(prev_temp);
-            return Err(VmError::RangeError("Invalid array length".into()));
-        }
-        let elements_start = vm.temp_roots.len();
-        let cur_obj = vm.temp_roots[prev_temp];
+        let cur_this = vm.temp_roots[prev_temp];
+        let len = vm.length_of_array_like(cur_this)?;
+        let items_start = vm.temp_roots.len();
         for i in 0..len {
-            let mut val = vm.get_element_result(cur_obj, i)?;
+            let cur_this = vm.temp_roots[prev_temp];
+            let mut val = vm.get_element_result(cur_this, i)?;
             if val.is_hole() {
                 val = JsValue::undefined();
             }
             vm.temp_roots.push(val);
         }
-        let res = sort_rooted_elements(vm, elements_start, len, prev_temp + 1);
-        if let Err(e) = res {
+
+        let mut items = vm.temp_roots[items_start..].to_vec();
+        let cur_cb = vm.temp_roots[prev_temp + 1];
+        let sort_res = sort_slice(&mut items, vm, cur_cb);
+        if let Err(e) = sort_res {
             vm.temp_roots.truncate(prev_temp);
             return Err(e);
         }
-        let mut sorted_elements = Vec::with_capacity(len);
-        for i in 0..len {
-            sorted_elements.push(vm.temp_roots[elements_start + i]);
-        }
         vm.temp_roots.truncate(prev_temp);
-        Ok(vm.alloc_array(sorted_elements))
+        Ok(vm.alloc_array(items))
     });
     vm.set_property(array_proto, "toSorted", to_sorted_fn);
 
@@ -754,13 +735,13 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
 
     let reduce_right_fn = vm.alloc_native_function("reduceRight", 1, |vm, this, args| {
         let obj = vm.to_object_value(this)?;
+        let len = vm.length_of_array_like(obj)?;
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
         if !vm.is_callable(cb) {
             return Err(VmError::TypeError(
                 "Array.prototype.reduceRight callback must be a function".into(),
             ));
         }
-        let len = vm.length_of_array_like(obj)?;
 
         let prev_temp = vm.temp_roots.len();
         vm.temp_roots.push(obj);
@@ -830,89 +811,98 @@ pub(super) fn register_callback_methods(vm: &mut Vm, array_proto: JsValue) {
     vm.set_property(array_proto, "reduceRight", reduce_right_fn);
 }
 
-fn sort_rooted_elements(
+fn sort_slice(items: &mut [JsValue], vm: &mut Vm, cb: JsValue) -> Result<(), VmError> {
+    if items.len() <= 1 {
+        return Ok(());
+    }
+    let mut temp = items.to_vec();
+    merge_sort_rec(items, &mut temp, 0, items.len(), vm, cb)
+}
+
+fn merge_sort_rec(
+    src: &mut [JsValue],
+    dest: &mut [JsValue],
+    start: usize,
+    end: usize,
     vm: &mut Vm,
-    elements_start: usize,
-    len: usize,
-    cb_idx: usize,
+    cb: JsValue,
 ) -> Result<(), VmError> {
-    let cb = vm.temp_roots[cb_idx];
-    let has_cb = !cb.is_undefined() && vm.is_callable(cb);
-    let mut err = None;
-
-    let mut indices: Vec<usize> = (0..len).collect();
-    indices.sort_by(|&i, &j| {
-        if err.is_some() {
-            return std::cmp::Ordering::Equal;
-        }
-        let a = vm.temp_roots[elements_start + i];
-        let b = vm.temp_roots[elements_start + j];
-
-        if a.is_hole() && b.is_hole() {
-            return std::cmp::Ordering::Equal;
-        }
-        if a.is_hole() {
-            return std::cmp::Ordering::Greater;
-        }
-        if b.is_hole() {
-            return std::cmp::Ordering::Less;
-        }
-        if a.is_undefined() && b.is_undefined() {
-            return std::cmp::Ordering::Equal;
-        }
-        if a.is_undefined() {
-            return std::cmp::Ordering::Greater;
-        }
-        if b.is_undefined() {
-            return std::cmp::Ordering::Less;
-        }
-
-        if has_cb {
-            let cur_cb = vm.temp_roots[cb_idx];
-            match vm.call(cur_cb, JsValue::undefined(), &[a, b]) {
-                Ok(res) => {
-                    let n = match vm.to_number_value(res) {
-                        Ok(num) => num,
-                        Err(e) => {
-                            err = Some(e);
-                            return std::cmp::Ordering::Equal;
-                        }
-                    };
-                    if n.is_nan() || n == 0.0 {
-                        std::cmp::Ordering::Equal
-                    } else if n < 0.0 {
-                        std::cmp::Ordering::Less
-                    } else {
-                        std::cmp::Ordering::Greater
-                    }
-                }
-                Err(e) => {
-                    err = Some(e);
-                    std::cmp::Ordering::Equal
+    if end - start <= 16 {
+        for i in (start + 1)..end {
+            let mut j = i;
+            while j > start {
+                let ord = sort_compare(vm, src[j - 1], src[j], cb)?;
+                if ord == std::cmp::Ordering::Greater {
+                    src.swap(j - 1, j);
+                    j -= 1;
+                } else {
+                    break;
                 }
             }
+        }
+        return Ok(());
+    }
+    let mid = start + (end - start) / 2;
+    merge_sort_rec(src, dest, start, mid, vm, cb)?;
+    merge_sort_rec(src, dest, mid, end, vm, cb)?;
+
+    let mut i = start;
+    let mut j = mid;
+    let mut k = start;
+    while i < mid && j < end {
+        let ord = sort_compare(vm, src[i], src[j], cb)?;
+        if ord == std::cmp::Ordering::Greater {
+            dest[k] = src[j];
+            j += 1;
         } else {
-            if a.is_symbol() || b.is_symbol() {
-                err = Some(VmError::TypeError("Cannot convert a Symbol value to a string".into()));
-                return std::cmp::Ordering::Equal;
-            }
-            let sa = vm.to_string_value(a);
-            let sb = vm.to_string_value(b);
-            sa.cmp(&sb)
+            dest[k] = src[i];
+            i += 1;
         }
-    });
-
-    if let Some(e) = err {
-        return Err(e);
+        k += 1;
     }
-
-    let sorted: Vec<JsValue> =
-        indices.iter().map(|&idx| vm.temp_roots[elements_start + idx]).collect();
-    for (i, el) in sorted.into_iter().enumerate() {
-        vm.temp_roots[elements_start + i] = el;
+    while i < mid {
+        dest[k] = src[i];
+        i += 1;
+        k += 1;
     }
-
+    while j < end {
+        dest[k] = src[j];
+        j += 1;
+        k += 1;
+    }
+    src[start..end].copy_from_slice(&dest[start..end]);
     Ok(())
+}
+
+fn sort_compare(
+    vm: &mut Vm,
+    x: JsValue,
+    y: JsValue,
+    cb: JsValue,
+) -> Result<std::cmp::Ordering, VmError> {
+    if x.is_undefined() && y.is_undefined() {
+        return Ok(std::cmp::Ordering::Equal);
+    }
+    if x.is_undefined() {
+        return Ok(std::cmp::Ordering::Greater);
+    }
+    if y.is_undefined() {
+        return Ok(std::cmp::Ordering::Less);
+    }
+    if !cb.is_undefined() {
+        let res = vm.call(cb, JsValue::undefined(), &[x, y])?;
+        let v = vm.to_number_value(res)?;
+        if v.is_nan() || v == 0.0 {
+            return Ok(std::cmp::Ordering::Equal);
+        } else if v < 0.0 {
+            return Ok(std::cmp::Ordering::Less);
+        } else {
+            return Ok(std::cmp::Ordering::Greater);
+        }
+    }
+    let x_str = vm.to_string_spec(x)?;
+    let y_str = vm.to_string_spec(y)?;
+    Ok(x_str.cmp(&y_str))
 }
 
 fn flatten_into_array(

@@ -242,6 +242,11 @@ pub enum Expression {
         is_getter: bool,
         accessor: Box<Expression>,
     },
+    DefinePrivateMethod {
+        target: Box<Expression>,
+        property: String,
+        value: Box<Expression>,
+    },
     OptionalChain(OptionalChain),
     TaggedTemplate {
         tag: Box<Expression>,
@@ -334,6 +339,7 @@ pub enum ObjectProperty {
     Getter(PropertyKey, Expression),
     Setter(PropertyKey, Expression),
     Spread(Expression),
+    CoverInitializedName(String, Expression),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -358,5 +364,6 @@ pub struct ClassDefinition {
     pub super_class: Option<Box<Expression>>,
     pub ctor_params: Vec<String>,
     pub ctor_body: Vec<Statement>,
+    pub has_constructor: bool,
     pub elements: Vec<ClassElement>,
 }

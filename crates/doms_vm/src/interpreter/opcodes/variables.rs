@@ -56,6 +56,8 @@ impl Vm {
                     lexical_new_target,
                     prototype: None,
                     initial_shape: None,
+                    is_class_constructor: f.is_class_constructor,
+                    is_derived_constructor: f.is_derived_constructor,
                 };
                 self.alloc_function(js_fn)
             }

@@ -2,7 +2,10 @@
 
 use super::types::*;
 use crate::interpreter::{Vm, VmError};
-use crate::value::{JsValue, TAG_BOOLEAN, TAG_INT32, TAG_MASK, TAG_NULL, TAG_UNDEFINED};
+use crate::value::{
+    JsValue, PAYLOAD_MASK, TAG_BOOLEAN, TAG_HOLE, TAG_INT32, TAG_MASK, TAG_NULL, TAG_OBJECT,
+    TAG_UNDEFINED,
+};
 use doms_compiler::bytecode::{BytecodeChunk, Constant, FeedbackSlot, OpCode};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -717,6 +720,30 @@ fn compile_native_internal(
                     let r_is_int = builder.ins().icmp(IntCC::Equal, r_tag, tag_int);
                     let is_both_int = builder.ins().band(l_is_int, r_is_int);
 
+                    let dbl_limit =
+                        builder.ins().iconst(types::I64, crate::value::DOUBLE_LIMIT as i64);
+                    let l_is_dbl = builder.ins().icmp(IntCC::UnsignedLessThan, lhs, dbl_limit);
+                    let r_is_dbl = builder.ins().icmp(IntCC::UnsignedLessThan, rhs, dbl_limit);
+                    let l_is_num = builder.ins().bor(l_is_int, l_is_dbl);
+                    let r_is_num = builder.ins().bor(r_is_int, r_is_dbl);
+                    let is_both_num = builder.ins().band(l_is_num, r_is_num);
+
+                    let num_ok_block = builder.create_block();
+                    let deopt_block = builder.create_block();
+                    builder.ins().brif(is_both_num, num_ok_block, &[], deopt_block, &[]);
+
+                    builder.switch_to_block(deopt_block);
+                    let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                    for i in 0..num_locals {
+                        let v = builder.use_var(local_vars[i]);
+                        builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                    }
+                    builder.ins().return_(&[deopt_val]);
+                    builder.seal_block(deopt_block);
+
+                    builder.switch_to_block(num_ok_block);
+                    builder.seal_block(num_ok_block);
+
                     let l32 = builder.ins().ireduce(types::I32, lhs);
                     let r32 = builder.ins().ireduce(types::I32, rhs);
 
@@ -1020,6 +1047,30 @@ fn compile_native_internal(
                     let l_is_int = builder.ins().icmp(IntCC::Equal, l_tag, tag_int);
                     let r_is_int = builder.ins().icmp(IntCC::Equal, r_tag, tag_int);
                     let is_both_int = builder.ins().band(l_is_int, r_is_int);
+
+                    let dbl_limit =
+                        builder.ins().iconst(types::I64, crate::value::DOUBLE_LIMIT as i64);
+                    let l_is_dbl = builder.ins().icmp(IntCC::UnsignedLessThan, lhs, dbl_limit);
+                    let r_is_dbl = builder.ins().icmp(IntCC::UnsignedLessThan, rhs, dbl_limit);
+                    let l_is_num = builder.ins().bor(l_is_int, l_is_dbl);
+                    let r_is_num = builder.ins().bor(r_is_int, r_is_dbl);
+                    let is_both_num = builder.ins().band(l_is_num, r_is_num);
+
+                    let num_ok_block = builder.create_block();
+                    let deopt_block = builder.create_block();
+                    builder.ins().brif(is_both_num, num_ok_block, &[], deopt_block, &[]);
+
+                    builder.switch_to_block(deopt_block);
+                    let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                    for i in 0..num_locals {
+                        let v = builder.use_var(local_vars[i]);
+                        builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                    }
+                    builder.ins().return_(&[deopt_val]);
+                    builder.seal_block(deopt_block);
+
+                    builder.switch_to_block(num_ok_block);
+                    builder.seal_block(num_ok_block);
 
                     let l32 = builder.ins().ireduce(types::I32, lhs);
                     let r32 = builder.ins().ireduce(types::I32, rhs);
@@ -1404,6 +1455,271 @@ fn compile_native_internal(
                         builder.def_var(stack_vars[stack_depth], push_fn);
                         stack_depth += 1;
                     } else {
+                        let mono_buf;
+                        let ic_entries: Option<&[(u32, u32)]> = match slot.as_ref() {
+                            Some(&FeedbackSlot::Monomorphic { shape_id, offset }) if offset < 4 => {
+                                mono_buf = [(shape_id, offset)];
+                                Some(&mono_buf[..])
+                            }
+                            Some(FeedbackSlot::Polymorphic { entries })
+                                if !entries.is_empty()
+                                    && entries.len() <= 4
+                                    && entries.iter().all(|(_, off)| *off < 4) =>
+                            {
+                                Some(entries.as_slice())
+                            }
+                            _ => None,
+                        };
+                        if let Some(entries) = ic_entries {
+                            let deopt_block = builder.create_block();
+                            let tag_check_ok = builder.create_block();
+                            let ok_block = builder.create_block();
+
+                            // 1. Tag check: is `obj` an object pointer?
+                            let tag_mask = builder.ins().iconst(types::I64, TAG_MASK as i64);
+                            let obj_tag = builder.ins().band(obj, tag_mask);
+                            let tag_expected = builder.ins().iconst(types::I64, TAG_OBJECT as i64);
+                            let is_obj = builder.ins().icmp(IntCC::Equal, obj_tag, tag_expected);
+                            builder.ins().brif(is_obj, tag_check_ok, &[], deopt_block, &[]);
+
+                            // 2. Shape check: load shape_id at offset 0 (4 bytes, types::I32)
+                            builder.switch_to_block(tag_check_ok);
+                            builder.seal_block(tag_check_ok);
+                            let payload_mask =
+                                builder.ins().iconst(types::I64, PAYLOAD_MASK as i64);
+                            let ptr = builder.ins().band(obj, payload_mask);
+                            let actual_shape =
+                                builder.ins().load(types::I32, MemFlagsData::trusted(), ptr, 0);
+
+                            let mut current_block = tag_check_ok;
+                            for (i, &(shape_id, offset)) in entries.iter().enumerate() {
+                                if i > 0 {
+                                    builder.switch_to_block(current_block);
+                                    builder.seal_block(current_block);
+                                }
+                                let hit_block = builder.create_block();
+                                let next_block = if i + 1 < entries.len() {
+                                    builder.create_block()
+                                } else {
+                                    deopt_block
+                                };
+
+                                let exp_shape = builder.ins().iconst(types::I32, shape_id as i64);
+                                let is_match =
+                                    builder.ins().icmp(IntCC::Equal, actual_shape, exp_shape);
+                                builder.ins().brif(is_match, hit_block, &[], next_block, &[]);
+
+                                // In hit_block: load slot and check for hole
+                                builder.switch_to_block(hit_block);
+                                builder.seal_block(hit_block);
+                                let slot_offset = (8 + (offset * 8)) as i32;
+                                let loaded_val = builder.ins().load(
+                                    types::I64,
+                                    MemFlagsData::trusted(),
+                                    ptr,
+                                    slot_offset,
+                                );
+                                let hole_val = builder.ins().iconst(types::I64, TAG_HOLE as i64);
+                                let is_hole =
+                                    builder.ins().icmp(IntCC::Equal, loaded_val, hole_val);
+                                let not_hole = builder.create_block();
+                                builder.ins().brif(is_hole, deopt_block, &[], not_hole, &[]);
+
+                                builder.switch_to_block(not_hole);
+                                builder.seal_block(not_hole);
+                                builder.def_var(stack_vars[stack_depth], loaded_val);
+                                builder.ins().jump(ok_block, &[]);
+
+                                current_block = next_block;
+                            }
+
+                            // 3. Deopt block:
+                            builder.switch_to_block(deopt_block);
+                            for i in 0..num_locals {
+                                let v = builder.use_var(local_vars[i]);
+                                builder.ins().store(
+                                    MemFlagsData::trusted(),
+                                    v,
+                                    args_ptr,
+                                    (i * 8) as i32,
+                                );
+                            }
+                            let deopt_val =
+                                builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                            builder.ins().return_(&[deopt_val]);
+                            builder.seal_block(deopt_block);
+
+                            // 4. Success block:
+                            builder.switch_to_block(ok_block);
+                            builder.seal_block(ok_block);
+                            stack_depth += 1;
+                        } else {
+                            let slot_info = match slot {
+                                Some(FeedbackSlot::Monomorphic { shape_id, offset }) => {
+                                    Some((shape_id, offset))
+                                }
+                                Some(FeedbackSlot::Polymorphic { entries })
+                                    if !entries.is_empty() =>
+                                {
+                                    Some(entries.last().copied().unwrap())
+                                }
+                                _ => None,
+                            };
+                            if let Some((shape_id, offset)) = slot_info {
+                                let s_val = builder.ins().iconst(types::I32, shape_id as i64);
+                                let o_val = builder.ins().iconst(types::I32, offset as i64);
+                                let call =
+                                    builder.ins().call(get_prop_func_ref, &[obj, s_val, o_val]);
+                                let res = builder.inst_results(call)[0];
+
+                                let deopt_val =
+                                    builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                                let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
+
+                                let ok_block = builder.create_block();
+                                let deopt_block = builder.create_block();
+
+                                builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
+
+                                builder.switch_to_block(deopt_block);
+                                for i in 0..num_locals {
+                                    let v = builder.use_var(local_vars[i]);
+                                    builder.ins().store(
+                                        MemFlagsData::trusted(),
+                                        v,
+                                        args_ptr,
+                                        (i * 8) as i32,
+                                    );
+                                }
+                                builder.ins().return_(&[deopt_val]);
+                                builder.seal_block(deopt_block);
+
+                                builder.switch_to_block(ok_block);
+                                builder.seal_block(ok_block);
+
+                                builder.def_var(stack_vars[stack_depth], res);
+                                stack_depth += 1;
+                            } else {
+                                let ok_block = builder.create_block();
+                                let deopt_block = builder.create_block();
+                                let deopt_val =
+                                    builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                                let one = builder.ins().iconst(types::I32, 1);
+                                builder.ins().brif(one, deopt_block, &[], ok_block, &[]);
+
+                                builder.switch_to_block(deopt_block);
+                                for i in 0..num_locals {
+                                    let v = builder.use_var(local_vars[i]);
+                                    builder.ins().store(
+                                        MemFlagsData::trusted(),
+                                        v,
+                                        args_ptr,
+                                        (i * 8) as i32,
+                                    );
+                                }
+                                builder.ins().return_(&[deopt_val]);
+                                builder.seal_block(deopt_block);
+
+                                builder.switch_to_block(ok_block);
+                                builder.seal_block(ok_block);
+
+                                builder.def_var(stack_vars[stack_depth], deopt_val);
+                                stack_depth += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            OpCode::SetProp(_name_idx) => {
+                if stack_depth >= 2 {
+                    stack_depth -= 2;
+                    let obj = builder.use_var(stack_vars[stack_depth]);
+                    let val = builder.use_var(stack_vars[stack_depth + 1]);
+                    let slot = chunk.get_feedback_slot(ip);
+                    let mono_buf;
+                    let ic_entries: Option<&[(u32, u32)]> = match slot.as_ref() {
+                        Some(&FeedbackSlot::Monomorphic { shape_id, offset }) if offset < 4 => {
+                            mono_buf = [(shape_id, offset)];
+                            Some(&mono_buf[..])
+                        }
+                        Some(FeedbackSlot::Polymorphic { entries })
+                            if !entries.is_empty()
+                                && entries.len() <= 4
+                                && entries.iter().all(|(_, off)| *off < 4) =>
+                        {
+                            Some(entries.as_slice())
+                        }
+                        _ => None,
+                    };
+                    if let Some(entries) = ic_entries {
+                        let deopt_block = builder.create_block();
+                        let tag_check_ok = builder.create_block();
+                        let ok_block = builder.create_block();
+
+                        // 1. Tag check: is `obj` an object pointer?
+                        let tag_mask = builder.ins().iconst(types::I64, TAG_MASK as i64);
+                        let obj_tag = builder.ins().band(obj, tag_mask);
+                        let tag_expected = builder.ins().iconst(types::I64, TAG_OBJECT as i64);
+                        let is_obj = builder.ins().icmp(IntCC::Equal, obj_tag, tag_expected);
+                        builder.ins().brif(is_obj, tag_check_ok, &[], deopt_block, &[]);
+
+                        // 2. Shape check: load shape_id at offset 0 (4 bytes, types::I32)
+                        builder.switch_to_block(tag_check_ok);
+                        builder.seal_block(tag_check_ok);
+                        let payload_mask = builder.ins().iconst(types::I64, PAYLOAD_MASK as i64);
+                        let ptr = builder.ins().band(obj, payload_mask);
+                        let actual_shape =
+                            builder.ins().load(types::I32, MemFlagsData::trusted(), ptr, 0);
+
+                        let mut current_block = tag_check_ok;
+                        for (i, &(shape_id, offset)) in entries.iter().enumerate() {
+                            if i > 0 {
+                                builder.switch_to_block(current_block);
+                                builder.seal_block(current_block);
+                            }
+                            let hit_block = builder.create_block();
+                            let next_block = if i + 1 < entries.len() {
+                                builder.create_block()
+                            } else {
+                                deopt_block
+                            };
+
+                            let exp_shape = builder.ins().iconst(types::I32, shape_id as i64);
+                            let is_match =
+                                builder.ins().icmp(IntCC::Equal, actual_shape, exp_shape);
+                            builder.ins().brif(is_match, hit_block, &[], next_block, &[]);
+
+                            // In hit_block: store slot
+                            builder.switch_to_block(hit_block);
+                            builder.seal_block(hit_block);
+                            let slot_offset = (8 + (offset * 8)) as i32;
+                            builder.ins().store(MemFlagsData::trusted(), val, ptr, slot_offset);
+                            builder.ins().jump(ok_block, &[]);
+
+                            current_block = next_block;
+                        }
+
+                        // 3. Deopt block:
+                        builder.switch_to_block(deopt_block);
+                        for i in 0..num_locals {
+                            let v = builder.use_var(local_vars[i]);
+                            builder.ins().store(
+                                MemFlagsData::trusted(),
+                                v,
+                                args_ptr,
+                                (i * 8) as i32,
+                            );
+                        }
+                        let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                        builder.ins().return_(&[deopt_val]);
+                        builder.seal_block(deopt_block);
+
+                        // 4. Success block:
+                        builder.switch_to_block(ok_block);
+                        builder.seal_block(ok_block);
+                        builder.def_var(stack_vars[stack_depth], val);
+                        stack_depth += 1;
+                    } else {
                         let slot_info = match slot {
                             Some(FeedbackSlot::Monomorphic { shape_id, offset }) => {
                                 Some((shape_id, offset))
@@ -1416,7 +1732,8 @@ fn compile_native_internal(
                         if let Some((shape_id, offset)) = slot_info {
                             let s_val = builder.ins().iconst(types::I32, shape_id as i64);
                             let o_val = builder.ins().iconst(types::I32, offset as i64);
-                            let call = builder.ins().call(get_prop_func_ref, &[obj, s_val, o_val]);
+                            let call =
+                                builder.ins().call(set_prop_func_ref, &[obj, val, s_val, o_val]);
                             let res = builder.inst_results(call)[0];
 
                             let deopt_val =
@@ -1473,80 +1790,6 @@ fn compile_native_internal(
                             builder.def_var(stack_vars[stack_depth], deopt_val);
                             stack_depth += 1;
                         }
-                    }
-                }
-            }
-            OpCode::SetProp(_name_idx) => {
-                if stack_depth >= 2 {
-                    stack_depth -= 2;
-                    let obj = builder.use_var(stack_vars[stack_depth]);
-                    let val = builder.use_var(stack_vars[stack_depth + 1]);
-                    let slot_info = match chunk.get_feedback_slot(ip) {
-                        Some(FeedbackSlot::Monomorphic { shape_id, offset }) => {
-                            Some((shape_id, offset))
-                        }
-                        Some(FeedbackSlot::Polymorphic { entries }) if !entries.is_empty() => {
-                            Some(entries.last().copied().unwrap())
-                        }
-                        _ => None,
-                    };
-                    if let Some((shape_id, offset)) = slot_info {
-                        let s_val = builder.ins().iconst(types::I32, shape_id as i64);
-                        let o_val = builder.ins().iconst(types::I32, offset as i64);
-                        let call = builder.ins().call(set_prop_func_ref, &[obj, val, s_val, o_val]);
-                        let res = builder.inst_results(call)[0];
-
-                        let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
-                        let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
-
-                        let ok_block = builder.create_block();
-                        let deopt_block = builder.create_block();
-
-                        builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
-
-                        builder.switch_to_block(deopt_block);
-                        for i in 0..num_locals {
-                            let v = builder.use_var(local_vars[i]);
-                            builder.ins().store(
-                                MemFlagsData::trusted(),
-                                v,
-                                args_ptr,
-                                (i * 8) as i32,
-                            );
-                        }
-                        builder.ins().return_(&[deopt_val]);
-                        builder.seal_block(deopt_block);
-
-                        builder.switch_to_block(ok_block);
-                        builder.seal_block(ok_block);
-
-                        builder.def_var(stack_vars[stack_depth], res);
-                        stack_depth += 1;
-                    } else {
-                        let ok_block = builder.create_block();
-                        let deopt_block = builder.create_block();
-                        let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
-                        let one = builder.ins().iconst(types::I32, 1);
-                        builder.ins().brif(one, deopt_block, &[], ok_block, &[]);
-
-                        builder.switch_to_block(deopt_block);
-                        for i in 0..num_locals {
-                            let v = builder.use_var(local_vars[i]);
-                            builder.ins().store(
-                                MemFlagsData::trusted(),
-                                v,
-                                args_ptr,
-                                (i * 8) as i32,
-                            );
-                        }
-                        builder.ins().return_(&[deopt_val]);
-                        builder.seal_block(deopt_block);
-
-                        builder.switch_to_block(ok_block);
-                        builder.seal_block(ok_block);
-
-                        builder.def_var(stack_vars[stack_depth], deopt_val);
-                        stack_depth += 1;
                     }
                 }
             }

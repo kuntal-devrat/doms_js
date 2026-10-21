@@ -79,7 +79,7 @@ impl Trace for JsObject {
         if let Some(privs) = &self.private_elements {
             for v in privs.values() {
                 match v {
-                    PrivateElement::Value(val) => {
+                    PrivateElement::Field(val) | PrivateElement::Method(val) => {
                         if let Some(p) = val.as_heap_ptr() {
                             tracer.trace_ref(p);
                         }
@@ -440,7 +440,7 @@ impl JsObject {
         if let Some(privs) = &mut self.private_elements {
             for element in privs.values_mut() {
                 match element {
-                    PrivateElement::Value(v) => visitor(v),
+                    PrivateElement::Field(v) | PrivateElement::Method(v) => visitor(v),
                     PrivateElement::Accessor(acc) => {
                         if let Some(g) = &mut acc.getter {
                             visitor(g);

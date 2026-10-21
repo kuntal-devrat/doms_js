@@ -17,6 +17,8 @@ pub struct FunctionDef {
     pub is_generator: bool,
     pub is_arrow: bool,
     pub is_method: bool,
+    pub is_class_constructor: bool,
+    pub is_derived_constructor: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,11 +28,7 @@ pub enum Constant {
     Boolean(bool),
     Function(Arc<FunctionDef>),
     BigInt(BigInt),
-    TemplateObject {
-        site: u64,
-        quasis: Vec<Option<String>>,
-        raw: Vec<String>,
-    },
+    TemplateObject { site: u64, quasis: Vec<Option<String>>, raw: Vec<String> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,8 +75,14 @@ pub enum OpCode {
     ObjectSpread,
     ObjectRest(u16),
     DefinePrivateField(u16),
+    DefinePrivateMethod(u16),
     DefinePrivateGetter(u16),
     DefinePrivateSetter(u16),
+    DefineDataProp(u16),
+    DefineDataPropComputed,
+    SetProtoOrNoop,
+    ToPropertyKey,
+    SetFunctionNameFromKey(u8),
 
     // Functions, Calls & Construction
     CreateFunction(u16),
@@ -93,6 +97,9 @@ pub enum OpCode {
     CallSpread,
     CallWithThisSpread,
     ConstructSpread,
+    SuperCall(u8),
+    SuperCallSpread,
+    SuperCallForward,
     GetNewTarget,
     Return,
     Await,
@@ -123,6 +130,9 @@ pub enum OpCode {
     Typeof,
     Void,
     Delete,
+    Inc,
+    Dec,
+    ToNumeric,
 
     // Comparison & Equality
     Eq,
@@ -149,6 +159,7 @@ pub enum OpCode {
     Jump(i32),
     JumpIfFalse(i32),
     JumpIfTrue(i32),
+    JumpIfLocalDefined(u16, i32),
 
     // Exceptions
     Throw,
@@ -171,11 +182,14 @@ pub enum OpCode {
     DeleteProp(u16),
     DeleteElem,
     DeleteIdent(u16),
+    DeleteSuper,
 
     // Scopes
     PushScope,
     PopScope,
     PushCatchScope(u16),
+    PushClassScope(u16),
+    InitClassBinding(u16),
     EnterFunctionBody,
 
     // Stack Management
@@ -434,9 +448,7 @@ impl BytecodeChunk {
             Constant::Boolean(b) => ConstantKey::Boolean(*b),
             Constant::Function(f) => ConstantKey::Function(Arc::as_ptr(f) as usize),
             Constant::BigInt(bi) => ConstantKey::BigInt(bi.clone()),
-            Constant::TemplateObject { site, .. } => {
-                ConstantKey::TemplateObject(*site)
-            }
+            Constant::TemplateObject { site, .. } => ConstantKey::TemplateObject(*site),
         };
 
         if let Some(&idx) = self.constant_indices.get(&key) {
@@ -454,6 +466,7 @@ impl BytecodeChunk {
             OpCode::Jump(offset) => *offset = target,
             OpCode::JumpIfFalse(offset) => *offset = target,
             OpCode::JumpIfTrue(offset) => *offset = target,
+            OpCode::JumpIfLocalDefined(_, offset) => *offset = target,
             OpCode::PushCatch(offset) => *offset = target,
             OpCode::PushFinally(offset, _, _) => *offset = target,
             OpCode::IteratorNext(offset) => *offset = target,

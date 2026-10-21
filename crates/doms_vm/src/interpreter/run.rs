@@ -174,6 +174,16 @@ impl Vm {
                 OpCode::LoadFalse => self.push(JsValue::from_boolean(false)),
                 OpCode::This => {
                     let this_val = self.frames.last().unwrap().this_val;
+                    if this_val == JsValue::uninitialized() {
+                        self.handle_exception_at_depth(
+                            VmError::ReferenceError(
+                                "Must call super constructor in derived class before accessing 'this'"
+                                    .into(),
+                            ),
+                            target_depth,
+                        )?;
+                        continue;
+                    }
                     self.push(this_val);
                 }
                 OpCode::SetThis => {
@@ -184,6 +194,16 @@ impl Vm {
                 }
                 OpCode::LoadSuper => {
                     let frame = self.frames.last().unwrap();
+                    if frame.this_val == JsValue::uninitialized() {
+                        self.handle_exception_at_depth(
+                            VmError::ReferenceError(
+                                "Must call super constructor in derived class before accessing 'this'"
+                                    .into(),
+                            ),
+                            target_depth,
+                        )?;
+                        continue;
+                    }
                     let base = if let Some(home_obj) = frame.home_object {
                         if let Some(ptr) = home_obj.as_object_ptr() {
                             let obj = unsafe { &*(ptr as *mut JsObject) };
@@ -268,6 +288,66 @@ impl Vm {
                 }
                 OpCode::DefineSetter(prop_idx) => {
                     self.op_define_setter(prop_idx, &chunk)?;
+                }
+                OpCode::DefineDataProp(prop_idx) => {
+                    let name = match &chunk.constants[prop_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Property name must be string".into())),
+                    };
+                    let val = self.pop()?;
+                    let obj = *self.stack.last().ok_or(VmError::StackUnderflow)?;
+                    self.create_data_property_or_throw(obj, &name, val)?;
+                }
+                OpCode::DefineDataPropComputed => {
+                    let val = self.pop()?;
+                    let key_val = self.pop()?;
+                    let obj = *self.stack.last().ok_or(VmError::StackUnderflow)?;
+                    let prop_key = self.to_property_key(key_val)?;
+                    match prop_key {
+                        PropertyKeyVal::String(s) => {
+                            self.create_data_property_or_throw(obj, &s, val)?;
+                        }
+                        PropertyKeyVal::Symbol(sym) => {
+                            if let Some(ptr) = obj.as_object_ptr() {
+                                let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                                jsobj.insert_symbol_property(sym, val);
+                            }
+                            if let Some(val_ptr) = val.as_object_ptr() {
+                                let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+                                if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                                    if f.is_method && f.home_object.is_none() {
+                                        f.home_object = Some(obj);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                OpCode::SetProtoOrNoop => {
+                    let val = self.pop()?;
+                    let obj = *self.stack.last().ok_or(VmError::StackUnderflow)?;
+                    if val.is_object() || val.is_null() {
+                        if let Some(ptr) = obj.as_object_ptr() {
+                            let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                            jsobj.prototype = if val.is_null() { None } else { Some(val) };
+                        }
+                    }
+                }
+                OpCode::ToPropertyKey => {
+                    let key = self.pop()?;
+                    let prop_key = self.to_property_key(key)?;
+                    match prop_key {
+                        PropertyKeyVal::String(s) => {
+                            let s_val = self.alloc_string(s);
+                            self.push(s_val);
+                        }
+                        PropertyKeyVal::Symbol(sym) => {
+                            self.push(sym);
+                        }
+                    }
+                }
+                OpCode::SetFunctionNameFromKey(prefix_kind) => {
+                    self.op_set_function_name_from_key(prefix_kind, target_depth)?;
                 }
                 OpCode::DefineComputedGetter => {
                     self.op_define_computed_getter(target_depth)?;
@@ -392,6 +472,28 @@ impl Vm {
                         )));
                     }
                 }
+                OpCode::DefinePrivateMethod(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => {
+                            return Err(VmError::TypeError(
+                                "Private method name must be string".into(),
+                            ));
+                        }
+                    };
+                    let val = self.pop()?;
+                    let obj = self.pop()?;
+                    if let Some(ptr) = obj.as_object_ptr() {
+                        let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                        jsobj.insert_private_method(name, val);
+                        self.push(val);
+                    } else {
+                        return Err(VmError::TypeError(format!(
+                            "Cannot install private method {} on non-object",
+                            name
+                        )));
+                    }
+                }
                 OpCode::DefinePrivateGetter(name_idx) => {
                     let name = match &chunk.constants[name_idx as usize] {
                         Constant::String(s) => s.clone(),
@@ -485,6 +587,28 @@ impl Vm {
                 OpCode::ConstructSpread => {
                     self.op_construct_spread(target_depth)?;
                 }
+                OpCode::SuperCall(argc) => {
+                    let argc_usize = argc as usize;
+                    let stack_len = self.stack.len();
+                    if stack_len < argc_usize {
+                        return Err(VmError::TypeError("Stack underflow in op_super_call".into()));
+                    }
+                    let args_start = stack_len - argc_usize;
+                    let mut args = Vec::with_capacity(argc_usize);
+                    args.extend_from_slice(&self.stack[args_start..stack_len]);
+                    self.stack.truncate(args_start);
+                    self.op_super_call(&args, target_depth)?;
+                }
+                OpCode::SuperCallSpread => {
+                    let args_val = self.pop()?;
+                    let args = self.array_to_vec_spread(args_val);
+                    self.op_super_call(&args, target_depth)?;
+                }
+                OpCode::SuperCallForward => {
+                    let raw =
+                        self.frames.last().and_then(|f| f.raw_args.clone()).unwrap_or_default();
+                    self.op_super_call(&raw, target_depth)?;
+                }
 
                 OpCode::Return => {
                     if let Some(v) = self.op_return(target_depth)? {
@@ -554,6 +678,15 @@ impl Vm {
                     let _ = self.pop()?;
                     self.push(JsValue::from_boolean(true));
                 }
+                OpCode::Inc => {
+                    self.op_inc()?;
+                }
+                OpCode::Dec => {
+                    self.op_dec()?;
+                }
+                OpCode::ToNumeric => {
+                    self.op_to_numeric()?;
+                }
                 OpCode::DeleteProp(name_idx) => {
                     if let Some(v) = self.op_delete_prop(name_idx, &chunk, target_depth)? {
                         return Ok(v);
@@ -568,6 +701,12 @@ impl Vm {
                     if let Some(v) = self.op_delete_ident(name_idx, &chunk, target_depth)? {
                         return Ok(v);
                     }
+                }
+                OpCode::DeleteSuper => {
+                    self.handle_exception_at_depth(
+                        VmError::ReferenceError("Unsupported reference to 'super'".into()),
+                        target_depth,
+                    )?;
                 }
                 OpCode::Not => {
                     self.op_not()?;
@@ -722,6 +861,19 @@ impl Vm {
                         frame.ip = t;
                     }
                 }
+                OpCode::JumpIfLocalDefined(slot, target) => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let slot_idx = slot as usize;
+                    let arg = frame
+                        .raw_args
+                        .as_ref()
+                        .and_then(|args| args.get(slot_idx).copied())
+                        .unwrap_or(JsValue::undefined());
+                    if !arg.is_undefined() {
+                        frame.locals[slot_idx] = arg;
+                        frame.ip = target as usize;
+                    }
+                }
 
                 OpCode::Throw => {
                     let err = self.pop()?;
@@ -746,6 +898,21 @@ impl Vm {
                     let frame = self.frames.last().unwrap();
                     let val =
                         frame.locals.get(slot as usize).copied().unwrap_or(JsValue::undefined());
+                    if val.is_uninitialized() {
+                        let name = frame
+                            .local_names
+                            .get(slot as usize)
+                            .cloned()
+                            .unwrap_or_else(|| "variable".to_string());
+                        self.handle_exception_at_depth(
+                            VmError::ReferenceError(format!(
+                                "Cannot access '{}' before initialization",
+                                name
+                            )),
+                            target_depth,
+                        )?;
+                        continue;
+                    }
                     self.push(val);
                 }
                 OpCode::SetLocal(slot) => {
@@ -763,9 +930,44 @@ impl Vm {
                 OpCode::PushCatchScope(name_idx) => {
                     self.op_push_catch_scope(name_idx, &chunk)?;
                 }
+                OpCode::PushClassScope(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Class name must be string".into())),
+                    };
+                    let scope_obj = self.alloc_object();
+                    self.temp_roots.push(scope_obj);
+                    self.set_own_property(scope_obj, &name, JsValue::uninitialized());
+                    self.temp_roots.pop();
+                    let frame = self.frames.last_mut().unwrap();
+                    frame.scopes.push(scope_obj);
+                }
+                OpCode::InitClassBinding(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Class name must be string".into())),
+                    };
+                    let ctor = *self.peek()?;
+                    let frame = self.frames.last().unwrap();
+                    if let Some(&scope_obj) = frame.scopes.last() {
+                        self.set_own_property(scope_obj, &name, ctor);
+                        self.set_property_non_writable(scope_obj, &name);
+                    }
+                }
                 OpCode::EnterFunctionBody => {
                     let frame = self.frames.last_mut().unwrap();
                     frame.in_param_init = false;
+                    for (i, val) in frame.locals.iter_mut().enumerate() {
+                        if val.is_uninitialized() {
+                            let arg_val = frame
+                                .raw_args
+                                .as_ref()
+                                .and_then(|args| args.get(i).copied())
+                                .unwrap_or(JsValue::undefined());
+                            *val =
+                                if arg_val.is_undefined() { JsValue::undefined() } else { arg_val };
+                        }
+                    }
                 }
                 OpCode::DefGlobal(name_idx) => {
                     if let Some(v) = self.op_def_global(name_idx, &chunk, target_depth)? {

@@ -29,7 +29,7 @@ impl Vm {
                 let jsobj = unsafe { &*(ptr as *mut JsObject) };
                 if let Some(elem) = jsobj.get_private_element(&name).cloned() {
                     match elem {
-                        PrivateElement::Value(v) => {
+                        PrivateElement::Field(v) | PrivateElement::Method(v) => {
                             self.push(v);
                             return Ok(());
                         }
@@ -179,9 +179,17 @@ impl Vm {
                 let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
                 if let Some(elem) = jsobj.get_private_element(name).cloned() {
                     match elem {
-                        PrivateElement::Value(_) => {
-                            jsobj.insert_private_element(name.to_string(), val);
+                        PrivateElement::Field(_) => {
+                            jsobj.set_private_value(name, val);
                             self.push(val);
+                            return Ok(());
+                        }
+                        PrivateElement::Method(_) => {
+                            let err = VmError::TypeError(format!(
+                                "Cannot write private member {} to a method private reference",
+                                name
+                            ));
+                            self.handle_exception_at_depth(err, target_depth)?;
                             return Ok(());
                         }
                         PrivateElement::Accessor(acc) => {
@@ -326,6 +334,11 @@ impl Vm {
     pub(crate) fn op_get_elem(&mut self, target_depth: usize) -> Result<(), VmError> {
         let key = self.pop()?;
         let obj = self.pop()?;
+        if obj.is_null() || obj.is_undefined() {
+            let err = VmError::TypeError("Cannot read property of null or undefined".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(());
+        }
         if let Some(idx) = Self::to_canonical_array_index(key) {
             if obj.is_sso_string() {
                 let len = ((obj.0 >> 40) & 0x7) as usize;
@@ -405,6 +418,11 @@ impl Vm {
         let val = self.pop()?;
         let key = self.pop()?;
         let obj = self.pop()?;
+        if obj.is_null() || obj.is_undefined() {
+            let err = VmError::TypeError("Cannot set property on null or undefined".into());
+            self.handle_exception_at_depth(err, target_depth)?;
+            return Ok(());
+        }
         if let Some(idx) = Self::to_canonical_array_index(key) {
             if let Some(ptr) = obj.as_object_ptr() {
                 let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
@@ -549,6 +567,23 @@ impl Vm {
         let val = self.pop()?;
         let key = self.pop()?;
 
+        let frame = match self.frames.last() {
+            Some(f) => f,
+            None => {
+                self.push(val);
+                return Ok(());
+            }
+        };
+        if frame.this_val == JsValue::uninitialized() {
+            self.handle_exception_at_depth(
+                VmError::ReferenceError(
+                    "Must call super constructor in derived class before accessing 'this'".into(),
+                ),
+                target_depth,
+            )?;
+            return Ok(());
+        }
+
         self.temp_roots.push(val);
         let prop_key = match self.to_property_key(key) {
             Ok(k) => k,
@@ -561,23 +596,7 @@ impl Vm {
         let val = self.temp_roots.pop().unwrap();
 
         let (receiver, base) = {
-            let frame = match self.frames.last() {
-                Some(f) => f,
-                None => {
-                    self.push(val);
-                    return Ok(());
-                }
-            };
-            if frame.this_val == JsValue::uninitialized() {
-                self.handle_exception_at_depth(
-                    VmError::ReferenceError(
-                        "Must call super constructor in derived class before accessing 'this'"
-                            .into(),
-                    ),
-                    target_depth,
-                )?;
-                return Ok(());
-            }
+            let frame = self.frames.last().unwrap();
             let receiver = frame.this_val;
             let base = if let Some(home_obj) = frame.home_object {
                 if let Some(ptr) = home_obj.as_object_ptr() {

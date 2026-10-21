@@ -151,11 +151,6 @@ pub unsafe extern "C" fn doms_set_global_function(
     }
     let isolate = unsafe { &mut (*(*ctx).isolate).inner };
     let g = isolate.vm.global_object;
-    let mut g_handle = doms_value_t {
-        inner: g,
-        ref_count: AtomicUsize::new(1),
-    };
-    unsafe {
-        doms_set_native_function(ctx, &mut g_handle, name, name_len, fn_ptr, userdata)
-    }
+    let mut g_handle = doms_value_t { inner: g, ref_count: AtomicUsize::new(1) };
+    unsafe { doms_set_native_function(ctx, &mut g_handle, name, name_len, fn_ptr, userdata) }
 }

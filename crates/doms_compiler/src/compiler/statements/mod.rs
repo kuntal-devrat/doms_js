@@ -241,7 +241,7 @@ impl Compiler {
                 self.compile_export(decl, *is_default, specifiers, source, *is_all, all_as)?;
             }
             Statement::ClassDecl(class_def) => {
-                self.compile_class_definition(class_def)?;
+                self.compile_class_decl(class_def)?;
                 self.chunk.emit(OpCode::Pop, 0);
             }
             Statement::With { object, body } => {

@@ -23,6 +23,26 @@ pub unsafe extern "C" fn doms_value_to_number(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn doms_value_to_boolean(
+    _ctx: *mut doms_context_t,
+    val: *mut doms_value_t,
+    out: *mut c_int,
+) -> doms_status_t {
+    if val.is_null() || out.is_null() {
+        return doms_status_t::ErrorInvalidArg;
+    }
+    let b = unsafe { (*val).inner.as_boolean() };
+    if let Some(b) = b {
+        unsafe {
+            *out = b as c_int;
+        }
+        doms_status_t::Ok
+    } else {
+        doms_status_t::ErrorType
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn doms_value_to_string(
     ctx: *mut doms_context_t,
     val: *mut doms_value_t,

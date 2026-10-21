@@ -289,12 +289,14 @@ impl Vm {
                 }
             }
 
-            // Special properties on Error
+            // Special properties on Error (fallback only if no prototype)
             if let ObjectKind::Error { name, message } = &obj.kind {
-                match key {
-                    "name" => return self.alloc_string(name.clone()),
-                    "message" => return self.alloc_string(message.clone()),
-                    _ => {}
+                if obj.prototype.is_none() {
+                    match key {
+                        "name" => return self.alloc_string(name.clone()),
+                        "message" => return self.alloc_string(message.clone()),
+                        _ => {}
+                    }
                 }
             }
 
@@ -326,6 +328,15 @@ impl Vm {
                     if let Some(offset) = self.shapes.lookup_offset(proto_obj.shape_id, key) {
                         if let Some(val) = proto_obj.get_slot(offset) {
                             return val;
+                        }
+                    }
+                    if let ObjectKind::Array(elements) = &proto_obj.kind {
+                        if let Ok(idx) = key.parse::<usize>() {
+                            if let Some(elem) = elements.get(idx) {
+                                if !elem.is_hole() {
+                                    return *elem;
+                                }
+                            }
                         }
                     }
                     curr_proto = proto_obj.prototype;

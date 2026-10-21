@@ -300,9 +300,8 @@ impl<'isolate> Context<'isolate> {
         func: impl crate::callback::JsCallback<Args, Ret>,
     ) {
         let arity = func.arity();
-        let closure: doms_vm::object::ClosureNativeFn = std::sync::Arc::new(move |vm, this, args| {
-            func.invoke(vm, this, args)
-        });
+        let closure: doms_vm::object::ClosureNativeFn =
+            std::sync::Arc::new(move |vm, this, args| func.invoke(vm, this, args));
         let fn_val = self.isolate.vm.alloc_closure_native_function(name, arity, closure);
         let g = self.isolate.vm.global_object;
         self.isolate.vm.set_property(g, name, fn_val);
@@ -316,9 +315,8 @@ impl<'isolate> Context<'isolate> {
         func: impl crate::callback::JsCallback<Args, Ret>,
     ) {
         let arity = func.arity();
-        let closure: doms_vm::object::ClosureNativeFn = std::sync::Arc::new(move |vm, this, args| {
-            func.invoke(vm, this, args)
-        });
+        let closure: doms_vm::object::ClosureNativeFn =
+            std::sync::Arc::new(move |vm, this, args| func.invoke(vm, this, args));
         let fn_val = self.isolate.vm.alloc_closure_native_function(name, arity, closure);
         self.isolate.vm.set_property(obj, name, fn_val);
     }
@@ -564,11 +562,7 @@ mod tests {
 
         // Register function returning Result for error throwing
         ctx.set_global_fn("safe_divide", |a: f64, b: f64| -> Result<f64, String> {
-            if b == 0.0 {
-                Err("Division by zero".into())
-            } else {
-                Ok(a / b)
-            }
+            if b == 0.0 { Err("Division by zero".into()) } else { Ok(a / b) }
         });
 
         let sum: i32 = ctx.eval_as("add(15, 27)").unwrap();

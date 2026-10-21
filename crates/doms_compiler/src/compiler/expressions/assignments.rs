@@ -31,6 +31,7 @@ impl Compiler {
                 self.compile_class_definition_with_name(
                     class_def,
                     inferred_name.map(|s| s.to_string()),
+                    false,
                 )?;
             }
             _ => {
@@ -44,8 +45,14 @@ impl Compiler {
             }
         }
         self.chunk.emit(OpCode::Dup, 0);
-        if self.with_depth == 0 {
+        if self.with_depth == 0 && !self.shadowed_class_names.iter().any(|s| s == target) {
             if let Some(slot) = self.symbols.resolve_local(target) {
+                if Some(slot) == self.self_slot {
+                    let name_idx = self.chunk.add_constant(Constant::String(target.to_string()));
+                    self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                    return Ok(());
+                }
                 self.chunk.emit(OpCode::SetLocal(slot), 0);
                 self.chunk.emit(OpCode::Pop, 0);
                 return Ok(());
@@ -102,7 +109,6 @@ impl Compiler {
         expr: &Expression,
     ) -> Result<(), CompileError> {
         let delta_is_pos = *op == UpdateOp::Inc;
-        let one_idx = self.chunk.add_constant(Constant::Number(1.0));
         match unwrap_grouping(expr) {
             Expression::Identifier(name) => {
                 if self.with_depth == 0 {
@@ -116,14 +122,12 @@ impl Compiler {
                     let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                     self.chunk.emit(OpCode::GetGlobal(name_idx), 0);
                 }
-                self.chunk.emit(OpCode::Pos, 0);
 
                 if is_prefix {
-                    self.chunk.emit(OpCode::LoadConst(one_idx), 0);
                     if delta_is_pos {
-                        self.chunk.emit(OpCode::Add, 0);
+                        self.chunk.emit(OpCode::Inc, 0);
                     } else {
-                        self.chunk.emit(OpCode::Sub, 0);
+                        self.chunk.emit(OpCode::Dec, 0);
                     }
                     self.chunk.emit(OpCode::Dup, 0);
                     if self.with_depth == 0 {
@@ -141,12 +145,12 @@ impl Compiler {
                         self.chunk.emit(OpCode::Pop, 0);
                     }
                 } else {
+                    self.chunk.emit(OpCode::ToNumeric, 0);
                     self.chunk.emit(OpCode::Dup, 0);
-                    self.chunk.emit(OpCode::LoadConst(one_idx), 0);
                     if delta_is_pos {
-                        self.chunk.emit(OpCode::Add, 0);
+                        self.chunk.emit(OpCode::Inc, 0);
                     } else {
-                        self.chunk.emit(OpCode::Sub, 0);
+                        self.chunk.emit(OpCode::Dec, 0);
                     }
                     if self.with_depth == 0 {
                         if let Some(slot) = self.symbols.resolve_local(name) {
@@ -169,22 +173,20 @@ impl Compiler {
                 if matches!(object.as_ref(), Expression::Super) {
                     self.chunk.emit(OpCode::LoadSuper, 0);
                     self.chunk.emit(OpCode::GetProp(prop_idx), 0);
-                    self.chunk.emit(OpCode::Pos, 0);
                     if is_prefix {
-                        self.chunk.emit(OpCode::LoadConst(one_idx), 0);
                         if delta_is_pos {
-                            self.chunk.emit(OpCode::Add, 0);
+                            self.chunk.emit(OpCode::Inc, 0);
                         } else {
-                            self.chunk.emit(OpCode::Sub, 0);
+                            self.chunk.emit(OpCode::Dec, 0);
                         }
                         self.chunk.emit(OpCode::SetSuperProp(prop_idx), 0);
                     } else {
+                        self.chunk.emit(OpCode::ToNumeric, 0);
                         self.chunk.emit(OpCode::Dup, 0);
-                        self.chunk.emit(OpCode::LoadConst(one_idx), 0);
                         if delta_is_pos {
-                            self.chunk.emit(OpCode::Add, 0);
+                            self.chunk.emit(OpCode::Inc, 0);
                         } else {
-                            self.chunk.emit(OpCode::Sub, 0);
+                            self.chunk.emit(OpCode::Dec, 0);
                         }
                         self.chunk.emit(OpCode::SetSuperProp(prop_idx), 0);
                         self.chunk.emit(OpCode::Pop, 0);
@@ -193,23 +195,153 @@ impl Compiler {
                     self.compile_expression(object)?;
                     self.chunk.emit(OpCode::Dup, 0);
                     self.chunk.emit(OpCode::GetProp(prop_idx), 0);
-                    self.chunk.emit(OpCode::Pos, 0);
                     if is_prefix {
-                        self.chunk.emit(OpCode::LoadConst(one_idx), 0);
                         if delta_is_pos {
-                            self.chunk.emit(OpCode::Add, 0);
+                            self.chunk.emit(OpCode::Inc, 0);
                         } else {
-                            self.chunk.emit(OpCode::Sub, 0);
+                            self.chunk.emit(OpCode::Dec, 0);
                         }
                         self.chunk.emit(OpCode::SetProp(prop_idx), 0);
                     } else {
-                        self.chunk.emit(OpCode::LoadConst(one_idx), 0);
+                        let tmp_slot = self
+                            .symbols
+                            .define_local(format!("@post_tmp_{}", self.symbols.locals.len()));
+                        self.chunk.emit(OpCode::ToNumeric, 0);
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.chunk.emit(OpCode::SetLocal(tmp_slot), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
                         if delta_is_pos {
-                            self.chunk.emit(OpCode::Add, 0);
+                            self.chunk.emit(OpCode::Inc, 0);
                         } else {
-                            self.chunk.emit(OpCode::Sub, 0);
+                            self.chunk.emit(OpCode::Dec, 0);
                         }
                         self.chunk.emit(OpCode::SetProp(prop_idx), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+                        self.chunk.emit(OpCode::GetLocal(tmp_slot), 0);
+                    }
+                }
+            }
+            Expression::Index { object, index } => {
+                if matches!(object.as_ref(), Expression::Super) {
+                    let idx_slot = self
+                        .symbols
+                        .define_local(format!("@upd_sidx_{}", self.symbols.locals.len()));
+                    self.compile_expression(index)?;
+                    self.chunk.emit(OpCode::ToPropertyKey, 0);
+                    self.chunk.emit(OpCode::SetLocal(idx_slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+
+                    self.chunk.emit(OpCode::LoadSuper, 0);
+                    self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+                    self.chunk.emit(OpCode::GetElem, 0);
+
+                    if is_prefix {
+                        if delta_is_pos {
+                            self.chunk.emit(OpCode::Inc, 0);
+                        } else {
+                            self.chunk.emit(OpCode::Dec, 0);
+                        }
+                        let new_val_slot = self
+                            .symbols
+                            .define_local(format!("@upd_snew_{}", self.symbols.locals.len()));
+                        self.chunk.emit(OpCode::SetLocal(new_val_slot), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+
+                        self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+                        self.chunk.emit(OpCode::GetLocal(new_val_slot), 0);
+                        self.chunk.emit(OpCode::SetSuperElem, 0);
+                    } else {
+                        self.chunk.emit(OpCode::ToNumeric, 0);
+                        let old_val_slot = self
+                            .symbols
+                            .define_local(format!("@upd_sold_{}", self.symbols.locals.len()));
+                        self.chunk.emit(OpCode::SetLocal(old_val_slot), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+
+                        self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+                        self.chunk.emit(OpCode::GetLocal(old_val_slot), 0);
+                        if delta_is_pos {
+                            self.chunk.emit(OpCode::Inc, 0);
+                        } else {
+                            self.chunk.emit(OpCode::Dec, 0);
+                        }
+                        self.chunk.emit(OpCode::SetSuperElem, 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+                        self.chunk.emit(OpCode::GetLocal(old_val_slot), 0);
+                    }
+                } else {
+                    let obj_slot = self
+                        .symbols
+                        .define_local(format!("@upd_obj_{}", self.symbols.locals.len()));
+                    let idx_slot = self
+                        .symbols
+                        .define_local(format!("@upd_idx_{}", self.symbols.locals.len()));
+                    self.compile_expression(object)?;
+                    self.chunk.emit(OpCode::SetLocal(obj_slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+                    self.compile_expression(index)?;
+                    self.chunk.emit(OpCode::SetLocal(idx_slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+
+                    // Check object coercibility AFTER index evaluation
+                    self.chunk.emit(OpCode::GetLocal(obj_slot), 0);
+                    self.chunk.emit(OpCode::RequireObjectCoercible, 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+
+                    // Coerce index to property key ONCE
+                    self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+                    self.chunk.emit(OpCode::ToPropertyKey, 0);
+                    self.chunk.emit(OpCode::SetLocal(idx_slot), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
+
+                    self.chunk.emit(OpCode::GetLocal(obj_slot), 0);
+                    self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+                    self.chunk.emit(OpCode::GetElem, 0);
+
+                    if is_prefix {
+                        if delta_is_pos {
+                            self.chunk.emit(OpCode::Inc, 0);
+                        } else {
+                            self.chunk.emit(OpCode::Dec, 0);
+                        }
+                        let new_val_slot = self
+                            .symbols
+                            .define_local(format!("@upd_val_{}", self.symbols.locals.len()));
+                        self.chunk.emit(OpCode::SetLocal(new_val_slot), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+
+                        self.chunk.emit(OpCode::GetLocal(obj_slot), 0);
+                        self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+                        self.chunk.emit(OpCode::GetLocal(new_val_slot), 0);
+                        self.chunk.emit(OpCode::SetElem, 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+                        self.chunk.emit(OpCode::GetLocal(new_val_slot), 0);
+                    } else {
+                        self.chunk.emit(OpCode::ToNumeric, 0);
+                        let old_val_slot = self
+                            .symbols
+                            .define_local(format!("@upd_old_{}", self.symbols.locals.len()));
+                        self.chunk.emit(OpCode::SetLocal(old_val_slot), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+
+                        self.chunk.emit(OpCode::GetLocal(old_val_slot), 0);
+                        if delta_is_pos {
+                            self.chunk.emit(OpCode::Inc, 0);
+                        } else {
+                            self.chunk.emit(OpCode::Dec, 0);
+                        }
+                        let new_val_slot = self
+                            .symbols
+                            .define_local(format!("@upd_new_{}", self.symbols.locals.len()));
+                        self.chunk.emit(OpCode::SetLocal(new_val_slot), 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+
+                        self.chunk.emit(OpCode::GetLocal(obj_slot), 0);
+                        self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+                        self.chunk.emit(OpCode::GetLocal(new_val_slot), 0);
+                        self.chunk.emit(OpCode::SetElem, 0);
+                        self.chunk.emit(OpCode::Pop, 0);
+                        self.chunk.emit(OpCode::GetLocal(old_val_slot), 0);
                     }
                 }
             }

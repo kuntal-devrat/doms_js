@@ -13,10 +13,8 @@ pub unsafe extern "C" fn doms_get_global(
     let isolate = unsafe { &mut (*(*ctx).isolate).inner };
     let g = isolate.vm.global_object;
     unsafe {
-        *result = Box::into_raw(Box::new(doms_value_t {
-            inner: g,
-            ref_count: AtomicUsize::new(1),
-        }));
+        *result =
+            Box::into_raw(Box::new(doms_value_t { inner: g, ref_count: AtomicUsize::new(1) }));
     }
     doms_status_t::Ok
 }
@@ -54,10 +52,8 @@ pub unsafe extern "C" fn doms_object_new(
     let isolate = unsafe { &mut (*(*ctx).isolate).inner };
     let obj = isolate.vm.alloc_object();
     unsafe {
-        *result = Box::into_raw(Box::new(doms_value_t {
-            inner: obj,
-            ref_count: AtomicUsize::new(1),
-        }));
+        *result =
+            Box::into_raw(Box::new(doms_value_t { inner: obj, ref_count: AtomicUsize::new(1) }));
     }
     doms_status_t::Ok
 }
@@ -122,10 +118,8 @@ pub unsafe extern "C" fn doms_array_new(
     let isolate = unsafe { &mut (*(*ctx).isolate).inner };
     let arr = isolate.vm.alloc_array(Vec::new());
     unsafe {
-        *result = Box::into_raw(Box::new(doms_value_t {
-            inner: arr,
-            ref_count: AtomicUsize::new(1),
-        }));
+        *result =
+            Box::into_raw(Box::new(doms_value_t { inner: arr, ref_count: AtomicUsize::new(1) }));
     }
     doms_status_t::Ok
 }
@@ -189,10 +183,8 @@ pub unsafe extern "C" fn doms_array_get_at(
     let target = unsafe { (*arr).inner };
     let val = isolate.vm.get_element(target, index);
     unsafe {
-        *result = Box::into_raw(Box::new(doms_value_t {
-            inner: val,
-            ref_count: AtomicUsize::new(1),
-        }));
+        *result =
+            Box::into_raw(Box::new(doms_value_t { inner: val, ref_count: AtomicUsize::new(1) }));
     }
     doms_status_t::Ok
 }

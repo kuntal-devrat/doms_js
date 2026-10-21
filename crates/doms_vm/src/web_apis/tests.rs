@@ -73,7 +73,7 @@ fn test_event_target_and_custom_event() {
 }
 
 #[test]
-fn test_fetch_response_mock() {
+fn test_fetch_data_uri_response() {
     let mut vm = Vm::new();
     let script = r#"
             var fetchBody = null;

@@ -121,14 +121,25 @@ impl Compiler {
         if *op == UnaryOp::Delete {
             match unwrap_grouping(expr) {
                 Expression::Member { object, property } => {
-                    self.compile_expression(object)?;
-                    let name_idx = self.chunk.add_constant(Constant::String(property.clone()));
-                    self.chunk.emit(OpCode::DeleteProp(name_idx), 0);
+                    if matches!(object.as_ref(), Expression::Super) {
+                        self.compile_expression(object)?;
+                        self.chunk.emit(OpCode::DeleteSuper, 0);
+                    } else {
+                        self.compile_expression(object)?;
+                        let name_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                        self.chunk.emit(OpCode::DeleteProp(name_idx), 0);
+                    }
                 }
                 Expression::Index { object, index } => {
-                    self.compile_expression(object)?;
-                    self.compile_expression(index)?;
-                    self.chunk.emit(OpCode::DeleteElem, 0);
+                    if matches!(object.as_ref(), Expression::Super) {
+                        self.compile_expression(object)?;
+                        self.compile_expression(index)?;
+                        self.chunk.emit(OpCode::DeleteSuper, 0);
+                    } else {
+                        self.compile_expression(object)?;
+                        self.compile_expression(index)?;
+                        self.chunk.emit(OpCode::DeleteElem, 0);
+                    }
                 }
                 Expression::Identifier(name) => {
                     let name_idx = self.chunk.add_constant(Constant::String(name.clone()));

@@ -7,14 +7,16 @@ pub const OBJECT_FLAG_EXTENSIBLE: u8 = 1 << 0;
 pub const OBJECT_FLAG_ARRAY_LENGTH_NON_WRITABLE: u8 = 1 << 1;
 pub const OBJECT_FLAG_ELEMENT_ATTRIBUTES: u8 = 1 << 2;
 
+#[repr(C)]
 #[derive(Debug, Clone)]
 pub struct JsObject {
     pub shape_id: ShapeId,
-    pub prototype: Option<JsValue>,
+    pub flags: u8,
+    pub _pad: [u8; 3],
     pub in_object_slots: [JsValue; IN_OBJECT_SLOTS],
+    pub prototype: Option<JsValue>,
     pub extra_slots: Vec<JsValue>,
     pub kind: ObjectKind,
-    pub flags: u8,
     pub accessors: Option<Box<std::collections::HashMap<String, Accessor>>>,
     pub accessor_order: Option<Vec<String>>,
     pub prop_order: Option<Vec<String>>,
@@ -25,15 +27,19 @@ pub struct JsObject {
     pub private_elements: Option<Box<std::collections::HashMap<String, PrivateElement>>>,
 }
 
+const _: () = assert!(std::mem::offset_of!(JsObject, shape_id) == 0);
+const _: () = assert!(std::mem::offset_of!(JsObject, in_object_slots) == 8);
+
 impl JsObject {
     pub fn new_with_kind(shape_id: ShapeId, prototype: Option<JsValue>, kind: ObjectKind) -> Self {
         Self {
             shape_id,
-            prototype,
+            flags: OBJECT_FLAG_EXTENSIBLE,
+            _pad: [0; 3],
             in_object_slots: [JsValue::hole(); IN_OBJECT_SLOTS],
+            prototype,
             extra_slots: Vec::new(),
             kind,
-            flags: OBJECT_FLAG_EXTENSIBLE,
             accessors: None,
             accessor_order: None,
             prop_order: None,
@@ -93,7 +99,13 @@ impl JsObject {
     pub fn insert_private_element(&mut self, name: String, val: JsValue) {
         let privs =
             self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        privs.insert(name, PrivateElement::Value(val));
+        privs.insert(name, PrivateElement::Field(val));
+    }
+
+    pub fn insert_private_method(&mut self, name: String, val: JsValue) {
+        let privs =
+            self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        privs.insert(name, PrivateElement::Method(val));
     }
 
     pub fn insert_private_getter(&mut self, name: String, getter: JsValue) {
@@ -103,9 +115,7 @@ impl JsObject {
             privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor::default()));
         match entry {
             PrivateElement::Accessor(acc) => acc.getter = Some(getter),
-            PrivateElement::Value(_) => {
-                *entry = PrivateElement::Accessor(Accessor::with_getter(getter))
-            }
+            _ => *entry = PrivateElement::Accessor(Accessor::with_getter(getter)),
         }
     }
 
@@ -116,18 +126,59 @@ impl JsObject {
             privs.entry(name).or_insert_with(|| PrivateElement::Accessor(Accessor::default()));
         match entry {
             PrivateElement::Accessor(acc) => acc.setter = Some(setter),
-            PrivateElement::Value(_) => {
-                *entry = PrivateElement::Accessor(Accessor::with_setter(setter))
-            }
+            _ => *entry = PrivateElement::Accessor(Accessor::with_setter(setter)),
         }
     }
 
+    pub fn resolve_private_key(&self, name: &str) -> Option<String> {
+        let p = self.private_elements.as_ref()?;
+        if p.contains_key(name) {
+            return Some(name.to_string());
+        }
+        if !name.contains('@') {
+            for k in p.keys() {
+                if let Some(prefix) = k.split('@').next() {
+                    if prefix == name {
+                        return Some(k.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub fn get_private_element(&self, name: &str) -> Option<&PrivateElement> {
-        self.private_elements.as_ref().and_then(|p| p.get(name))
+        let p = self.private_elements.as_ref()?;
+        if let Some(elem) = p.get(name) {
+            return Some(elem);
+        }
+        if !name.contains('@') {
+            for (k, v) in p.iter() {
+                if let Some(prefix) = k.split('@').next() {
+                    if prefix == name {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        None
     }
 
     pub fn contains_private_element(&self, name: &str) -> bool {
-        self.private_elements.as_ref().map_or(false, |p| p.contains_key(name))
+        self.resolve_private_key(name).is_some()
+    }
+
+    pub fn set_private_value(&mut self, name: &str, val: JsValue) -> bool {
+        let actual_key = self.resolve_private_key(name);
+        if let Some(key) = actual_key {
+            let privs = self
+                .private_elements
+                .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+            privs.insert(key, PrivateElement::Field(val));
+            true
+        } else {
+            false
+        }
     }
 
     pub fn insert_symbol_property(&mut self, sym: JsValue, val: JsValue) {

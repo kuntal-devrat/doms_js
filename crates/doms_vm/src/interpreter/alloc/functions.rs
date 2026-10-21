@@ -64,7 +64,9 @@ impl Vm {
     pub fn alloc_function(&mut self, func: JsFunction) -> JsValue {
         let fn_proto = self.function_proto.or(self.object_proto);
         let fn_len = func.length;
-        let has_prototype = !func.is_arrow && !func.is_method && !func.is_generator && !func.is_async;
+        let has_prototype =
+            !func.is_arrow && !func.is_method && !func.is_generator && !func.is_async;
+        let is_class_ctor = func.is_class_constructor;
         let name_str = func.name.as_deref().unwrap_or("").to_string();
         let obj = JsObject::new_function(ShapeRegistry::ROOT_SHAPE_ID, fn_proto, func);
         let ptr = self.allocate_js_object_old_gen(obj);
@@ -103,7 +105,7 @@ impl Vm {
                 "prototype",
                 proto,
                 crate::shape::PropertyAttributes {
-                    writable: true,
+                    writable: !is_class_ctor,
                     enumerable: false,
                     configurable: false,
                 },

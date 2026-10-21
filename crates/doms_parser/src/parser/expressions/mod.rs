@@ -13,3 +13,10 @@ mod prefix;
 mod reserved_words;
 mod template;
 mod update;
+
+pub(crate) fn unwrap_grouping<'b>(mut expr: &'b Expression) -> &'b Expression {
+    while let Expression::Grouping(inner) = expr {
+        expr = inner;
+    }
+    expr
+}

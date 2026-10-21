@@ -49,7 +49,7 @@ impl Compiler {
                 return Ok(());
             }
         }
-        if self.with_depth == 0 {
+        if self.with_depth == 0 && !self.shadowed_class_names.iter().any(|s| s == name) {
             if let Some(slot) = self.symbols.resolve_local(name) {
                 self.chunk.emit(OpCode::GetLocal(slot), 0);
                 return Ok(());
@@ -64,29 +64,68 @@ impl Compiler {
         self.chunk.emit(OpCode::CreateObject, 0);
         for prop in props {
             match prop {
+                ObjectProperty::CoverInitializedName(..) => {
+                    return Err(CompileError::General(
+                        "CoverInitializedName cannot appear in evaluated object literal".into(),
+                    ));
+                }
                 ObjectProperty::KeyValue(key, val_expr) => match key {
                     PropertyKey::Literal(k) => {
-                        self.chunk.emit(OpCode::Dup, 0);
-                        self.compile_expression(val_expr)?;
-                        if Self::is_anonymous_function_definition(val_expr) {
-                            let name_idx = self.chunk.add_constant(Constant::String(k.clone()));
-                            self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                        if k == "__proto__" {
+                            self.compile_expression(val_expr)?;
+                            self.chunk.emit(OpCode::SetProtoOrNoop, 0);
+                        } else {
+                            match val_expr {
+                                Expression::ClassExpr(class_def) if class_def.name.is_none() => {
+                                    self.compile_class_definition_with_name(
+                                        class_def,
+                                        Some(k.clone()),
+                                        false,
+                                    )?;
+                                }
+                                Expression::GeneratorExpr { name, params, body } => {
+                                    self.compile_generator_expr_full(name, params, body, true)?;
+                                }
+                                Expression::AsyncGeneratorExpr { name, params, body } => {
+                                    self.compile_async_generator_expr_full(
+                                        name, params, body, true,
+                                    )?;
+                                }
+                                _ => {
+                                    self.compile_expression(val_expr)?;
+                                    if Self::is_anonymous_function_definition(val_expr) {
+                                        let name_idx =
+                                            self.chunk.add_constant(Constant::String(k.clone()));
+                                        self.chunk.emit(OpCode::SetFunctionName(name_idx), 0);
+                                    }
+                                }
+                            }
+                            let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
+                            self.chunk.emit(OpCode::DefineDataProp(prop_idx), 0);
                         }
-                        let prop_idx = self.chunk.add_constant(Constant::String(k.clone()));
-                        self.chunk.emit(OpCode::SetProp(prop_idx), 0);
-                        self.chunk.emit(OpCode::Pop, 0);
                     }
                     PropertyKey::Computed(k_expr) => {
-                        self.chunk.emit(OpCode::Dup, 0);
                         self.compile_expression(k_expr)?;
-                        self.compile_expression(val_expr)?;
-                        self.chunk.emit(OpCode::SetElem, 0);
-                        self.chunk.emit(OpCode::Pop, 0);
+                        self.chunk.emit(OpCode::ToPropertyKey, 0);
+                        match val_expr {
+                            Expression::GeneratorExpr { name, params, body } => {
+                                self.compile_generator_expr_full(name, params, body, true)?;
+                            }
+                            Expression::AsyncGeneratorExpr { name, params, body } => {
+                                self.compile_async_generator_expr_full(name, params, body, true)?;
+                            }
+                            _ => {
+                                self.compile_expression(val_expr)?;
+                                if Self::is_anonymous_function_definition(val_expr) {
+                                    self.chunk.emit(OpCode::SetFunctionNameFromKey(0), 0);
+                                }
+                            }
+                        }
+                        self.chunk.emit(OpCode::DefineDataPropComputed, 0);
                     }
                 },
                 ObjectProperty::Getter(key, fn_expr) => match key {
                     PropertyKey::Literal(k) => {
-                        self.chunk.emit(OpCode::Dup, 0);
                         self.compile_expression(fn_expr)?;
                         let get_name =
                             self.chunk.add_constant(Constant::String(format!("get {}", k)));
@@ -95,15 +134,15 @@ impl Compiler {
                         self.chunk.emit(OpCode::DefineGetter(prop_idx), 0);
                     }
                     PropertyKey::Computed(k_expr) => {
-                        self.chunk.emit(OpCode::Dup, 0);
                         self.compile_expression(k_expr)?;
+                        self.chunk.emit(OpCode::ToPropertyKey, 0);
                         self.compile_expression(fn_expr)?;
+                        self.chunk.emit(OpCode::SetFunctionNameFromKey(1), 0);
                         self.chunk.emit(OpCode::DefineComputedGetter, 0);
                     }
                 },
                 ObjectProperty::Setter(key, fn_expr) => match key {
                     PropertyKey::Literal(k) => {
-                        self.chunk.emit(OpCode::Dup, 0);
                         self.compile_expression(fn_expr)?;
                         let set_name =
                             self.chunk.add_constant(Constant::String(format!("set {}", k)));
@@ -112,9 +151,10 @@ impl Compiler {
                         self.chunk.emit(OpCode::DefineSetter(prop_idx), 0);
                     }
                     PropertyKey::Computed(k_expr) => {
-                        self.chunk.emit(OpCode::Dup, 0);
                         self.compile_expression(k_expr)?;
+                        self.chunk.emit(OpCode::ToPropertyKey, 0);
                         self.compile_expression(fn_expr)?;
+                        self.chunk.emit(OpCode::SetFunctionNameFromKey(2), 0);
                         self.chunk.emit(OpCode::DefineComputedSetter, 0);
                     }
                 },

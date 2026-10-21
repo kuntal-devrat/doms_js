@@ -24,6 +24,8 @@ pub(super) fn register_array_builtins(vm: &mut Vm) {
         "unshift",
         "slice",
         "splice",
+        "copyWithin",
+        "fill",
         "indexOf",
         "lastIndexOf",
         "includes",
@@ -62,7 +64,7 @@ pub(super) fn register_array_builtins(vm: &mut Vm) {
 
     vm.set_property(array_constructor, "isArray", is_array_fn);
     vm.set_property(array_constructor, "prototype", array_proto);
-    for s in ["isArray", "from", "of", "prototype"] {
+    for s in ["isArray", "from", "fromAsync", "of", "prototype"] {
         vm.set_property_non_enumerable(array_constructor, s.to_string());
     }
     vm.set_property_non_writable(array_constructor, "prototype".to_string());

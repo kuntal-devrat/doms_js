@@ -143,6 +143,7 @@ impl Compiler {
                         self.compile_class_definition_with_name(
                             class_def,
                             Some("default".to_string()),
+                            false,
                         )?;
                         let def_idx =
                             self.chunk.add_constant(Constant::String("default".to_string()));

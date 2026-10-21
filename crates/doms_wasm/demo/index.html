@@ -326,7 +326,7 @@ console.log("Event dispatched detail:", detailVal);
       const start = performance.now();
       appendOutput(`\n>>> Running in Isolate ${currentIsolate}...\n`);
 
-      // Mock client evaluation in browser demonstration
+      // Interactive client demonstration
       try {
         const duration = (performance.now() - start).toFixed(2);
         document.getElementById('execStats').textContent = `Execution Time: ${duration} ms`;

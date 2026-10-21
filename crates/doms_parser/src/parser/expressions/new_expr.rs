@@ -17,7 +17,7 @@ impl<'a> Parser<'a> {
                 return Err(ParseError::UnexpectedToken(TokenKind::Ident(ident), line, col));
             }
         }
-        let mut callee = self.parse_prefix()?;
+        let mut callee = self.parse_prefix(0)?;
         loop {
             if self.check(&TokenKind::Dot) {
                 self.advance()?;
@@ -35,6 +35,7 @@ impl<'a> Parser<'a> {
                 if prop.starts_with('#') {
                     prop = match self.resolve_private_name(&prop) {
                         Some(scoped) => scoped,
+                        None if self.is_eval => prop,
                         None => {
                             return Err(ParseError::UnexpectedToken(
                                 prop_tok.kind,
@@ -50,7 +51,9 @@ impl<'a> Parser<'a> {
                 let index = self.parse_expression(0)?;
                 self.expect(TokenKind::RBracket)?;
                 callee = Expression::Index { object: Box::new(callee), index: Box::new(index) };
-            } else if let TokenKind::TemplateLiteral { quasis, raw_quasis, raw_exprs } = &self.current.kind {
+            } else if let TokenKind::TemplateLiteral { quasis, raw_quasis, raw_exprs } =
+                &self.current.kind
+            {
                 let quasis = quasis.clone();
                 let raw_quasis = raw_quasis.clone();
                 let raw_exprs = raw_exprs.clone();
@@ -60,12 +63,8 @@ impl<'a> Parser<'a> {
                     let sub = Parser::new(raw)?.parse_expression(0)?;
                     exprs.push(sub);
                 }
-                callee = Expression::TaggedTemplate {
-                    tag: Box::new(callee),
-                    quasis,
-                    raw_quasis,
-                    exprs,
-                };
+                callee =
+                    Expression::TaggedTemplate { tag: Box::new(callee), quasis, raw_quasis, exprs };
             } else {
                 break;
             }
