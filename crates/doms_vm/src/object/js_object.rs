@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub const IN_OBJECT_SLOTS: usize = 4;
+pub const IN_OBJECT_SLOTS: usize = 8;
 pub const OBJECT_FLAG_EXTENSIBLE: u8 = 1 << 0;
 pub const OBJECT_FLAG_ARRAY_LENGTH_NON_WRITABLE: u8 = 1 << 1;
 pub const OBJECT_FLAG_ELEMENT_ATTRIBUTES: u8 = 1 << 2;

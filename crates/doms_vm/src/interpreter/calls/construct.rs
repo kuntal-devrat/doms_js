@@ -71,7 +71,10 @@ impl Vm {
                         let mut stack_args = [JsValue::undefined(); 8];
                         stack_args[..args_len]
                             .copy_from_slice(&self.temp_roots[args_start..args_start + args_len]);
-                        native.call(self, cur_this, &stack_args[..args_len])
+                        let r = native.call(self, cur_this, &stack_args[..args_len]);
+                        stack_args = [JsValue::undefined(); 8];
+                        std::hint::black_box(&stack_args);
+                        r
                     } else {
                         let cur_args = self.temp_roots[args_start..args_start + args_len].to_vec();
                         native.call(self, cur_this, &cur_args)

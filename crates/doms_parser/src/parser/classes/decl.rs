@@ -24,6 +24,9 @@ impl<'a> Parser<'a> {
         } else {
             Some(self.parse_class_binding_identifier()?)
         };
+        if self.check(&TokenKind::Lt) {
+            self.skip_type_parameters()?;
+        }
         let super_class = if self.match_token(&TokenKind::Extends)? {
             let expr = self.parse_expression(1)?;
             if matches!(&expr, Expression::ArrowExpr { .. }) {
@@ -37,6 +40,13 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        if self.check(&TokenKind::Implements)
+            || matches!(&self.current.kind, TokenKind::Ident(id) if id == "implements")
+        {
+            while !self.check(&TokenKind::LBrace) && !self.check(&TokenKind::Eof) {
+                self.advance()?;
+            }
+        }
         let (ctor_params, ctor_body, has_ctor, elements) =
             self.parse_class_elements(super_class.is_some())?;
         Ok(Statement::ClassDecl(ClassDefinition {

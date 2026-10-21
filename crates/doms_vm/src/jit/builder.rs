@@ -1457,14 +1457,18 @@ fn compile_native_internal(
                     } else {
                         let mono_buf;
                         let ic_entries: Option<&[(u32, u32)]> = match slot.as_ref() {
-                            Some(&FeedbackSlot::Monomorphic { shape_id, offset }) if offset < 4 => {
+                            Some(&FeedbackSlot::Monomorphic { shape_id, offset })
+                                if offset < crate::object::IN_OBJECT_SLOTS as u32 =>
+                            {
                                 mono_buf = [(shape_id, offset)];
                                 Some(&mono_buf[..])
                             }
                             Some(FeedbackSlot::Polymorphic { entries })
                                 if !entries.is_empty()
                                     && entries.len() <= 4
-                                    && entries.iter().all(|(_, off)| *off < 4) =>
+                                    && entries.iter().all(|(_, off)| {
+                                        *off < crate::object::IN_OBJECT_SLOTS as u32
+                                    }) =>
                             {
                                 Some(entries.as_slice())
                             }
@@ -1638,14 +1642,18 @@ fn compile_native_internal(
                     let slot = chunk.get_feedback_slot(ip);
                     let mono_buf;
                     let ic_entries: Option<&[(u32, u32)]> = match slot.as_ref() {
-                        Some(&FeedbackSlot::Monomorphic { shape_id, offset }) if offset < 4 => {
+                        Some(&FeedbackSlot::Monomorphic { shape_id, offset })
+                            if offset < crate::object::IN_OBJECT_SLOTS as u32 =>
+                        {
                             mono_buf = [(shape_id, offset)];
                             Some(&mono_buf[..])
                         }
                         Some(FeedbackSlot::Polymorphic { entries })
                             if !entries.is_empty()
                                 && entries.len() <= 4
-                                && entries.iter().all(|(_, off)| *off < 4) =>
+                                && entries.iter().all(|(_, off)| {
+                                    *off < crate::object::IN_OBJECT_SLOTS as u32
+                                }) =>
                         {
                             Some(entries.as_slice())
                         }

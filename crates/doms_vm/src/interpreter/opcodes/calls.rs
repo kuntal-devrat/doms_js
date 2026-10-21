@@ -100,7 +100,10 @@ impl Vm {
             let mut stack_args = [JsValue::undefined(); 8];
             stack_args[..argc_usize]
                 .copy_from_slice(&self.temp_roots[args_start..args_start + argc_usize]);
-            self.construct(cur_callee, &stack_args[..argc_usize])
+            let r = self.construct(cur_callee, &stack_args[..argc_usize]);
+            stack_args = [JsValue::undefined(); 8];
+            std::hint::black_box(&stack_args);
+            r
         } else {
             let heap_args = self.temp_roots[args_start..args_start + argc_usize].to_vec();
             self.construct(cur_callee, &heap_args)

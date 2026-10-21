@@ -46,6 +46,18 @@ impl<'a> Parser<'a> {
                 self.advance()?; // 'using'
                 self.parse_using_decl()
             }
+            TokenKind::Interface => {
+                self.parse_typescript_type_or_interface_decl()?;
+                Ok(Statement::Empty)
+            }
+            TokenKind::Ident(ref id)
+                if (id == "type" || id == "interface")
+                    && !self.peeked.has_preceding_line_terminator
+                    && matches!(self.peeked.kind, TokenKind::Ident(_)) =>
+            {
+                self.parse_typescript_type_or_interface_decl()?;
+                Ok(Statement::Empty)
+            }
             TokenKind::Async => {
                 if self.peeked.kind == TokenKind::Function
                     && !self.peeked.has_preceding_line_terminator

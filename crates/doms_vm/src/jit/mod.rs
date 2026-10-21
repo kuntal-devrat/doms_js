@@ -554,4 +554,24 @@ mod tests {
             .unwrap();
         assert_eq!(res.as_number(), Some(12375.0));
     }
+
+    #[test]
+    fn test_in_object_property_storage_8_slots() {
+        let mut vm = Vm::new();
+        let obj = vm.alloc_object();
+        for i in 0..8 {
+            vm.set_property(obj, &format!("prop{}", i), JsValue::from_int32(i * 10));
+        }
+        let jsobj = unsafe { &*(obj.as_object_ptr().unwrap() as *const crate::object::JsObject) };
+        // All 8 properties reside directly in in_object_slots with zero extra_slots allocation!
+        assert_eq!(jsobj.extra_slots.len(), 0);
+        for i in 0..8 {
+            assert_eq!(jsobj.in_object_slots[i].as_int32(), Some((i * 10) as i32));
+        }
+        // 9th property spills to extra_slots
+        vm.set_property(obj, "prop8", JsValue::from_int32(80));
+        let jsobj = unsafe { &*(obj.as_object_ptr().unwrap() as *const crate::object::JsObject) };
+        assert_eq!(jsobj.extra_slots.len(), 1);
+        assert_eq!(jsobj.extra_slots[0].as_int32(), Some(80));
+    }
 }

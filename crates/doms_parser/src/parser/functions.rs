@@ -57,9 +57,20 @@ impl<'a> Parser<'a> {
                         self.destruct_counter += 1;
                     } else {
                         let id = self.expect_identifier()?;
+                        if self.match_token(&TokenKind::Colon)? {
+                            self.skip_type_annotation()?;
+                        }
                         params.push(format!("...{}", id));
                     }
                     break;
+                }
+                while Self::is_ts_modifier(&self.current.kind)
+                    && matches!(
+                        &self.peeked.kind,
+                        TokenKind::Ident(_) | TokenKind::LBracket | TokenKind::LBrace
+                    )
+                {
+                    self.advance()?;
                 }
                 let mut destruct_decls = Vec::new();
                 let (id, is_destruct) = if self.match_token(&TokenKind::LBracket)? {
@@ -77,6 +88,12 @@ impl<'a> Parser<'a> {
                 } else {
                     (self.expect_identifier()?, false)
                 };
+                if self.match_token(&TokenKind::Question)? {
+                    // Optional TypeScript parameter `x?: Type`
+                }
+                if self.match_token(&TokenKind::Colon)? {
+                    self.skip_type_annotation()?;
+                }
                 if self.match_token(&TokenKind::Eq)? {
                     self.current_params_simple = false;
                     let def_expr = self.parse_expression(1)?;
@@ -162,7 +179,13 @@ impl<'a> Parser<'a> {
         } else {
             self.expect_identifier()?
         };
+        if self.check(&TokenKind::Lt) {
+            self.skip_type_parameters()?;
+        }
         let (params, defaults) = self.parse_formal_parameters()?;
+        if self.match_token(&TokenKind::Colon)? {
+            self.skip_type_annotation()?;
+        }
         let mut body =
             self.parse_function_body(&params, if name.is_empty() { None } else { Some(&name) })?;
         Self::apply_parameter_defaults(&mut body, defaults);
@@ -400,6 +423,10 @@ impl<'a> Parser<'a> {
             None
         };
 
+        if self.check(&TokenKind::Lt) {
+            self.skip_type_parameters()?;
+        }
+
         let (params, defaults) = match self.parse_formal_parameters() {
             Ok(p) => p,
             Err(e) => {
@@ -409,6 +436,9 @@ impl<'a> Parser<'a> {
                 return Err(e);
             }
         };
+        if self.match_token(&TokenKind::Colon)? {
+            self.skip_type_annotation()?;
+        }
         let mut body = match self.parse_function_body(&params, name.as_deref()) {
             Ok(b) => b,
             Err(e) => {

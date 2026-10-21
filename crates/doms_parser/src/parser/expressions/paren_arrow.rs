@@ -7,6 +7,9 @@ impl<'a> Parser<'a> {
         col: usize,
     ) -> Result<Expression, ParseError> {
         if self.match_token(&TokenKind::RParen)? {
+            if self.match_token(&TokenKind::Colon)? {
+                self.skip_type_annotation()?;
+            }
             if !self.current.has_preceding_line_terminator
                 && self.match_token(&TokenKind::FatArrow)?
             {
@@ -39,12 +42,31 @@ impl<'a> Parser<'a> {
                 rest_param = Some(pat);
             } else {
                 let id = self.expect_identifier()?;
+                if self.match_token(&TokenKind::Colon)? {
+                    self.skip_type_annotation()?;
+                }
                 rest_param = Some(Expression::Identifier(id));
             }
         } else {
             let prev_spread = self.allow_spread;
             self.allow_spread = true;
             let first = self.parse_expression(1)?;
+            let _ = self.match_token(&TokenKind::Question)?;
+            if self.match_token(&TokenKind::Colon)? {
+                self.skip_type_annotation()?;
+            }
+            let first = if self.match_token(&TokenKind::Eq)? {
+                let def = self.parse_expression(1)?;
+                Expression::Assignment {
+                    target: match &first {
+                        Expression::Identifier(id) => id.clone(),
+                        _ => format!("{:?}", first),
+                    },
+                    value: Box::new(def),
+                }
+            } else {
+                first
+            };
             self.allow_spread = prev_spread;
             exprs.push(first);
             while self.match_token(&TokenKind::Comma)? {
@@ -60,6 +82,9 @@ impl<'a> Parser<'a> {
                         rest_param = Some(pat);
                     } else {
                         let id = self.expect_identifier()?;
+                        if self.match_token(&TokenKind::Colon)? {
+                            self.skip_type_annotation()?;
+                        }
                         rest_param = Some(Expression::Identifier(id));
                     }
                     break;
@@ -67,12 +92,31 @@ impl<'a> Parser<'a> {
                 let prev_spread = self.allow_spread;
                 self.allow_spread = true;
                 let next = self.parse_expression(1)?;
+                let _ = self.match_token(&TokenKind::Question)?;
+                if self.match_token(&TokenKind::Colon)? {
+                    self.skip_type_annotation()?;
+                }
+                let next = if self.match_token(&TokenKind::Eq)? {
+                    let def = self.parse_expression(1)?;
+                    Expression::Assignment {
+                        target: match &next {
+                            Expression::Identifier(id) => id.clone(),
+                            _ => format!("{:?}", next),
+                        },
+                        value: Box::new(def),
+                    }
+                } else {
+                    next
+                };
                 self.allow_spread = prev_spread;
                 exprs.push(next);
             }
         }
         self.expect(TokenKind::RParen)?;
         self.allow_in = old_in;
+        if self.match_token(&TokenKind::Colon)? {
+            self.skip_type_annotation()?;
+        }
         if !self.current.has_preceding_line_terminator && self.match_token(&TokenKind::FatArrow)? {
             for e in &exprs {
                 if contains_yield_expr(e) {

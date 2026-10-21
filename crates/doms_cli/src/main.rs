@@ -174,15 +174,13 @@ fn main() {
 }
 
 fn print_help() {
-    println!("DOMS JavaScript Engine CLI");
+    println!("DOMS JavaScript & TypeScript Engine CLI");
     println!("Usage:");
     println!("  doms                     Start interactive REPL");
-    println!("  doms run <file.js>       Execute a JavaScript file");
-    println!(
-        "  doms run <file.js> --inspect       Enable Chrome DevTools Protocol live inspection"
-    );
-    println!("  doms run <file.js> --inspect-brk   Wait for DevTools connection before execution");
-    println!("  doms eval \"<code>\"       Evaluate JavaScript code string");
+    println!("  doms run <file.[js|ts]>  Execute a JavaScript or TypeScript file");
+    println!("  doms run <file> --inspect         Enable Chrome DevTools Protocol live inspection");
+    println!("  doms run <file> --inspect-brk     Wait for DevTools connection before execution");
+    println!("  doms eval \"<code>\"       Evaluate JavaScript or TypeScript code string");
     println!("  doms test262 [opts]      Run official Test262 ECMAScript conformance test suite");
     println!("  doms --version           Show version information");
     println!("  doms --help              Show this help message");

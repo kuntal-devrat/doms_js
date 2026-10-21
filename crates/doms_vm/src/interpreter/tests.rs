@@ -839,3 +839,42 @@ fn test_gc_reclaims_dead_large_objects() {
     );
     assert!(!vm.heap.large_objects.contains(p));
 }
+
+#[test]
+fn test_proxy_mop_reactivity_and_reflect() {
+    let mut vm = Vm::new();
+    let res = vm
+        .eval(
+            r#"
+        const log = [];
+        const raw = { count: 0, items: ["a", "b"] };
+        const state = new Proxy(raw, {
+            get(target, prop, receiver) {
+                log.push("get:" + String(prop));
+                return Reflect.get(target, prop, receiver);
+            },
+            set(target, prop, value, receiver) {
+                log.push("set:" + String(prop) + "=" + String(value));
+                return Reflect.set(target, prop, value, receiver);
+            },
+            has(target, prop) {
+                log.push("has:" + String(prop));
+                return Reflect.has(target, prop);
+            },
+            deleteProperty(target, prop) {
+                log.push("delete:" + String(prop));
+                return Reflect.deleteProperty(target, prop);
+            }
+        });
+
+        state.count = 42;
+        const c = state.count;
+        const exists = "count" in state;
+        delete state.items;
+
+        log.join(",");
+    "#,
+        )
+        .unwrap();
+    assert_eq!(vm.to_string_value(res), "set:count=42,get:count,has:count,delete:items");
+}

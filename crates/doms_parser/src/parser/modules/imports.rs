@@ -29,6 +29,20 @@ impl<'a> Parser<'a> {
             });
         }
 
+        // Support TypeScript type-only import: import type { Foo } from '...';
+        if matches!(&self.current.kind, TokenKind::Ident(id) if id == "type")
+            && matches!(
+                &self.peeked.kind,
+                TokenKind::LBrace | TokenKind::Star | TokenKind::Ident(_)
+            )
+        {
+            while !self.check(&TokenKind::Semicolon) && !self.check(&TokenKind::Eof) {
+                self.advance()?;
+            }
+            let _ = self.consume_semicolon();
+            return Ok(Statement::Empty);
+        }
+
         let mut specifiers = Vec::new();
         let mut is_default = false;
         let mut is_all = false;

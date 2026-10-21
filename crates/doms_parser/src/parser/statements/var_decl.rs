@@ -11,6 +11,9 @@ impl<'a> Parser<'a> {
                 self.destruct_counter += 1;
                 let mut destruct_decls = Vec::new();
                 self.parse_array_destructuring_into(&tmp_name, &mut destruct_decls)?;
+                if self.match_token(&TokenKind::Colon)? {
+                    self.skip_type_annotation()?;
+                }
                 let init = if self.match_token(&TokenKind::Eq)? {
                     Some(self.parse_expression(1)?)
                 } else {
@@ -35,6 +38,9 @@ impl<'a> Parser<'a> {
                 self.destruct_counter += 1;
                 let mut destruct_decls = Vec::new();
                 self.parse_object_destructuring_into(&tmp_name, &mut destruct_decls)?;
+                if self.match_token(&TokenKind::Colon)? {
+                    self.skip_type_annotation()?;
+                }
                 let init = if self.match_token(&TokenKind::Eq)? {
                     Some(self.parse_expression(1)?)
                 } else {
@@ -62,6 +68,9 @@ impl<'a> Parser<'a> {
                         self.current.line,
                         self.current.col,
                     ));
+                }
+                if self.match_token(&TokenKind::Colon)? {
+                    self.skip_type_annotation()?;
                 }
                 let init = if self.match_token(&TokenKind::Eq)? {
                     Some(self.parse_expression(1)?)

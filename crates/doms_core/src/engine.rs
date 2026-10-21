@@ -193,6 +193,14 @@ impl<'isolate> Context<'isolate> {
         Ok(result)
     }
 
+    /// Evaluate a JavaScript source string and pump the full event loop until all
+    /// pending timers, network fetches, and microtasks complete.
+    pub fn eval_async(&mut self, source: &str) -> Result<JsValue, EngineError> {
+        let result = self.eval(source)?;
+        self.isolate.vm.run_event_loop().map_err(EngineError::from)?;
+        Ok(result)
+    }
+
     /// Evaluate an ES6 module source string, executing it, draining microtasks,
     /// and returning the module namespace object containing all exported bindings.
     pub fn eval_module(&mut self, source: &str) -> Result<JsValue, EngineError> {
@@ -608,5 +616,96 @@ mod tests {
 
         let vec_out: Vec<i32> = ctx.eval_as("[1, 2, 3, 4, 5]").unwrap();
         assert_eq!(vec_out, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_eval_async_with_timers_and_promises() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let mut ctx = isolate.create_context();
+
+        ctx.eval_async(
+            r#"
+            let state = 0;
+            setTimeout(() => {
+                state = 42;
+            }, 1);
+        "#,
+        )
+        .unwrap();
+
+        let final_state: i32 = ctx.eval_as("state").unwrap();
+        assert_eq!(final_state, 42);
+    }
+
+    #[test]
+    fn test_native_typescript_execution() {
+        let engine = Engine::new();
+        let mut isolate = engine.create_isolate();
+        let mut ctx = isolate.create_context();
+
+        let ts_code = r#"
+            // Type alias and interface declarations
+            type ID = string | number;
+            interface User {
+                name: string;
+                age?: number;
+            }
+
+            // Function with generics, param types, and return type
+            function add<T>(a: number, b: number): number {
+                return a + b;
+            }
+
+            // Arrow function with typed parameters and return type
+            const multiply = (x: number, y: number): number => x * y;
+
+            // Rest parameter with type annotation
+            function sum(...values: number[]): number {
+                return values.reduce((acc, curr) => acc + curr, 0);
+            }
+
+            // Type assertion (as and satisfies) and non-null assertion
+            const rawVal = 100 as any;
+            const text: string = "hello"!;
+
+            // Class with modifiers, typed fields, and implements
+            interface Greetable {
+                greet(): string;
+            }
+
+            class Person implements Greetable {
+                public readonly id: number = 42;
+                private name: string;
+
+                constructor(name: string) {
+                    this.name = name;
+                }
+
+                public greet(): string {
+                    return "Hello " + this.name;
+                }
+
+                public get info(): string {
+                    return this.name + ":" + this.id;
+                }
+            }
+
+            const p = new Person("DOMS");
+            const sumResult = sum(add(2, 3), multiply(4, 5));
+            const greeting = p.greet();
+            const personInfo = p.info;
+        "#;
+
+        ctx.eval(ts_code).unwrap();
+
+        let sum_result: i32 = ctx.eval_as("sumResult").unwrap();
+        assert_eq!(sum_result, 25); // (2+3) + (4*5) = 5 + 20 = 25
+
+        let greeting: String = ctx.eval_as("greeting").unwrap();
+        assert_eq!(greeting, "Hello DOMS");
+
+        let person_info: String = ctx.eval_as("personInfo").unwrap();
+        assert_eq!(person_info, "DOMS:42");
     }
 }

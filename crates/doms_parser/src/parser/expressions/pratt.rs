@@ -209,6 +209,22 @@ impl<'a> Parser<'a> {
                 ));
             }
 
+            // TypeScript non-null assertion: expr!
+            if self.check(&TokenKind::Bang) && !self.current.has_preceding_line_terminator {
+                self.advance()?;
+                continue;
+            }
+
+            // TypeScript type assertion: expr as Type or expr satisfies Type
+            if (self.check(&TokenKind::As)
+                || matches!(&self.current.kind, TokenKind::Ident(id) if id == "satisfies"))
+                && !self.current.has_preceding_line_terminator
+            {
+                self.advance()?;
+                self.skip_type_annotation()?;
+                continue;
+            }
+
             if self.check(&TokenKind::Question) {
                 if min_bp > 1 {
                     break;

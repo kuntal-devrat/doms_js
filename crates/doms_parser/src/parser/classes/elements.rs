@@ -36,6 +36,15 @@ impl<'a> Parser<'a> {
             if self.match_token(&TokenKind::Semicolon)? {
                 continue;
             }
+            while Self::is_ts_modifier(&self.current.kind)
+                && !matches!(
+                    &self.peeked.kind,
+                    TokenKind::LParen | TokenKind::Colon | TokenKind::Eq | TokenKind::Semicolon
+                )
+                && !self.peeked.has_preceding_line_terminator
+            {
+                self.advance()?;
+            }
             let is_static = if self.check(&TokenKind::Static) {
                 if self.peeked.kind == TokenKind::LParen
                     || self.peeked.kind == TokenKind::Colon
@@ -49,6 +58,15 @@ impl<'a> Parser<'a> {
             } else {
                 false
             };
+            while matches!(&self.current.kind, TokenKind::Ident(id) if id == "readonly")
+                && !matches!(
+                    &self.peeked.kind,
+                    TokenKind::LParen | TokenKind::Colon | TokenKind::Eq | TokenKind::Semicolon
+                )
+                && !self.peeked.has_preceding_line_terminator
+            {
+                self.advance()?;
+            }
 
             if is_static && self.check(&TokenKind::LBrace) {
                 let prev_in_func = self.in_function;
@@ -154,6 +172,9 @@ impl<'a> Parser<'a> {
                 if is_getter {
                     self.expect(TokenKind::LParen)?;
                     self.expect(TokenKind::RParen)?;
+                    if self.match_token(&TokenKind::Colon)? {
+                        self.skip_type_annotation()?;
+                    }
                     let prev_ctor = self.in_derived_constructor;
                     let prev_method = self.in_method;
                     let prev_gen = self.in_generator;
@@ -210,6 +231,9 @@ impl<'a> Parser<'a> {
                     self.in_generator = false;
                     self.in_async = false;
                     let (params, defaults) = self.parse_formal_parameters()?;
+                    if self.match_token(&TokenKind::Colon)? {
+                        self.skip_type_annotation()?;
+                    }
                     if params.len() != 1 || params[0].starts_with("...") {
                         return Err(ParseError::General(
                             "Setter must have exactly one formal parameter".to_string(),
@@ -313,6 +337,9 @@ impl<'a> Parser<'a> {
                     self.in_generator = false;
                     self.in_async = false;
                     let (params, defaults) = self.parse_formal_parameters()?;
+                    if self.match_token(&TokenKind::Colon)? {
+                        self.skip_type_annotation()?;
+                    }
                     let mut body = self.parse_function_body(&params, None)?;
                     self.in_generator = prev_gen;
                     self.in_async = prev_async;
@@ -326,6 +353,10 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            if self.check(&TokenKind::Lt) {
+                self.skip_type_parameters()?;
+            }
+
             if self.check(&TokenKind::LParen) {
                 let prev_ctor = self.in_derived_constructor;
                 let prev_method = self.in_method;
@@ -336,6 +367,9 @@ impl<'a> Parser<'a> {
                 self.in_generator = is_generator;
                 self.in_async = is_async;
                 let (params, defaults) = self.parse_formal_parameters()?;
+                if self.match_token(&TokenKind::Colon)? {
+                    self.skip_type_annotation()?;
+                }
                 let mut body = self.parse_function_body(&params, None)?;
                 self.in_generator = prev_gen;
                 self.in_async = prev_async;
@@ -375,6 +409,11 @@ impl<'a> Parser<'a> {
                     kind: ClassElementKind::Method(method_expr),
                 });
             } else {
+                let _ = self.match_token(&TokenKind::Question)?;
+                let _ = self.match_token(&TokenKind::Bang)?;
+                if self.match_token(&TokenKind::Colon)? {
+                    self.skip_type_annotation()?;
+                }
                 let init_opt = if self.match_token(&TokenKind::Eq)? {
                     let expr = self.parse_expression(0)?;
                     self.check_field_initializer(&expr)?;

@@ -11,6 +11,21 @@ impl<'a> Parser<'a> {
             ));
         }
 
+        // Support TypeScript type-only export: export type { Foo } or export type Foo = ... or export interface Bar ...
+        if matches!(&self.current.kind, TokenKind::Ident(id) if id == "type" || id == "interface") {
+            if matches!(&self.current.kind, TokenKind::Ident(id) if id == "type")
+                && self.peeked.kind == TokenKind::LBrace
+            {
+                while !self.check(&TokenKind::Semicolon) && !self.check(&TokenKind::Eof) {
+                    self.advance()?;
+                }
+                let _ = self.consume_semicolon();
+                return Ok(Statement::Empty);
+            }
+            self.parse_typescript_type_or_interface_decl()?;
+            return Ok(Statement::Empty);
+        }
+
         if self.match_token(&TokenKind::Star)? {
             let all_as = if self.match_token(&TokenKind::As)? {
                 Some(self.expect_export_name()?)

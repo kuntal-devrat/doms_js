@@ -57,3 +57,7 @@ panic = "unwind"
 debug = false
 strip = true
 
+[profile.test.package.doms_vm]
+opt-level = 2
+
+

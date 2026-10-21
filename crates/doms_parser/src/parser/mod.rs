@@ -7,6 +7,7 @@ pub mod functions;
 pub mod modules;
 pub mod program;
 pub mod statements;
+pub mod typescript;
 pub mod validation;
 
 use crate::lexer::{LexError, Lexer, Token, TokenKind};
