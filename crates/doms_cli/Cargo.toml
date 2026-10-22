@@ -10,7 +10,6 @@ name = "doms"
 path = "src/main.rs"
 
 [dependencies]
-doms_core.workspace = true
 doms_parser.workspace = true
 doms_compiler.workspace = true
 doms_vm.workspace = true

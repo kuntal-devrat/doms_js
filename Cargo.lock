@@ -304,7 +304,6 @@ name = "doms_cli"
 version = "0.1.0"
 dependencies = [
  "doms_compiler",
- "doms_core",
  "doms_parser",
  "doms_vm",
  "log",
@@ -315,7 +314,6 @@ name = "doms_compiler"
 version = "0.1.0"
 dependencies = [
  "doms_parser",
- "log",
  "num-bigint",
  "num-traits",
  "thiserror",
@@ -348,7 +346,6 @@ name = "doms_fuzz"
 version = "0.1.0"
 dependencies = [
  "doms_compiler",
- "doms_core",
  "doms_parser",
  "doms_vm",
 ]
@@ -356,16 +353,12 @@ dependencies = [
 [[package]]
 name = "doms_gc"
 version = "0.1.0"
-dependencies = [
- "log",
-]
 
 [[package]]
 name = "doms_parallel"
 version = "0.1.0"
 dependencies = [
  "libc",
- "log",
  "thiserror",
 ]
 
@@ -373,7 +366,6 @@ dependencies = [
 name = "doms_parser"
 version = "0.1.0"
 dependencies = [
- "log",
  "num-bigint",
  "num-traits",
  "regress",
@@ -410,7 +402,6 @@ name = "doms_wasm"
 version = "0.1.0"
 dependencies = [
  "doms_compiler",
- "doms_core",
  "doms_parser",
  "doms_vm",
  "log",
