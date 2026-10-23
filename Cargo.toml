@@ -17,11 +17,6 @@ members = [
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/kuntal-devrat/doms_js"
-homepage = "https://domsjs.dev"
-description = "A modular, embeddable JavaScript engine with first-class parallelism support"
-categories = ["compilers", "wasm", "web-programming"]
-keywords = ["javascript", "engine", "embeddable", "parallel", "ecmascript"]
 
 [workspace.dependencies]
 # Internal crates
@@ -31,9 +26,6 @@ doms_compiler = { path = "crates/doms_compiler" }
 doms_vm = { path = "crates/doms_vm" }
 doms_parallel = { path = "crates/doms_parallel" }
 doms_core = { path = "crates/doms_core" }
-doms_ffi = { path = "crates/doms_ffi" }
-doms_cli = { path = "crates/doms_cli" }
-doms_wasm = { path = "crates/doms_wasm" }
 
 # External dependencies
 thiserror = "2"

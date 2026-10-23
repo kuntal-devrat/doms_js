@@ -6,6 +6,5 @@ license.workspace = true
 description = "Generational garbage collector for the DOMS JavaScript engine"
 
 [dependencies]
-log.workspace = true
 
 [dev-dependencies]

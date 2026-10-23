@@ -7,7 +7,6 @@ description = "Parallelism primitives, isolate messaging, and scheduler for DOMS
 
 [dependencies]
 thiserror.workspace = true
-log.workspace = true
 libc.workspace = true
 
 
