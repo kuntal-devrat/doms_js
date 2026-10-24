@@ -37,7 +37,6 @@ pub fn compile_eval(program: &Program, is_strict: bool) -> Result<BytecodeChunk,
     compiler.is_eval = true;
     compiler.compile(program)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,5 +77,13 @@ mod tests {
 
         let chunk_non_strict = compile_eval(&program, false).unwrap();
         assert!(chunk_non_strict.instructions.len() > 0);
+    }
+
+    #[test]
+    fn test_compile_basic_program() {
+        let program = parse("let x = 1;").unwrap();
+        let chunk = compile(&program).unwrap();
+        assert!(!chunk.instructions.is_empty());
+        assert!(!chunk.constants.is_empty());
     }
 }
