@@ -89,27 +89,27 @@ impl SourceMap {
                 if let Some(pos2) = rest.rfind(':') {
                     if let Ok(line_num) = rest[pos2 + 1..].parse::<u32>() {
                         if let Some(orig) = self.lookup(line_num, col_num) {
-                            let prefix = &frame[..pos2];
-
-                            // Extract everything before the filename
-                            let filename_start = prefix
+                            let before_colon = &frame[..pos2];
+                            let file_start = before_colon
                                 .rfind('(')
+                                .or_else(|| before_colon.rfind(' '))
                                 .map(|i| i + 1)
-                                .unwrap_or_else(|| prefix.rfind(' ').map(|i| i + 1).unwrap_or(0));
-                            let pre_file = &prefix[..filename_start];
+                                .unwrap_or(0);
+                            let prefix = &frame[..file_start];
 
                             let name_part = orig.name.as_deref().unwrap_or("");
-                            let orig_call = if !name_part.is_empty() {
-                                format!("{}{} (from {})", pre_file, orig.source, name_part)
+                            let source_and_name = if !name_part.is_empty() {
+                                format!("{} (from {})", orig.source, name_part)
                             } else {
-                                format!("{}{}", pre_file, orig.source)
+                                orig.source.clone()
                             };
 
-                            let mut result = format!("{}:{}:{}", orig_call, orig.line, orig.column);
-                            if has_paren {
-                                result.push(')');
-                            }
-                            return result;
+                            let suffix = if has_paren { ")" } else { "" };
+
+                            return format!(
+                                "{}{}:{}:{}{}",
+                                prefix, source_and_name, orig.line, orig.column, suffix
+                            );
                         }
                     }
                 }
@@ -393,6 +393,18 @@ mod tests {
         assert_eq!(
             sm.symbolicate_frame("    at invalid"),
             "    at invalid"
+        );
+
+        // Random text format
+        assert_eq!(
+            sm.symbolicate_frame("just some random text"),
+            "just some random text"
+        );
+
+        // Incomplete frame format
+        assert_eq!(
+            sm.symbolicate_frame("    at foo (bundle.js:1)"),
+            "    at foo (bundle.js:1)"
         );
     }
 }
