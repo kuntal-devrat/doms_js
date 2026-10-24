@@ -83,19 +83,33 @@ impl SourceMap {
     pub fn symbolicate_frame(&self, frame: &str) -> String {
         // Find line and column in format `filename:line:col`
         if let Some(pos) = frame.rfind(':') {
+            let has_paren = frame.ends_with(')');
             if let Ok(col_num) = frame[pos + 1..].trim_end_matches(')').parse::<u32>() {
                 let rest = &frame[..pos];
                 if let Some(pos2) = rest.rfind(':') {
                     if let Ok(line_num) = rest[pos2 + 1..].parse::<u32>() {
                         if let Some(orig) = self.lookup(line_num, col_num) {
                             let prefix = &frame[..pos2];
+
+                            // Extract everything before the filename
+                            let filename_start = prefix
+                                .rfind('(')
+                                .map(|i| i + 1)
+                                .unwrap_or_else(|| prefix.rfind(' ').map(|i| i + 1).unwrap_or(0));
+                            let pre_file = &prefix[..filename_start];
+
                             let name_part = orig.name.as_deref().unwrap_or("");
                             let orig_call = if !name_part.is_empty() {
-                                format!("{} (from {})", prefix, name_part)
+                                format!("{}{} (from {})", pre_file, orig.source, name_part)
                             } else {
-                                prefix.to_string()
+                                format!("{}{}", pre_file, orig.source)
                             };
-                            return format!("{}:{}:{}", orig_call, orig.line, orig.column);
+
+                            let mut result = format!("{}:{}:{}", orig_call, orig.line, orig.column);
+                            if has_paren {
+                                result.push(')');
+                            }
+                            return result;
                         }
                     }
                 }
@@ -327,5 +341,58 @@ mod tests {
         let invalid_mapping_json = r#"{"mappings": "!!!"}"#;
         let err = SourceMap::parse_json(invalid_mapping_json).expect_err("should return Err on invalid mapping");
         assert!(err.contains("Invalid Base64 character: !"));
+    }
+
+    #[test]
+    fn test_symbolicate_frame() {
+        let sm = SourceMap {
+            version: 3,
+            file: Some("bundle.js".to_string()),
+            sources: vec!["src/foo.ts".to_string(), "src/bar.ts".to_string()],
+            sources_content: vec![],
+            names: vec!["myFunc".to_string()],
+            mappings: vec![
+                Mapping {
+                    generated_line: 1,
+                    generated_column: 42,
+                    original_source_index: Some(0),
+                    original_line: Some(15),
+                    original_column: Some(8),
+                    original_name_index: Some(0),
+                },
+                Mapping {
+                    generated_line: 2,
+                    generated_column: 10,
+                    original_source_index: Some(1),
+                    original_line: Some(10),
+                    original_column: Some(5),
+                    original_name_index: None,
+                },
+            ],
+        };
+
+        // Happy path: mapping with original name
+        assert_eq!(
+            sm.symbolicate_frame("    at foo (bundle.js:1:42)"),
+            "    at foo (src/foo.ts (from myFunc):15:8)"
+        );
+
+        // Missing name path
+        assert_eq!(
+            sm.symbolicate_frame("    at bar (bundle.js:2:10)"),
+            "    at bar (src/bar.ts:10:5)"
+        );
+
+        // A string that doesn't match the line/col (no mapping found)
+        assert_eq!(
+            sm.symbolicate_frame("    at unknown (bundle.js:3:15)"),
+            "    at unknown (bundle.js:3:15)"
+        );
+
+        // Invalid format string
+        assert_eq!(
+            sm.symbolicate_frame("    at invalid"),
+            "    at invalid"
+        );
     }
 }
