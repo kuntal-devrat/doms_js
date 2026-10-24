@@ -1,0 +1,44 @@
+--- crates/doms_vm/src/interpreter/opcodes/modules.rs
++++ crates/doms_vm/src/interpreter/opcodes/modules.rs
+@@ -4,6 +4,15 @@
+
+ impl Vm {
++    fn is_safe_import_path(src: &str) -> bool {
++        let path = std::path::Path::new(src);
++        !path.is_absolute()
++            && !path
++                .components()
++                .any(|c| matches!(c, std::path::Component::ParentDir))
++    }
++
+     pub(crate) fn op_export(
+         &mut self,
+         name_idx: u16,
+@@ -91,12 +100,7 @@
+             Constant::String(s) => s.clone(),
+             _ => return Err(VmError::TypeError("Import source must be string".into())),
+         };
+-        let path = std::path::Path::new(&src);
+-        if path.is_absolute()
+-            || path
+-                .components()
+-                .any(|c| matches!(c, std::path::Component::ParentDir))
+-        {
++        if !Self::is_safe_import_path(&src) {
+             return Err(VmError::TypeError("Invalid module path".into()));
+         }
+         let file_path = if let Some(ref base) = self.base_dir {
+@@ -182,12 +186,7 @@
+     pub(crate) fn op_dynamic_import(&mut self) -> Result<(), VmError> {
+         let specifier_val = self.pop()?;
+         let src = self.to_string_value(specifier_val);
+-        let path = std::path::Path::new(&src);
+-        if path.is_absolute()
+-            || path
+-                .components()
+-                .any(|c| matches!(c, std::path::Component::ParentDir))
+-        {
++        if !Self::is_safe_import_path(&src) {
+             return Err(VmError::TypeError("Invalid module path".into()));
+         }
+         let file_path = if let Some(ref base) = self.base_dir {
