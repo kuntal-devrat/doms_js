@@ -364,16 +364,8 @@ mod tests {
         }
 
         // False cases
-        let not_strict_reserved = [
-            "eval",
-            "arguments",
-            "foo",
-            "bar",
-            "var",
-            "const",
-            "function",
-            "await",
-        ];
+        let not_strict_reserved =
+            ["eval", "arguments", "foo", "bar", "var", "const", "function", "await"];
         for word in not_strict_reserved {
             assert!(!is_strict_reserved_word(word));
         }
