@@ -8,8 +8,11 @@ pub(super) fn register_worker(vm: &mut Vm) {
         let channel = doms_parallel::MessageChannel::new();
         let child_port = channel.port2;
 
+        let base_dir = vm.base_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
         std::thread::spawn(move || {
             let mut worker_vm = Vm::new();
+            worker_vm.base_dir = Some(base_dir.clone());
             let parent_port = Arc::new(std::sync::Mutex::new(child_port));
             let post_msg = worker_vm.alloc_closure_native_function(
                 "postMessage",
@@ -32,10 +35,22 @@ pub(super) fn register_worker(vm: &mut Vm) {
             );
             worker_vm.globals.insert("postMessage".to_string(), post_msg);
 
-            let code = if std::path::Path::new(&script).exists() {
-                std::fs::read_to_string(&script).unwrap_or(script)
+            let mut resolved_safe_path = None;
+            let target = base_dir.join(&script);
+            if let (Ok(canonical_base), Ok(canonical_target)) = (base_dir.canonicalize(), target.canonicalize()) {
+                if canonical_target.starts_with(&canonical_base) {
+                    resolved_safe_path = Some(canonical_target);
+                }
+            }
+
+            let code = if let Some(safe_path) = resolved_safe_path {
+                if safe_path.exists() {
+                    std::fs::read_to_string(&safe_path).unwrap_or(script.clone())
+                } else {
+                    script.clone()
+                }
             } else {
-                script
+                script.clone()
             };
 
             if let Ok(prog) = doms_parser::parse(&code) {
@@ -50,4 +65,19 @@ pub(super) fn register_worker(vm: &mut Vm) {
     });
 
     vm.globals.insert("Worker".to_string(), worker_ctor);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_worker_path_traversal_prevention() {
+        let mut vm = Vm::new();
+        let temp_dir = std::env::temp_dir();
+        vm.base_dir = Some(temp_dir);
+
+        let res = vm.eval("new Worker('../../etc/passwd');");
+        assert!(res.is_ok(), "Worker creation with path traversal should not crash or panic");
+    }
 }
