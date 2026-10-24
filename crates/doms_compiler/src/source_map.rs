@@ -310,4 +310,22 @@ mod tests {
         assert_eq!(p.source, "app.ts");
         assert_eq!(p.line, 1);
     }
+
+    #[test]
+    fn test_source_map_parse_json_malformed() {
+        // Test parsing gracefully handles missing fields and invalid JSON structure
+        let malformed_json = "{ malformed: json, [ }";
+        let sm = SourceMap::parse_json(malformed_json).expect("should not panic, but fallback to defaults");
+
+        assert_eq!(sm.version, 3);
+        assert_eq!(sm.file, None);
+        assert!(sm.sources.is_empty());
+        assert!(sm.names.is_empty());
+        assert!(sm.mappings.is_empty());
+
+        // Test that it returns an Err on invalid VLQ characters in mappings
+        let invalid_mapping_json = r#"{"mappings": "!!!"}"#;
+        let err = SourceMap::parse_json(invalid_mapping_json).expect_err("should return Err on invalid mapping");
+        assert!(err.contains("Invalid Base64 character: !"));
+    }
 }
