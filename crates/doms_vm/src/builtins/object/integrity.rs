@@ -162,3 +162,36 @@ pub(super) fn register_integrity(
 
     (prevent_extensions_fn, is_extensible_fn, freeze_fn, is_frozen_fn, seal_fn, is_sealed_fn)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Vm;
+    use crate::value::JsValue;
+
+    #[test]
+    fn test_prevent_extensions_internal_object() {
+        let mut vm = Vm::new();
+        let obj = vm.alloc_object();
+
+        // Should be extensible by default
+        assert_eq!(is_extensible_internal(&mut vm, obj).unwrap(), true);
+
+        // Prevent extensions
+        let res = prevent_extensions_internal(&mut vm, obj).unwrap();
+        assert_eq!(res, true);
+
+        // Should no longer be extensible
+        assert_eq!(is_extensible_internal(&mut vm, obj).unwrap(), false);
+    }
+
+    #[test]
+    fn test_prevent_extensions_internal_primitive() {
+        let mut vm = Vm::new();
+        let primitive = JsValue::from_double(42.0);
+
+        // Primitives shouldn't have extensions prevented in the same way, returns false
+        let res = prevent_extensions_internal(&mut vm, primitive).unwrap();
+        assert_eq!(res, false);
+    }
+}
