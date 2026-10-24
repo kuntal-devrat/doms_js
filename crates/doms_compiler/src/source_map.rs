@@ -407,4 +407,43 @@ mod tests {
             "    at foo (bundle.js:1)"
         );
     }
+
+    #[test]
+    fn test_symbolicate_frame_no_name_and_fallback() {
+        let sm_no_name = SourceMap {
+            version: 3,
+            file: Some("bundle.js".to_string()),
+            sources: vec!["src/foo.ts".to_string()],
+            sources_content: vec![],
+            names: vec![],
+            mappings: vec![
+                Mapping {
+                    generated_line: 1,
+                    generated_column: 42,
+                    original_source_index: Some(0),
+                    original_line: Some(15),
+                    original_column: Some(8),
+                    original_name_index: None,
+                }
+            ],
+        };
+
+        // Test without function name
+        assert_eq!(
+            sm_no_name.symbolicate_frame("    at foo (bundle.js:1:42)"),
+            "    at foo (src/foo.ts:15:8)"
+        );
+
+        // Test invalid format
+        assert_eq!(
+            sm_no_name.symbolicate_frame("invalid format string"),
+            "invalid format string"
+        );
+
+        // Test no match in mappings
+        assert_eq!(
+            sm_no_name.symbolicate_frame("    at foo (bundle.js:10:42)"),
+            "    at foo (bundle.js:10:42)"
+        );
+    }
 }
