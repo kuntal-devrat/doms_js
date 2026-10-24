@@ -90,7 +90,7 @@ jobs:
       - name: Run Test262 Subset
         run: |
           chmod +x tests/test262/run.sh
-          ./tests/test262/run.sh --summary-only || true
+          ./tests/test262/run.sh --summary-only -o tests/test262/results/summary.json
       - name: Upload Results
         uses: actions/upload-artifact@v4
         if: always()
@@ -101,7 +101,7 @@ jobs:
   # Gate: all checks must pass
   ci-pass:
     name: CI Pass
-    needs: [check, fmt, clippy, test, docs]
+    needs: [check, fmt, clippy, test, docs, test262]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -111,7 +111,8 @@ jobs:
              [[ "${{ needs.fmt.result }}" != "success" ]] || \
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
-             [[ "${{ needs.docs.result }}" != "success" ]]; then
+             [[ "${{ needs.docs.result }}" != "success" ]] || \
+             [[ "${{ needs.test262.result }}" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi

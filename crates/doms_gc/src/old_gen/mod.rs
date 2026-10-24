@@ -7,6 +7,7 @@
 //! 2. **Sweep:** Free unmarked objects, returning memory to free lists.
 
 use crate::header::{GC_ALIGN, GcHeader, HEADER_SIZE, TypeTag};
+use crate::trace::{TraceVisitor, TypeRegistry};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -57,6 +58,8 @@ pub struct OldGen {
     pub mark_worklist: Vec<*mut u8>,
     /// Free chunks reclaimed by sweep for reuse.
     pub free_chunks: Vec<FreeChunk>,
+    /// Registry mapping TypeTags to interior trace visitors.
+    pub type_registry: TypeRegistry,
 }
 
 impl Drop for OldGen {

@@ -878,3 +878,29 @@ fn test_proxy_mop_reactivity_and_reflect() {
         .unwrap();
     assert_eq!(vm.to_string_value(res), "set:count=42,get:count,has:count,delete:items");
 }
+
+#[test]
+fn test_vm_incremental_gc_slice() {
+    let mut vm = Vm::new();
+    let _ = vm
+        .eval(
+            r#"
+        globalThis.preserved = { id: 123, child: { name: "doms" } };
+        let temp = { dead: true };
+        "#,
+        )
+        .unwrap();
+
+    // Run incremental slices with budget 16 objects per slice
+    let mut done = false;
+    for _ in 0..100 {
+        if vm.gc_incremental_slice(16) {
+            done = true;
+            break;
+        }
+    }
+    assert!(done, "Incremental GC slices should complete");
+
+    let check = vm.eval("globalThis.preserved.child.name").unwrap();
+    assert_eq!(vm.to_string_value(check), "doms");
+}

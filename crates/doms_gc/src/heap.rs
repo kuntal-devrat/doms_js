@@ -4,10 +4,12 @@
 //! It routes allocations to the appropriate space (nursery, old gen, or
 //! large object space) and triggers collections when needed.
 
-use crate::header::TypeTag;
+use crate::header::{GcHeader, TypeTag};
 use crate::large_object::{LARGE_OBJECT_THRESHOLD, LargeObjectSpace};
 use crate::nursery::Nursery;
 use crate::old_gen::OldGen;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// Configuration for a GC heap.
 #[derive(Debug, Clone)]
@@ -82,6 +84,45 @@ impl RememberedSet {
     }
 }
 
+/// Coordinator for background concurrent GC marking in the old generation.
+pub struct ConcurrentMarker {
+    worker: Option<std::thread::JoinHandle<()>>,
+    stop_signal: Arc<AtomicBool>,
+    done_flag: Arc<AtomicBool>,
+    shared_worklist: Arc<Mutex<Vec<usize>>>,
+}
+
+impl ConcurrentMarker {
+    pub fn push_work(&self, ptr: *mut u8) {
+        if let Ok(mut worklist) = self.shared_worklist.lock() {
+            worklist.push(ptr as usize);
+            self.done_flag.store(false, Ordering::Relaxed);
+        }
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.done_flag.load(Ordering::SeqCst)
+            && self.shared_worklist.lock().map(|w| w.is_empty()).unwrap_or(true)
+    }
+
+    pub fn stop_and_join(&mut self) -> Vec<*mut u8> {
+        self.stop_signal.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.worker.take() {
+            let _ = handle.join();
+        }
+        self.shared_worklist
+            .lock()
+            .map(|mut w| w.drain(..).map(|addr| addr as *mut u8).collect())
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for ConcurrentMarker {
+    fn drop(&mut self) {
+        let _ = self.stop_and_join();
+    }
+}
+
 /// The GC Heap — owns all memory spaces and coordinates collection.
 ///
 /// # Usage
@@ -108,6 +149,8 @@ pub struct Heap {
     roots: Vec<*mut u8>,
     /// Remembered set for generational write barrier tracking.
     pub remembered_set: RememberedSet,
+    /// Background concurrent marking coordinator.
+    pub concurrent_marker: Option<ConcurrentMarker>,
 }
 
 impl Heap {
@@ -119,6 +162,7 @@ impl Heap {
             large_objects: LargeObjectSpace::new(),
             roots: Vec::new(),
             remembered_set: RememberedSet::new(),
+            concurrent_marker: None,
         }
     }
 
@@ -186,13 +230,17 @@ impl Heap {
         self.roots.retain(|r| *r != root);
     }
 
-    /// Register a type tracer for interior reference tracing in the nursery.
+    /// Register a type tracer for interior reference tracing in the nursery and old generation.
     pub fn register_tracer(&mut self, tag: TypeTag, visitor: crate::trace::TraceVisitor) {
         self.nursery.register_tracer(tag, visitor);
+        self.old_gen.register_tracer(tag, visitor);
     }
 
-    /// Post-write barrier: records when an old generation or large object
-    /// is updated to point to a nursery (young generation) object.
+    /// Post-write barrier: records when an object is updated.
+    ///
+    /// 1. Generational: If target is in nursery, remembers the slot.
+    /// 2. Concurrent/Incremental: If target is in old generation and marking is active,
+    ///    marks target and adds it to the marking worklist (Dijkstra SATB write barrier).
     ///
     /// # Safety
     /// `slot` must be a valid, readable pointer to a pointer.
@@ -201,9 +249,192 @@ impl Heap {
             return;
         }
         let target = unsafe { *slot };
-        if !target.is_null() && self.nursery.contains(target) {
+        if target.is_null() {
+            return;
+        }
+        if self.nursery.contains(target) {
             self.remembered_set.remember(slot);
         }
+        if let Some(marker) = &self.concurrent_marker {
+            if self.old_gen.contains(target) {
+                let header = unsafe { &*((target as *const GcHeader).sub(1)) };
+                if header.set_marked_atomic() {
+                    marker.push_work(target);
+                }
+            }
+        } else if self.old_gen.mark_state == crate::old_gen::MarkState::MarkingObjects {
+            self.old_gen.mark_object(target);
+        }
+    }
+
+    /// Begin incremental marking for the old generation using the registered roots.
+    pub fn start_incremental_marking(&mut self) {
+        self.old_gen.start_incremental_marking(&self.roots);
+    }
+
+    /// Perform a single step of incremental marking with a slice budget.
+    /// Returns `true` if marking is complete, `false` if more work remains.
+    pub fn step_incremental_marking(&mut self, slice_limit: usize) -> bool {
+        self.old_gen.mark_step(slice_limit)
+    }
+
+    /// Check if incremental marking is complete.
+    pub fn is_incremental_marking_complete(&self) -> bool {
+        self.old_gen.mark_state == crate::old_gen::MarkState::Complete
+    }
+
+    /// Start concurrent background marking on a dedicated worker thread.
+    pub fn start_concurrent_marking(&mut self) {
+        if self.concurrent_marker.is_some() {
+            return;
+        }
+
+        self.old_gen.mark_state = crate::old_gen::MarkState::MarkingObjects;
+        self.old_gen.mark_worklist.clear();
+
+        let mut initial_worklist: Vec<usize> = Vec::new();
+        for &root in &self.roots {
+            if !root.is_null() && self.old_gen.contains(root) {
+                unsafe {
+                    let header = &mut *((root as *mut GcHeader).sub(1));
+                    if header.set_marked_atomic() {
+                        initial_worklist.push(root as usize);
+                    }
+                }
+            }
+        }
+
+        let stop_signal = Arc::new(AtomicBool::new(false));
+        let done_flag = Arc::new(AtomicBool::new(false));
+        let shared_worklist = Arc::new(Mutex::new(initial_worklist));
+
+        let stop_clone = stop_signal.clone();
+        let done_clone = done_flag.clone();
+        let work_clone = shared_worklist.clone();
+
+        let start = self.old_gen.start as usize;
+        let limit = self.old_gen.limit as usize;
+        let type_registry = self.old_gen.type_registry;
+
+        let handle = std::thread::Builder::new()
+            .name("doms-concurrent-gc-marker".into())
+            .spawn(move || {
+                let mut local_batch = Vec::with_capacity(64);
+                let mut new_children = Vec::new();
+
+                while !stop_clone.load(Ordering::Relaxed) {
+                    local_batch.clear();
+                    if let Ok(mut worklist) = work_clone.lock() {
+                        let to_drain = worklist.len().min(64);
+                        if to_drain == 0 {
+                            done_clone.store(true, Ordering::SeqCst);
+                        } else {
+                            done_clone.store(false, Ordering::Relaxed);
+                            let start_idx = worklist.len() - to_drain;
+                            local_batch.extend(worklist.drain(start_idx..));
+                        }
+                    }
+
+                    if local_batch.is_empty() {
+                        std::thread::yield_now();
+                        std::thread::sleep(std::time::Duration::from_micros(100));
+                        continue;
+                    }
+
+                    new_children.clear();
+                    for addr in local_batch.drain(..) {
+                        if addr < start || addr >= limit {
+                            continue;
+                        }
+                        let ptr = addr as *mut u8;
+                        let header = unsafe { &*((ptr as *const GcHeader).sub(1)) };
+                        let tag = header.tag();
+                        unsafe {
+                            type_registry.trace(tag, ptr, &mut |slot: *mut *mut u8| {
+                                if !slot.is_null() {
+                                    let child = *slot;
+                                    let child_addr = child as usize;
+                                    if !child.is_null()
+                                        && child_addr >= start
+                                        && child_addr < limit
+                                    {
+                                        let child_header =
+                                            &*((child as *const GcHeader).sub(1));
+                                        if child_header.set_marked_atomic() {
+                                            new_children.push(child_addr);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+
+                    if !new_children.is_empty() {
+                        if let Ok(mut worklist) = work_clone.lock() {
+                            worklist.extend(new_children.drain(..));
+                        }
+                    }
+                }
+            })
+            .ok();
+
+        self.concurrent_marker = Some(ConcurrentMarker {
+            worker: handle,
+            stop_signal,
+            done_flag,
+            shared_worklist,
+        });
+    }
+
+    /// Check if background concurrent marking is currently active.
+    pub fn is_concurrent_marking_active(&self) -> bool {
+        self.concurrent_marker.is_some()
+    }
+
+    /// Check if background concurrent marking has drained all known reachable objects.
+    pub fn is_concurrent_marking_done(&self) -> bool {
+        self.concurrent_marker
+            .as_ref()
+            .map(|m| m.is_done())
+            .unwrap_or(false)
+    }
+
+    /// Step concurrent marking from the main thread, assisting the worker thread by
+    /// processing up to `slice_limit` items. Returns `true` if marking is complete.
+    pub fn step_concurrent_marking(&mut self, slice_limit: usize) -> bool {
+        if self.is_concurrent_marking_done() {
+            self.finish_concurrent_marking();
+            return true;
+        }
+        if let Some(marker) = &self.concurrent_marker {
+            let mut items = Vec::new();
+            if let Ok(mut w) = marker.shared_worklist.lock() {
+                let to_take = w.len().min(slice_limit);
+                let start_idx = w.len() - to_take;
+                items.extend(w.drain(start_idx..).map(|addr| addr as *mut u8));
+            }
+            if !items.is_empty() {
+                self.old_gen.mark_worklist.extend(items);
+                self.old_gen.mark_step(slice_limit);
+            }
+        }
+        self.is_concurrent_marking_done()
+    }
+
+    /// Finish concurrent marking: joins background thread, performs final remark,
+    /// and completes the marking phase.
+    pub fn finish_concurrent_marking(&mut self) -> bool {
+        let remaining = if let Some(mut marker) = self.concurrent_marker.take() {
+            marker.stop_and_join()
+        } else {
+            return false;
+        };
+
+        // Final remark STW pass
+        self.old_gen.mark_worklist.extend(remaining);
+        self.old_gen.mark_step(usize::MAX);
+        self.old_gen.mark_state = crate::old_gen::MarkState::Complete;
+        true
     }
 
     /// Trigger a nursery scavenge (minor GC).

@@ -574,4 +574,129 @@ mod tests {
         assert_eq!(jsobj.extra_slots.len(), 1);
         assert_eq!(jsobj.extra_slots[0].as_int32(), Some(80));
     }
+
+    #[test]
+    fn test_cranelift_native_expanded_opcodes() {
+        let mut vm = Vm::new();
+
+        // 1. typeof
+        let mut typeof_chunk = BytecodeChunk::new();
+        typeof_chunk.emit(OpCode::GetLocal(0), 1);
+        typeof_chunk.emit(OpCode::Typeof, 1);
+        typeof_chunk.emit(OpCode::Return, 1);
+
+        assert!(can_compile_native(&typeof_chunk));
+        let jit_typeof = JitCompiler::compile_native(&typeof_chunk).unwrap();
+        assert!(jit_typeof.is_native());
+
+        let res_num = jit_typeof
+            .call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(123)])
+            .unwrap();
+        assert_eq!(vm.to_string_value(res_num), "number");
+
+        let long_str = vm.alloc_string("arbitrary length string value".into());
+        let res_str = jit_typeof
+            .call(&mut vm, JsValue::undefined(), &[long_str])
+            .unwrap();
+        assert_eq!(vm.to_string_value(res_str), "string");
+
+        // 2. void
+        let mut void_chunk = BytecodeChunk::new();
+        void_chunk.emit(OpCode::GetLocal(0), 1);
+        void_chunk.emit(OpCode::Void, 1);
+        void_chunk.emit(OpCode::Return, 1);
+
+        assert!(can_compile_native(&void_chunk));
+        let jit_void = JitCompiler::compile_native(&void_chunk).unwrap();
+        assert!(jit_void.is_native());
+
+        let res_void = jit_void
+            .call(&mut vm, JsValue::undefined(), &[JsValue::from_int32(999)])
+            .unwrap();
+        assert!(res_void.is_undefined());
+
+        // 3. in
+        let mut in_chunk = BytecodeChunk::new();
+        in_chunk.emit(OpCode::GetLocal(0), 1); // prop
+        in_chunk.emit(OpCode::GetLocal(1), 1); // obj
+        in_chunk.emit(OpCode::In, 1);
+        in_chunk.emit(OpCode::Return, 1);
+
+        assert!(can_compile_native(&in_chunk));
+        let jit_in = JitCompiler::compile_native(&in_chunk).unwrap();
+        assert!(jit_in.is_native());
+
+        let test_obj = vm.alloc_object();
+        let key_str = vm.alloc_string("foo".into());
+        vm.set_property(test_obj, "foo", JsValue::from_int32(42));
+
+        let res_in_true = jit_in
+            .call(&mut vm, JsValue::undefined(), &[key_str, test_obj])
+            .unwrap();
+        assert_eq!(res_in_true.as_boolean(), Some(true));
+
+        let missing_key = vm.alloc_string("bar".into());
+        let res_in_false = jit_in
+            .call(&mut vm, JsValue::undefined(), &[missing_key, test_obj])
+            .unwrap();
+        assert_eq!(res_in_false.as_boolean(), Some(false));
+
+        // 4. long string constant loading
+        let mut str_chunk = BytecodeChunk::new();
+        let long_const = str_chunk.add_constant(Constant::String(
+            "This is a very long string constant that tests native non-SSO string allocation in Cranelift JIT".to_string()
+        ));
+        str_chunk.emit(OpCode::LoadConst(long_const), 1);
+        str_chunk.emit(OpCode::Return, 1);
+
+        assert!(can_compile_native(&str_chunk));
+        let jit_str = JitCompiler::compile_native(&str_chunk).unwrap();
+        assert!(jit_str.is_native());
+
+        let res_loaded_str = jit_str
+            .call(&mut vm, JsValue::undefined(), &[])
+            .unwrap();
+        assert_eq!(
+            vm.to_string_value(res_loaded_str),
+            "This is a very long string constant that tests native non-SSO string allocation in Cranelift JIT"
+        );
+
+        // 5. ArrayPush
+        let mut arr_chunk = BytecodeChunk::new();
+        let c_val = arr_chunk.add_constant(Constant::Number(77.0));
+        arr_chunk.emit(OpCode::CreateArray(0), 1);
+        arr_chunk.emit(OpCode::LoadConst(c_val), 1);
+        arr_chunk.emit(OpCode::ArrayPush, 1);
+        arr_chunk.emit(OpCode::Return, 1);
+
+        assert!(can_compile_native(&arr_chunk));
+        let jit_arr = JitCompiler::compile_native(&arr_chunk).unwrap();
+        assert!(jit_arr.is_native());
+
+        let res_arr = jit_arr
+            .call(&mut vm, JsValue::undefined(), &[])
+            .unwrap();
+        assert!(res_arr.is_object());
+        let len_val = vm.get_property(res_arr, "length");
+        assert_eq!(len_val.as_number(), Some(1.0));
+        let elem_0 = vm.get_property(res_arr, "0");
+        assert_eq!(elem_0.as_number(), Some(77.0));
+
+        // 6. instanceof
+        let mut inst_chunk = BytecodeChunk::new();
+        inst_chunk.emit(OpCode::GetLocal(0), 1);
+        inst_chunk.emit(OpCode::GetLocal(1), 1);
+        inst_chunk.emit(OpCode::Instanceof, 1);
+        inst_chunk.emit(OpCode::Return, 1);
+
+        assert!(can_compile_native(&inst_chunk));
+        let jit_inst = JitCompiler::compile_native(&inst_chunk).unwrap();
+        assert!(jit_inst.is_native());
+
+        let array_ctor = vm.globals.get("Array").copied().unwrap();
+        let res_inst_true = jit_inst
+            .call(&mut vm, JsValue::undefined(), &[res_arr, array_ctor])
+            .unwrap();
+        assert_eq!(res_inst_true.as_boolean(), Some(true));
+    }
 }

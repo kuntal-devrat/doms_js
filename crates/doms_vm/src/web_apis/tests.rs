@@ -315,3 +315,127 @@ fn test_response_json_and_clone() {
     let count_prop = vm.get_property(jr, "count");
     assert_eq!(count_prop.to_int32(), Some(42));
 }
+
+#[test]
+fn test_url_relative_without_base_throws_type_error() {
+    let mut vm = Vm::new();
+    let res1 = vm.eval(r#"new URL("relative_path")"#);
+    assert!(res1.is_err(), "new URL without base must throw TypeError");
+
+    let res2 = vm.eval(r#"new URL("subpath", "relative_base")"#);
+    assert!(res2.is_err(), "new URL with invalid base must throw TypeError");
+
+    let res3 = vm.eval(r#"new URL("/foo", "https://example.com/bar").href"#).unwrap();
+    assert_eq!(vm.to_string_value(res3), "https://example.com/foo");
+
+    let res4 = vm.eval(r#"new URL("foo", "https://example.com/bar/").href"#).unwrap();
+    assert_eq!(vm.to_string_value(res4), "https://example.com/bar/foo");
+}
+
+#[test]
+fn test_url_search_params_methods_and_decoding() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var usp = new URLSearchParams("query=hello+world&tag=foo&query=hello%20again");
+        var qAll = usp.getAll("query");
+        var qSingle = usp.get("query");
+        var decodedSpace = qSingle === "hello world";
+
+        var usp2 = new URLSearchParams("z=9&a=1&m=5");
+        usp2.sort();
+        var sortedStr = usp2.toString();
+
+        var iterated = [];
+        usp2.forEach(function(val, key) {
+            iterated.push(key + ":" + val);
+        });
+        var forEachResult = iterated.join(",");
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    assert_eq!(vm.globals.get("decodedSpace").map(|v| v.is_truthy()), Some(true));
+    let q_all = vm.globals.get("qAll").copied().unwrap();
+    assert!(q_all.is_object());
+    let len = vm.get_property(q_all, "length");
+    assert_eq!(len.as_number(), Some(2.0));
+    let q0 = vm.get_property(q_all, "0");
+    assert_eq!(vm.to_string_value(q0), "hello world");
+    let q1 = vm.get_property(q_all, "1");
+    assert_eq!(vm.to_string_value(q1), "hello again");
+
+    assert_eq!(vm.to_string_value(vm.globals.get("sortedStr").copied().unwrap()), "a=1&m=5&z=9");
+    assert_eq!(vm.to_string_value(vm.globals.get("forEachResult").copied().unwrap()), "a:1,m:5,z:9");
+}
+
+#[test]
+fn test_request_prototype_methods_and_clone() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var req = new Request("https://example.com/api", {
+            method: "POST",
+            body: "test body content"
+        });
+        var initialBodyUsed = req.bodyUsed;
+        var cloned = req.clone();
+        var clonedMethod = cloned.method;
+
+        var textResult = null;
+        req.text().then(function(t) {
+            textResult = t;
+        });
+
+        var afterTextBodyUsed = req.bodyUsed;
+        var cloneFailed = false;
+        try {
+            req.clone();
+        } catch (e) {
+            cloneFailed = true;
+        }
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+
+    assert_eq!(vm.globals.get("initialBodyUsed").map(|v| v.is_truthy()), Some(false));
+    assert_eq!(vm.to_string_value(vm.globals.get("clonedMethod").copied().unwrap()), "POST");
+    assert_eq!(vm.globals.get("afterTextBodyUsed").map(|v| v.is_truthy()), Some(true));
+    assert_eq!(vm.globals.get("cloneFailed").map(|v| v.is_truthy()), Some(true));
+    assert_eq!(vm.to_string_value(vm.globals.get("textResult").copied().unwrap()), "test body content");
+}
+
+#[test]
+fn test_abort_signal_timeout_without_eval() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var sig = AbortSignal.timeout(10);
+        var initialAborted = sig.aborted;
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    assert_eq!(vm.globals.get("initialAborted").map(|v| v.is_truthy()), Some(false));
+
+    std::thread::sleep(Duration::from_millis(25));
+    vm.run_event_loop().expect("run event loop");
+
+    let sig = vm.globals.get("sig").copied().unwrap();
+    let aborted = vm.get_property(sig, "aborted");
+    assert_eq!(aborted.is_truthy(), true);
+    let reason = vm.get_property(sig, "reason");
+    let name = vm.get_property(reason, "name");
+    assert_eq!(vm.to_string_value(name), "TimeoutError");
+}
+
+#[test]
+fn test_fetch_with_request_instance() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var req = new Request("data:text/plain,Passed%20Through%20Request");
+        var fetchResult = null;
+        fetch(req).then(function(res) {
+            return res.text();
+        }).then(function(t) {
+            fetchResult = t;
+        });
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+    let res = vm.globals.get("fetchResult").copied().unwrap();
+    assert_eq!(vm.to_string_value(res), "Passed%20Through%20Request");
+}

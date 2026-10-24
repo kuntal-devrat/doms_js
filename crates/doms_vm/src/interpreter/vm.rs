@@ -202,6 +202,10 @@ impl Vm {
             regexp_last_match: RegExpLastMatch::default(),
             template_map: HashMap::new(),
         };
+        vm.heap.register_tracer(
+            doms_gc::header::TypeTag::Object,
+            crate::interpreter::gc::js_object_tracer,
+        );
         let global_obj = vm.alloc_object_old_gen();
         vm.global_object = global_obj;
         vm.globals.insert("globalThis".to_string(), global_obj);

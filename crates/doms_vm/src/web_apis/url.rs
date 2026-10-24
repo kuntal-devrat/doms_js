@@ -1,6 +1,55 @@
-//! `URL` and `URLSearchParams`.
+//! `URL` and `URLSearchParams` compliant with the WHATWG URL specification.
 
 use super::*;
+
+fn decode_component(s: &str) -> String {
+    let mut bytes = Vec::with_capacity(s.len());
+    let mut iter = s.bytes();
+    while let Some(b) = iter.next() {
+        if b == b'+' {
+            bytes.push(b' ');
+        } else if b == b'%' {
+            let h1 = iter.next();
+            let h2 = iter.next();
+            if let (Some(c1), Some(c2)) = (h1, h2) {
+                let hex = [c1, c2];
+                if let Ok(byte_val) = u8::from_str_radix(std::str::from_utf8(&hex).unwrap_or(""), 16) {
+                    bytes.push(byte_val);
+                    continue;
+                }
+                bytes.push(b'%');
+                bytes.push(c1);
+                bytes.push(c2);
+            } else {
+                bytes.push(b'%');
+                if let Some(c1) = h1 {
+                    bytes.push(c1);
+                }
+            }
+        } else {
+            bytes.push(b);
+        }
+    }
+    String::from_utf8_lossy(&bytes).to_string()
+}
+
+fn encode_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'*' => {
+                out.push(b as char);
+            }
+            b' ' => {
+                out.push('+');
+            }
+            _ => {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    out
+}
 
 fn parse_query_string(query: &str) -> Vec<(String, String)> {
     let clean = query.strip_prefix('?').unwrap_or(query);
@@ -12,12 +61,20 @@ fn parse_query_string(query: &str) -> Vec<(String, String)> {
         .filter(|part| !part.is_empty())
         .map(|pair| {
             if let Some((k, v)) = pair.split_once('=') {
-                (k.to_string(), v.to_string())
+                (decode_component(k), decode_component(v))
             } else {
-                (pair.to_string(), String::new())
+                (decode_component(pair), String::new())
             }
         })
         .collect()
+}
+
+fn serialize_query_pairs(pairs: &[(String, String)]) -> String {
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", encode_component(k), encode_component(v)))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 pub(super) fn register_url(vm: &mut Vm) {
@@ -26,7 +83,7 @@ pub(super) fn register_url(vm: &mut Vm) {
         let pairs = parse_query_string(&query_str);
         let instance = vm.alloc_object();
 
-        let ser = pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
+        let ser = serialize_query_pairs(&pairs);
         let ser_val = vm.alloc_string(ser);
         vm.set_property(instance, "__query__", ser_val);
 
@@ -43,6 +100,21 @@ pub(super) fn register_url(vm: &mut Vm) {
             Ok(JsValue::null())
         });
         vm.set_property(instance, "get", get_fn);
+
+        let get_all_fn = vm.alloc_native_function("getAll", 1, |vm, this, args| {
+            let key = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
+            let q_val = vm.get_property(this, "__query__");
+            let q_str = vm.to_string_value(q_val);
+            let pairs = parse_query_string(&q_str);
+            let mut matches = Vec::new();
+            for (k, v) in pairs {
+                if k == key {
+                    matches.push(vm.alloc_string(v));
+                }
+            }
+            Ok(vm.alloc_array(matches))
+        });
+        vm.set_property(instance, "getAll", get_all_fn);
 
         let has_fn = vm.alloc_native_function("has", 1, |vm, this, args| {
             let key = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
@@ -61,18 +133,24 @@ pub(super) fn register_url(vm: &mut Vm) {
             let q_str = vm.to_string_value(q_val);
             let mut pairs = parse_query_string(&q_str);
             let mut found = false;
-            for (k, v) in &mut pairs {
-                if *k == key {
-                    *v = val.clone();
-                    found = true;
-                    break;
+            let mut i = 0;
+            while i < pairs.len() {
+                if pairs[i].0 == key {
+                    if !found {
+                        pairs[i].1 = val.clone();
+                        found = true;
+                        i += 1;
+                    } else {
+                        pairs.remove(i);
+                    }
+                } else {
+                    i += 1;
                 }
             }
             if !found {
                 pairs.push((key, val));
             }
-            let new_ser =
-                pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
+            let new_ser = serialize_query_pairs(&pairs);
             let new_ser_val = vm.alloc_string(new_ser);
             vm.set_property(this, "__query__", new_ser_val);
             Ok(JsValue::undefined())
@@ -86,8 +164,7 @@ pub(super) fn register_url(vm: &mut Vm) {
             let q_str = vm.to_string_value(q_val);
             let mut pairs = parse_query_string(&q_str);
             pairs.push((key, val));
-            let new_ser =
-                pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
+            let new_ser = serialize_query_pairs(&pairs);
             let new_ser_val = vm.alloc_string(new_ser);
             vm.set_property(this, "__query__", new_ser_val);
             Ok(JsValue::undefined())
@@ -100,13 +177,42 @@ pub(super) fn register_url(vm: &mut Vm) {
             let q_str = vm.to_string_value(q_val);
             let mut pairs = parse_query_string(&q_str);
             pairs.retain(|(k, _)| k != &key);
-            let new_ser =
-                pairs.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("&");
+            let new_ser = serialize_query_pairs(&pairs);
             let new_ser_val = vm.alloc_string(new_ser);
             vm.set_property(this, "__query__", new_ser_val);
             Ok(JsValue::undefined())
         });
         vm.set_property(instance, "delete", delete_fn);
+
+        let sort_fn = vm.alloc_native_function("sort", 0, |vm, this, _args| {
+            let q_val = vm.get_property(this, "__query__");
+            let q_str = vm.to_string_value(q_val);
+            let mut pairs = parse_query_string(&q_str);
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let new_ser = serialize_query_pairs(&pairs);
+            let new_ser_val = vm.alloc_string(new_ser);
+            vm.set_property(this, "__query__", new_ser_val);
+            Ok(JsValue::undefined())
+        });
+        vm.set_property(instance, "sort", sort_fn);
+
+        let for_each_fn = vm.alloc_native_function("forEach", 2, |vm, this, args| {
+            let callback = args.first().copied().unwrap_or(JsValue::undefined());
+            let this_arg = args.get(1).copied().unwrap_or(this);
+            if !vm.is_callable(callback) {
+                return Err(VmError::TypeError("callback is not callable".into()));
+            }
+            let q_val = vm.get_property(this, "__query__");
+            let q_str = vm.to_string_value(q_val);
+            let pairs = parse_query_string(&q_str);
+            for (k, v) in pairs {
+                let k_val = vm.alloc_string(k);
+                let v_val = vm.alloc_string(v);
+                vm.call(callback, this_arg, &[v_val, k_val, this])?;
+            }
+            Ok(JsValue::undefined())
+        });
+        vm.set_property(instance, "forEach", for_each_fn);
 
         let to_string_fn = vm.alloc_native_function("toString", 0, |vm, this, _args| {
             let q_val = vm.get_property(this, "__query__");
@@ -120,15 +226,39 @@ pub(super) fn register_url(vm: &mut Vm) {
 
     // URL constructor
     let url_ctor = vm.alloc_native_function("URL", 2, |vm, _this, args| {
-        let input = args.first().map(|v| vm.to_string_value(*v)).unwrap_or_default();
-        let base = args.get(1).map(|v| vm.to_string_value(*v));
+        let input_val = args.first().copied().unwrap_or(JsValue::undefined());
+        let base_val = args.get(1).copied().unwrap_or(JsValue::undefined());
 
-        let full_url = if let Some(base_str) = base {
-            if input.starts_with("http://") || input.starts_with("https://") {
-                input
-            } else if input.starts_with('/') {
-                let base_root = if let Some(slash_idx) = base_str[8..].find('/') {
-                    &base_str[..8 + slash_idx]
+        let input = vm.to_string_value(input_val);
+        let base = if base_val.is_undefined() {
+            None
+        } else {
+            Some(vm.to_string_value(base_val))
+        };
+
+        let has_scheme = input.contains("://")
+            || input.starts_with("data:")
+            || input.starts_with("blob:")
+            || input.starts_with("file:");
+
+        let full_url = if has_scheme {
+            input
+        } else if let Some(base_str) = base {
+            let base_has_scheme = base_str.contains("://")
+                || base_str.starts_with("file:")
+                || base_str.starts_with("data:")
+                || base_str.starts_with("blob:");
+            if !base_has_scheme {
+                return Err(VmError::TypeError(format!("Invalid base URL: {}", base_str)));
+            }
+            if input.starts_with('/') {
+                let base_root = if let Some(proto_end) = base_str.find("://") {
+                    let after_proto = proto_end + 3;
+                    if let Some(slash_idx) = base_str[after_proto..].find('/') {
+                        &base_str[..after_proto + slash_idx]
+                    } else {
+                        &base_str
+                    }
                 } else {
                     &base_str
                 };
@@ -138,7 +268,7 @@ pub(super) fn register_url(vm: &mut Vm) {
                 format!("{}/{}", trimmed_base, input)
             }
         } else {
-            input
+            return Err(VmError::TypeError(format!("Invalid URL: {}", input)));
         };
 
         let (protocol, rest) = if let Some((proto, r)) = full_url.split_once("://") {

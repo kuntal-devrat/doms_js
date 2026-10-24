@@ -169,3 +169,115 @@ fn test_old_gen_repeated_sweep_scans_past_split_remainder() {
     assert!(old_gen.bytes_used > 0);
     assert!(!old_gen.is_marked(old_p3), "live mark must be cleared by the sweep");
 }
+
+#[test]
+fn test_old_gen_incremental_pointer_tracing() {
+    let mut old_gen = OldGen::new(4096);
+
+    // Register a tracer for TypeTag::Object where the first 8 bytes point to another object
+    unsafe fn trace_one_slot(payload: *mut u8, visit: &mut dyn FnMut(*mut *mut u8)) {
+        let slot = payload as *mut *mut u8;
+        visit(slot);
+    }
+    old_gen.register_tracer(TypeTag::Object, trace_one_slot);
+
+    // Allocate p1 (parent), p2 (child), p3 (unreachable garbage)
+    let p1 = old_gen.allocate(16, TypeTag::Object).unwrap();
+    let p2 = old_gen.allocate(16, TypeTag::Object).unwrap();
+    let p3 = old_gen.allocate(16, TypeTag::Object).unwrap();
+
+    // p1 points to p2
+    unsafe {
+        *(p1 as *mut *mut u8) = p2;
+        *(p2 as *mut *mut u8) = std::ptr::null_mut();
+        *(p3 as *mut *mut u8) = std::ptr::null_mut();
+    }
+
+    // Only p1 is in the roots!
+    old_gen.start_incremental_marking(&[p1]);
+    assert!(old_gen.is_marked(p1));
+    assert!(!old_gen.is_marked(p2));
+    assert!(!old_gen.is_marked(p3));
+    assert_eq!(old_gen.mark_worklist.len(), 1);
+
+    // Step 1: processes p1. Through the tracer, p2 must be discovered and marked!
+    let finished1 = old_gen.mark_step(1);
+    assert!(!finished1, "Marking should not be complete as p2 was discovered");
+    assert!(old_gen.is_marked(p2), "p2 must be marked via interior pointer tracing");
+    assert_eq!(old_gen.mark_worklist.len(), 1);
+
+    // Step 2: processes p2.
+    let finished2 = old_gen.mark_step(1);
+    assert!(finished2, "Marking should now be complete");
+    assert_eq!(old_gen.mark_state, MarkState::Complete);
+
+    // Sweep: p1 and p2 must survive, p3 must be reclaimed!
+    let reclaimed = old_gen.sweep();
+    assert!(reclaimed > 0);
+    assert_eq!(old_gen.object_count, 2);
+    assert!(old_gen.contains(p1));
+    assert!(old_gen.contains(p2));
+}
+
+#[test]
+fn test_heap_concurrent_marking_and_write_barrier() {
+    use crate::heap::{Heap, HeapConfig};
+
+    let mut heap = Heap::new(HeapConfig { nursery_size: 4096, old_gen_size: 8192 });
+
+    unsafe fn trace_first_slot(payload: *mut u8, visit: &mut dyn FnMut(*mut *mut u8)) {
+        let slot = payload as *mut *mut u8;
+        visit(slot);
+    }
+    heap.register_tracer(TypeTag::Object, trace_first_slot);
+
+    // Allocate in old gen directly
+    let root_obj = heap.old_gen.allocate(16, TypeTag::Object).unwrap();
+    let child_obj = heap.old_gen.allocate(16, TypeTag::Object).unwrap();
+    let barrier_obj = heap.old_gen.allocate(16, TypeTag::Object).unwrap();
+    let garbage_obj = heap.old_gen.allocate(16, TypeTag::Object).unwrap();
+
+    unsafe {
+        *(root_obj as *mut *mut u8) = child_obj;
+        *(child_obj as *mut *mut u8) = std::ptr::null_mut();
+        *(barrier_obj as *mut *mut u8) = std::ptr::null_mut();
+        *(garbage_obj as *mut *mut u8) = std::ptr::null_mut();
+    }
+
+    heap.add_root(root_obj);
+
+    // Start concurrent marking
+    heap.start_concurrent_marking();
+    assert!(heap.is_concurrent_marking_active());
+
+    // Main thread mutates child_obj to point to barrier_obj via write barrier
+    unsafe {
+        let slot = child_obj as *mut *mut u8;
+        *slot = barrier_obj;
+        heap.write_barrier(slot);
+    }
+
+    // Allow concurrent worker to run and finish
+    for _ in 0..50 {
+        if heap.is_concurrent_marking_done() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    // Finalize concurrent marking
+    let completed = heap.finish_concurrent_marking();
+    assert!(completed);
+    assert!(!heap.is_concurrent_marking_active());
+
+    // root_obj, child_obj, and barrier_obj (via write barrier) must be marked!
+    assert!(heap.old_gen.is_marked(root_obj));
+    assert!(heap.old_gen.is_marked(child_obj));
+    assert!(heap.old_gen.is_marked(barrier_obj));
+    assert!(!heap.old_gen.is_marked(garbage_obj));
+
+    // Sweep: 3 objects survive, 1 garbage reclaimed
+    let reclaimed = heap.old_gen.sweep();
+    assert!(reclaimed > 0);
+    assert_eq!(heap.old_gen.object_count, 3);
+}

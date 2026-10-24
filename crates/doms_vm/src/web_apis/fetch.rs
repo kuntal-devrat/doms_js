@@ -73,20 +73,48 @@ fn register_abort_api(vm: &mut Vm) {
 
     // AbortSignal.timeout(ms)
     let static_timeout = vm.alloc_native_function("timeout", 1, |vm, _this, args| {
-        let ms = args.first().copied().unwrap_or(JsValue::from_int32(0));
-        let timeout_script = r#"
-            (function(ms) {
-                var controller = new AbortController();
-                setTimeout(function() {
-                    var err = new Error("The operation timed out");
-                    err.name = "TimeoutError";
-                    controller.abort(err);
-                }, ms);
-                return controller.signal;
-            })
-        "#;
-        let helper = vm.eval(timeout_script)?;
-        vm.call(helper, JsValue::undefined(), &[ms])
+        let ms_arg = args.first().copied().unwrap_or(JsValue::from_int32(0));
+        let ms = ms_arg.to_number().unwrap_or(0.0).max(0.0) as u64;
+
+        let ctrl_ctor = vm.globals.get("AbortController").copied().unwrap_or(JsValue::undefined());
+        let controller = vm.call(ctrl_ctor, JsValue::undefined(), &[])?;
+        let signal = vm.get_property(controller, "signal");
+
+        let err_ctor = vm.globals.get("Error").copied().unwrap_or(JsValue::undefined());
+        let msg = vm.alloc_string("The operation timed out".into());
+        let err = vm.call(err_ctor, JsValue::undefined(), &[msg])?;
+        let name_val = vm.alloc_string("TimeoutError".into());
+        vm.set_property(err, "name", name_val);
+
+        fn timeout_abort_callback(
+            vm: &mut Vm,
+            _this: JsValue,
+            args: &[JsValue],
+        ) -> Result<JsValue, VmError> {
+            if let (Some(&controller), Some(&err)) = (args.first(), args.get(1)) {
+                let abort_fn = vm.get_property(controller, "abort");
+                let _ = vm.call(abort_fn, controller, &[err]);
+            }
+            Ok(JsValue::undefined())
+        }
+
+        let id = vm.next_timer_id;
+        vm.next_timer_id += 1;
+        let due_time = Instant::now() + Duration::from_millis(ms);
+        let timer_callback = vm.alloc_native_function("timeout_abort", 2, timeout_abort_callback);
+
+        vm.timers.insert(
+            id,
+            TimerEntry {
+                id,
+                callback: timer_callback,
+                args: vec![controller, err],
+                due_time,
+                interval: None,
+            },
+        );
+
+        Ok(signal)
     });
     vm.set_property(abort_signal_ctor, "timeout", static_timeout);
     vm.globals.insert("AbortSignal".to_string(), abort_signal_ctor);
@@ -302,6 +330,102 @@ fn register_headers(vm: &mut Vm) {
 fn register_request(vm: &mut Vm) {
     let request_proto = vm.alloc_object();
 
+    let clone_fn = vm.alloc_native_function("clone", 0, |vm, this, _args| {
+        let body_used = vm.get_property(this, "bodyUsed");
+        if body_used.is_truthy() {
+            return Err(VmError::TypeError(
+                "Cannot clone a Request whose body has already been used".into(),
+            ));
+        }
+        let ctor = vm.globals.get("Request").copied().unwrap_or(JsValue::undefined());
+        let url = vm.get_property(this, "url");
+        let method = vm.get_property(this, "method");
+        let headers = vm.get_property(this, "headers");
+        let signal = vm.get_property(this, "signal");
+        let body = vm.get_property(this, "body");
+
+        let init = vm.alloc_object();
+        vm.set_property(init, "method", method);
+        vm.set_property(init, "headers", headers);
+        vm.set_property(init, "signal", signal);
+        if !body.is_undefined() && !body.is_null() {
+            vm.set_property(init, "body", body);
+        }
+        vm.call(ctor, JsValue::undefined(), &[url, init])
+    });
+    vm.set_property(request_proto, "clone", clone_fn);
+
+    let text_fn = vm.alloc_native_function("text", 0, |vm, this, _args| {
+        let body_used = vm.get_property(this, "bodyUsed");
+        let promise = vm.alloc_promise(PromiseState::Pending, JsValue::undefined());
+        if body_used.is_truthy() {
+            let err_ctor = vm.globals.get("TypeError").copied().unwrap_or(JsValue::undefined());
+            let msg = vm.alloc_string("Body has already been consumed".into());
+            let err = vm.call(err_ctor, JsValue::undefined(), &[msg])?;
+            vm.reject_promise(promise, err);
+            return Ok(promise);
+        }
+        vm.set_property(this, "bodyUsed", JsValue::from_boolean(true));
+
+        let body = vm.get_property(this, "body");
+        if !body.is_undefined() && !body.is_null() {
+            let s = vm.to_string_value(body);
+            let s_val = vm.alloc_string(s);
+            vm.resolve_promise(promise, s_val);
+        } else {
+            let empty = vm.alloc_string(String::new());
+            vm.resolve_promise(promise, empty);
+        }
+        Ok(promise)
+    });
+    vm.set_property(request_proto, "text", text_fn);
+
+    let json_fn = vm.alloc_native_function("json", 0, |vm, this, _args| {
+        let text_method = vm.get_property(this, "text");
+        let text_promise = vm.call(text_method, this, &[])?;
+
+        let json_parse_script = r#"
+            (function(textProm) {
+                return textProm.then(function(t) {
+                    return JSON.parse(t);
+                });
+            })
+        "#;
+        let jp_fn = vm.eval(json_parse_script)?;
+        vm.call(jp_fn, JsValue::undefined(), &[text_promise])
+    });
+    vm.set_property(request_proto, "json", json_fn);
+
+    let ab_fn = vm.alloc_native_function("arrayBuffer", 0, |vm, this, _args| {
+        let body_used = vm.get_property(this, "bodyUsed");
+        let promise = vm.alloc_promise(PromiseState::Pending, JsValue::undefined());
+        if body_used.is_truthy() {
+            let err_ctor = vm.globals.get("TypeError").copied().unwrap_or(JsValue::undefined());
+            let msg = vm.alloc_string("Body has already been consumed".into());
+            let err = vm.call(err_ctor, JsValue::undefined(), &[msg])?;
+            vm.reject_promise(promise, err);
+            return Ok(promise);
+        }
+        vm.set_property(this, "bodyUsed", JsValue::from_boolean(true));
+
+        let body = vm.get_property(this, "body");
+        let s = if !body.is_undefined() && !body.is_null() {
+            vm.to_string_value(body)
+        } else {
+            String::new()
+        };
+        let bytes = s.as_bytes();
+        let sab = doms_parallel::SharedArrayBuffer::try_new(bytes.len())
+            .map_err(|e| VmError::RuntimeError(e.into()))?;
+        for (i, &byte) in bytes.iter().enumerate() {
+            let _ = sab.set(i, byte);
+        }
+        let ab_val = vm.alloc_array_buffer(Arc::new(sab));
+        vm.resolve_promise(promise, ab_val);
+        Ok(promise)
+    });
+    vm.set_property(request_proto, "arrayBuffer", ab_fn);
+
     let request_ctor = vm.alloc_native_function("Request", 2, |vm, _this, args| {
         let input = args.first().copied().unwrap_or(JsValue::undefined());
         let init = args.get(1).copied().unwrap_or(JsValue::undefined());
@@ -319,6 +443,7 @@ fn register_request(vm: &mut Vm) {
         };
         let mut method_str = "GET".to_string();
         let mut signal_val = JsValue::undefined();
+        let mut body_val = JsValue::undefined();
 
         if input.is_js_object() {
             let m = vm.get_property(input, "method");
@@ -328,6 +453,10 @@ fn register_request(vm: &mut Vm) {
             let s = vm.get_property(input, "signal");
             if !s.is_undefined() {
                 signal_val = s;
+            }
+            let b = vm.get_property(input, "body");
+            if !b.is_undefined() {
+                body_val = b;
             }
         }
 
@@ -349,7 +478,7 @@ fn register_request(vm: &mut Vm) {
             }
             let b = vm.get_property(init, "body");
             if !b.is_undefined() {
-                vm.set_property(instance, "body", b);
+                body_val = b;
             }
         }
 
@@ -359,6 +488,8 @@ fn register_request(vm: &mut Vm) {
         vm.set_property(instance, "method", m_val);
         vm.set_property(instance, "headers", headers_obj);
         vm.set_property(instance, "signal", signal_val);
+        vm.set_property(instance, "body", body_val);
+        vm.set_property(instance, "bodyUsed", JsValue::from_boolean(false));
 
         Ok(instance)
     });
@@ -644,6 +775,25 @@ fn register_fetch_fn(vm: &mut Vm) {
             if !s.is_undefined() {
                 signal_val = s;
             }
+            let b = vm.get_property(input, "body");
+            if !b.is_undefined() && !b.is_null() {
+                let bs = vm.to_string_value(b);
+                body_bytes = Some(bs.into_bytes());
+                vm.set_property(input, "bodyUsed", JsValue::from_boolean(true));
+            }
+            let h = vm.get_property(input, "headers");
+            if h.is_js_object() {
+                let store = vm.get_property(h, "__store__");
+                let target = if store.is_js_object() { store } else { h };
+                if let Some(ptr) = target.as_object_ptr() {
+                    let obj = unsafe { &*(ptr as *mut JsObject) };
+                    for (k, offset) in vm.shapes.all_property_entries(obj.shape_id) {
+                        if let Some(v) = obj.get_slot(offset) {
+                            headers_vec.push((k, vm.to_string_value(v)));
+                        }
+                    }
+                }
+            }
         }
 
         if init.is_js_object() {
@@ -665,9 +815,10 @@ fn register_fetch_fn(vm: &mut Vm) {
                 body_bytes = Some(bs.into_bytes());
             }
 
-            // Extract headers
+            // Extract headers if specified in init (overriding input headers)
             let h = vm.get_property(init, "headers");
             if h.is_js_object() {
+                headers_vec.clear();
                 let store = vm.get_property(h, "__store__");
                 let target = if store.is_js_object() { store } else { h };
                 if let Some(ptr) = target.as_object_ptr() {

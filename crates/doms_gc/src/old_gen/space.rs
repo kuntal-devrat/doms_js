@@ -25,6 +25,7 @@ impl OldGen {
             mark_state: MarkState::Idle,
             mark_worklist: Vec::new(),
             free_chunks: Vec::new(),
+            type_registry: TypeRegistry::new(),
         }
     }
 

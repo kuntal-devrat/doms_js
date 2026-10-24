@@ -1,0 +1,53 @@
+name: Test262 Conformance Nightly
+
+on:
+  schedule:
+    # Run every night at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Specific Test262 suite to run (default: language/eval-code)'
+        required: false
+        default: 'language/eval-code'
+      min_pass_pct:
+        description: 'Minimum required pass rate percentage (e.g. 80)'
+        required: false
+        default: '75'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test262-nightly:
+    name: Test262 Nightly Conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build DOMS CLI (Release)
+        run: cargo build -p doms_cli --release
+
+      - name: Download Test262 Suite
+        run: |
+          if [ ! -d "tests/test262/test262" ]; then
+            git clone --depth 1 https://github.com/tc39/test262.git tests/test262/test262
+          fi
+
+      - name: Run Test262 Conformance Suite
+        run: |
+          SUITE="${{ github.event.inputs.suite || 'language/eval-code' }}"
+          MIN_PASS="${{ github.event.inputs.min_pass_pct || '75' }}"
+          echo "Running Test262 suite: ${SUITE} with min pass: ${MIN_PASS}%"
+          ./tests/test262/run.sh -s "${SUITE}" -t 4 --min-pass "${MIN_PASS}" -o tests/test262/results/summary.json
+
+      - name: Upload Test262 Conformance Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test262-nightly-results
+          path: tests/test262/results/

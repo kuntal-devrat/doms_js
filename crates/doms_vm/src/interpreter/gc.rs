@@ -631,4 +631,121 @@ impl Vm {
     pub fn scavenge_nursery(&mut self) {
         self.gc_collect();
     }
+
+    /// Perform an incremental marking slice of at most `slice_budget` objects.
+    /// Returns `true` if GC collection completed, `false` if more marking work remains.
+    pub fn gc_incremental_slice(&mut self, slice_budget: usize) -> bool {
+        if self.gc_suppressed {
+            return false;
+        }
+
+        if self.heap.old_gen.mark_state != doms_gc::old_gen::MarkState::MarkingObjects {
+            let mut roots = Vec::new();
+            if let Some(pending) = self.pending_alloc {
+                roots.push(pending as *mut u8);
+            }
+            if let Some(p) = self.global_object.as_heap_ptr() {
+                roots.push(p as *mut u8);
+            }
+            for proto in [
+                self.object_proto,
+                self.array_proto,
+                self.function_proto,
+                self.regexp_proto,
+                self.string_proto,
+                self.number_proto,
+                self.boolean_proto,
+                self.symbol_proto,
+                self.promise_proto,
+                self.date_proto,
+                self.iterator_proto,
+                self.array_iterator_proto,
+                self.map_iterator_proto,
+                self.set_iterator_proto,
+                self.string_iterator_proto,
+                self.regexp_string_iterator_proto,
+                self.generator_proto,
+                self.wrap_for_valid_iterator_proto,
+                self.iterator_helper_proto,
+                self.current_new_target,
+                self.symbol_iterator,
+                self.symbol_async_iterator,
+                self.symbol_to_string_tag,
+                self.symbol_is_concat_spreadable,
+                self.symbol_species,
+                self.symbol_to_primitive,
+                self.symbol_has_instance,
+                self.symbol_match,
+                self.symbol_match_all,
+                self.symbol_replace,
+                self.symbol_search,
+                self.symbol_split,
+                self.symbol_unscopables,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if let Some(p) = proto.as_heap_ptr() {
+                    roots.push(p as *mut u8);
+                }
+            }
+            for val in self.globals.values() {
+                if let Some(p) = val.as_heap_ptr() {
+                    roots.push(p as *mut u8);
+                }
+            }
+            for val in &self.stack {
+                if let Some(p) = val.as_heap_ptr() {
+                    roots.push(p as *mut u8);
+                }
+            }
+            for frame in &self.frames {
+                if let Some(p) = frame.this_val.as_heap_ptr() {
+                    roots.push(p as *mut u8);
+                }
+                for local in &frame.locals {
+                    if let Some(p) = local.as_heap_ptr() {
+                        roots.push(p as *mut u8);
+                    }
+                }
+            }
+            self.heap.old_gen.start_incremental_marking(&roots);
+        }
+
+        let done = self.heap.step_incremental_marking(slice_budget);
+        if done {
+            // Prune dead old_gen objects from self.objects before sweeping
+            let mut i = 0;
+            while i < self.objects.len() {
+                let ptr = self.objects[i];
+                if self.heap.old_gen.contains(ptr as *const u8) {
+                    let header = unsafe { &*((ptr as *const doms_gc::GcHeader).sub(1)) };
+                    if !header.is_marked() {
+                        unsafe {
+                            std::ptr::drop_in_place(ptr);
+                        }
+                        self.objects.swap_remove(i);
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+            self.heap.old_gen.sweep();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Type tracer function for interior reference tracing of `JsObject` payloads.
+pub(crate) unsafe fn js_object_tracer(payload: *mut u8, visit: &mut dyn FnMut(*mut *mut u8)) {
+    let obj = unsafe { &mut *(payload as *mut JsObject) };
+    obj.visit_values_mut_mode(VisitMode::Strong, |val| {
+        if let Some(ptr) = val.as_heap_ptr() {
+            let mut p = ptr as *mut u8;
+            let p_ptr = &mut p as *mut *mut u8;
+            visit(p_ptr);
+        }
+    });
 }

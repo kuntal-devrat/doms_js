@@ -28,12 +28,7 @@ pub fn can_compile_native(chunk: &BytecodeChunk) -> bool {
     for (_ip, op) in chunk.instructions.iter().enumerate() {
         match op {
             OpCode::LoadConst(idx) => match chunk.constants.get(*idx as usize) {
-                Some(Constant::Number(_)) | Some(Constant::Boolean(_)) => {}
-                Some(Constant::String(s)) => {
-                    if s.len() > 5 || !s.is_ascii() {
-                        return false;
-                    }
-                }
+                Some(Constant::Number(_)) | Some(Constant::Boolean(_)) | Some(Constant::String(_)) => {}
                 _ => return false,
             },
             OpCode::LoadNull
@@ -62,6 +57,11 @@ pub fn can_compile_native(chunk: &BytecodeChunk) -> bool {
             | OpCode::Pos
             | OpCode::Neg
             | OpCode::Not
+            | OpCode::Typeof
+            | OpCode::Void
+            | OpCode::In
+            | OpCode::Instanceof
+            | OpCode::ArrayPush
             | OpCode::Lt
             | OpCode::Lte
             | OpCode::Gt
@@ -101,12 +101,7 @@ pub fn can_compile_native_osr(chunk: &BytecodeChunk, loop_target: usize) -> bool
         let op = &chunk.instructions[ip];
         match op {
             OpCode::LoadConst(idx) => match chunk.constants.get(*idx as usize) {
-                Some(Constant::Number(_)) | Some(Constant::Boolean(_)) => {}
-                Some(Constant::String(s)) => {
-                    if s.len() > 5 || !s.is_ascii() {
-                        return false;
-                    }
-                }
+                Some(Constant::Number(_)) | Some(Constant::Boolean(_)) | Some(Constant::String(_)) => {}
                 _ => return false,
             },
             OpCode::LoadNull
@@ -135,6 +130,11 @@ pub fn can_compile_native_osr(chunk: &BytecodeChunk, loop_target: usize) -> bool
             | OpCode::Pos
             | OpCode::Neg
             | OpCode::Not
+            | OpCode::Typeof
+            | OpCode::Void
+            | OpCode::In
+            | OpCode::Instanceof
+            | OpCode::ArrayPush
             | OpCode::Lt
             | OpCode::Lte
             | OpCode::Gt
@@ -228,9 +228,16 @@ fn compute_stack_depths(chunk: &BytecodeChunk, osr_target: Option<usize>) -> Vec
             | OpCode::StrictNotEq
             | OpCode::GetElem => (2, 1, Vec::new()),
 
-            OpCode::BitNot | OpCode::Pos | OpCode::Neg | OpCode::Not | OpCode::GetProp(_) => {
-                (1, 1, Vec::new())
-            }
+            OpCode::BitNot
+            | OpCode::Pos
+            | OpCode::Neg
+            | OpCode::Not
+            | OpCode::Typeof
+            | OpCode::Void
+            | OpCode::GetProp(_) => (1, 1, Vec::new()),
+
+            OpCode::In | OpCode::Instanceof => (2, 1, Vec::new()),
+            OpCode::ArrayPush => (1, 0, Vec::new()),
 
             OpCode::SetProp(_) => (2, 1, Vec::new()),
             OpCode::SetElem => (3, 1, Vec::new()),
@@ -298,6 +305,10 @@ fn compile_native_internal(
     builder_obj.symbol("jit_construct_trampoline", jit_construct_trampoline as *const u8);
     builder_obj.symbol("jit_array_length", jit_array_length as *const u8);
     builder_obj.symbol("jit_array_push_fast", jit_array_push_fast as *const u8);
+    builder_obj.symbol("jit_typeof", jit_typeof as *const u8);
+    builder_obj.symbol("jit_in", jit_in as *const u8);
+    builder_obj.symbol("jit_instanceof", jit_instanceof as *const u8);
+    builder_obj.symbol("jit_alloc_string", jit_alloc_string as *const u8);
     builder_obj.symbol("jit_get_global", jit_get_global as *const u8);
     builder_obj.symbol("jit_get_global_safe", jit_get_global_safe as *const u8);
     builder_obj.symbol("jit_set_global", jit_set_global as *const u8);
@@ -426,6 +437,29 @@ fn compile_native_internal(
         .declare_function("jit_array_push_fast", Linkage::Import, &array_push_fast_sig)
         .ok()?;
 
+    let mut typeof_sig = module.make_signature();
+    typeof_sig.params.push(AbiParam::new(types::I64));
+    typeof_sig.returns.push(AbiParam::new(types::I64));
+    let typeof_func_id = module.declare_function("jit_typeof", Linkage::Import, &typeof_sig).ok()?;
+
+    let mut in_sig = module.make_signature();
+    in_sig.params.push(AbiParam::new(types::I64));
+    in_sig.params.push(AbiParam::new(types::I64));
+    in_sig.returns.push(AbiParam::new(types::I64));
+    let in_func_id = module.declare_function("jit_in", Linkage::Import, &in_sig).ok()?;
+
+    let mut instanceof_sig = module.make_signature();
+    instanceof_sig.params.push(AbiParam::new(types::I64));
+    instanceof_sig.params.push(AbiParam::new(types::I64));
+    instanceof_sig.returns.push(AbiParam::new(types::I64));
+    let instanceof_func_id = module.declare_function("jit_instanceof", Linkage::Import, &instanceof_sig).ok()?;
+
+    let mut alloc_string_sig = module.make_signature();
+    alloc_string_sig.params.push(AbiParam::new(types::I64));
+    alloc_string_sig.params.push(AbiParam::new(types::I64));
+    alloc_string_sig.returns.push(AbiParam::new(types::I64));
+    let alloc_string_func_id = module.declare_function("jit_alloc_string", Linkage::Import, &alloc_string_sig).ok()?;
+
     let mut get_global_sig = module.make_signature();
     get_global_sig.params.push(AbiParam::new(types::I64));
     get_global_sig.params.push(AbiParam::new(types::I64));
@@ -491,6 +525,10 @@ fn compile_native_internal(
         module.declare_func_in_func(array_length_func_id, &mut builder.func);
     let array_push_fast_func_ref =
         module.declare_func_in_func(array_push_fast_func_id, &mut builder.func);
+    let typeof_func_ref = module.declare_func_in_func(typeof_func_id, &mut builder.func);
+    let in_func_ref = module.declare_func_in_func(in_func_id, &mut builder.func);
+    let instanceof_func_ref = module.declare_func_in_func(instanceof_func_id, &mut builder.func);
+    let alloc_string_func_ref = module.declare_func_in_func(alloc_string_func_id, &mut builder.func);
     let get_global_func_ref = module.declare_func_in_func(get_global_func_id, &mut builder.func);
     let get_global_safe_func_ref =
         module.declare_func_in_func(get_global_safe_func_id, &mut builder.func);
@@ -634,27 +672,44 @@ fn compile_native_internal(
         let op = chunk.instructions[ip];
         match op {
             OpCode::LoadConst(idx) => {
-                let js_val = match &chunk.constants[idx as usize] {
+                match &chunk.constants[idx as usize] {
                     Constant::Number(n) => {
-                        if n.fract() == 0.0 && *n >= i32::MIN as f64 && *n <= i32::MAX as f64 {
+                        let js_val = if n.fract() == 0.0 && *n >= i32::MIN as f64 && *n <= i32::MAX as f64 {
                             JsValue::from_int32(*n as i32)
                         } else {
                             JsValue::from_double(*n)
-                        }
+                        };
+                        let val = builder.ins().iconst(types::I64, js_val.0 as i64);
+                        builder.def_var(stack_vars[stack_depth], val);
+                        stack_depth += 1;
                     }
-                    Constant::Boolean(b) => JsValue::from_boolean(*b),
+                    Constant::Boolean(b) => {
+                        let js_val = JsValue::from_boolean(*b);
+                        let val = builder.ins().iconst(types::I64, js_val.0 as i64);
+                        builder.def_var(stack_vars[stack_depth], val);
+                        stack_depth += 1;
+                    }
                     Constant::String(s) => {
                         if s.len() <= 5 && s.is_ascii() {
-                            JsValue::try_from_sso_string(s).unwrap_or_else(JsValue::undefined)
+                            let js_val = JsValue::try_from_sso_string(s).unwrap_or_else(JsValue::undefined);
+                            let val = builder.ins().iconst(types::I64, js_val.0 as i64);
+                            builder.def_var(stack_vars[stack_depth], val);
+                            stack_depth += 1;
                         } else {
-                            JsValue::undefined()
+                            let s_ptr = builder.ins().iconst(types::I64, s.as_ptr() as usize as i64);
+                            let s_len = builder.ins().iconst(types::I64, s.len() as i64);
+                            let call = builder.ins().call(alloc_string_func_ref, &[s_ptr, s_len]);
+                            let res = builder.inst_results(call)[0];
+                            builder.def_var(stack_vars[stack_depth], res);
+                            stack_depth += 1;
                         }
                     }
-                    _ => JsValue::undefined(),
-                };
-                let val = builder.ins().iconst(types::I64, js_val.0 as i64);
-                builder.def_var(stack_vars[stack_depth], val);
-                stack_depth += 1;
+                    _ => {
+                        let val = builder.ins().iconst(types::I64, JsValue::undefined().0 as i64);
+                        builder.def_var(stack_vars[stack_depth], val);
+                        stack_depth += 1;
+                    }
+                }
             }
             OpCode::LoadTrue => {
                 let val = builder.ins().iconst(types::I64, JsValue::from_boolean(true).0 as i64);
@@ -1192,6 +1247,133 @@ fn compile_native_internal(
                         builder.ins().iconst(types::I64, JsValue::from_boolean(false).0 as i64);
                     let res = builder.ins().select(is_falsy, true_val, false_val);
                     builder.def_var(stack_vars[stack_depth - 1], res);
+                }
+            }
+            OpCode::Void => {
+                if stack_depth > 0 {
+                    let undef_val = builder.ins().iconst(types::I64, TAG_UNDEFINED as i64);
+                    builder.def_var(stack_vars[stack_depth - 1], undef_val);
+                }
+            }
+            OpCode::Typeof => {
+                if stack_depth > 0 {
+                    let val = builder.use_var(stack_vars[stack_depth - 1]);
+                    let call = builder.ins().call(typeof_func_ref, &[val]);
+                    let res = builder.inst_results(call)[0];
+
+                    let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                    let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
+
+                    let ok_block = builder.create_block();
+                    let deopt_block = builder.create_block();
+
+                    builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
+
+                    builder.switch_to_block(deopt_block);
+                    for i in 0..num_locals {
+                        let v = builder.use_var(local_vars[i]);
+                        builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                    }
+                    builder.ins().return_(&[deopt_val]);
+                    builder.seal_block(deopt_block);
+
+                    builder.switch_to_block(ok_block);
+                    builder.seal_block(ok_block);
+
+                    builder.def_var(stack_vars[stack_depth - 1], res);
+                }
+            }
+            OpCode::In => {
+                if stack_depth >= 2 {
+                    stack_depth -= 2;
+                    let lhs = builder.use_var(stack_vars[stack_depth]);
+                    let rhs = builder.use_var(stack_vars[stack_depth + 1]);
+
+                    let call = builder.ins().call(in_func_ref, &[lhs, rhs]);
+                    let res = builder.inst_results(call)[0];
+
+                    let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                    let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
+
+                    let ok_block = builder.create_block();
+                    let deopt_block = builder.create_block();
+
+                    builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
+
+                    builder.switch_to_block(deopt_block);
+                    for i in 0..num_locals {
+                        let v = builder.use_var(local_vars[i]);
+                        builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                    }
+                    builder.ins().return_(&[deopt_val]);
+                    builder.seal_block(deopt_block);
+
+                    builder.switch_to_block(ok_block);
+                    builder.seal_block(ok_block);
+
+                    builder.def_var(stack_vars[stack_depth], res);
+                    stack_depth += 1;
+                }
+            }
+            OpCode::Instanceof => {
+                if stack_depth >= 2 {
+                    stack_depth -= 2;
+                    let lhs = builder.use_var(stack_vars[stack_depth]);
+                    let rhs = builder.use_var(stack_vars[stack_depth + 1]);
+
+                    let call = builder.ins().call(instanceof_func_ref, &[lhs, rhs]);
+                    let res = builder.inst_results(call)[0];
+
+                    let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                    let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
+
+                    let ok_block = builder.create_block();
+                    let deopt_block = builder.create_block();
+
+                    builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
+
+                    builder.switch_to_block(deopt_block);
+                    for i in 0..num_locals {
+                        let v = builder.use_var(local_vars[i]);
+                        builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                    }
+                    builder.ins().return_(&[deopt_val]);
+                    builder.seal_block(deopt_block);
+
+                    builder.switch_to_block(ok_block);
+                    builder.seal_block(ok_block);
+
+                    builder.def_var(stack_vars[stack_depth], res);
+                    stack_depth += 1;
+                }
+            }
+            OpCode::ArrayPush => {
+                if stack_depth >= 2 {
+                    let val = builder.use_var(stack_vars[stack_depth - 1]);
+                    let arr = builder.use_var(stack_vars[stack_depth - 2]);
+                    stack_depth -= 1;
+
+                    let call = builder.ins().call(array_push_fast_func_ref, &[arr, val]);
+                    let res = builder.inst_results(call)[0];
+
+                    let deopt_val = builder.ins().iconst(types::I64, JIT_DEOPT_SENTINEL as i64);
+                    let is_deopt = builder.ins().icmp(IntCC::Equal, res, deopt_val);
+
+                    let ok_block = builder.create_block();
+                    let deopt_block = builder.create_block();
+
+                    builder.ins().brif(is_deopt, deopt_block, &[], ok_block, &[]);
+
+                    builder.switch_to_block(deopt_block);
+                    for i in 0..num_locals {
+                        let v = builder.use_var(local_vars[i]);
+                        builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                    }
+                    builder.ins().return_(&[deopt_val]);
+                    builder.seal_block(deopt_block);
+
+                    builder.switch_to_block(ok_block);
+                    builder.seal_block(ok_block);
                 }
             }
             OpCode::Jump(target) => {

@@ -194,6 +194,26 @@ impl GcHeader {
         self.flags |= FLAG_MARKED;
     }
 
+    /// Atomically set the marked flag. Returns `true` if this transitioned the object
+    /// from unmarked to marked.
+    #[inline]
+    pub fn set_marked_atomic(&self) -> bool {
+        let atomic_flags = unsafe {
+            &*(&self.flags as *const u16 as *const std::sync::atomic::AtomicU16)
+        };
+        let prev = atomic_flags.fetch_or(FLAG_MARKED, std::sync::atomic::Ordering::SeqCst);
+        (prev & FLAG_MARKED) == 0
+    }
+
+    /// Atomically check if the marked flag is set.
+    #[inline]
+    pub fn is_marked_atomic(&self) -> bool {
+        let atomic_flags = unsafe {
+            &*(&self.flags as *const u16 as *const std::sync::atomic::AtomicU16)
+        };
+        (atomic_flags.load(std::sync::atomic::Ordering::SeqCst) & FLAG_MARKED) != 0
+    }
+
     /// Clear the marked flag.
     #[inline]
     pub fn clear_marked(&mut self) {

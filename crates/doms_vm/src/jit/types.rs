@@ -963,3 +963,113 @@ pub extern "C" fn jit_osr_yield(target_ip: u32) -> u64 {
     OSR_YIELDED_IP.with(|c| c.set(Some(target_ip as usize)));
     JIT_DEOPT_SENTINEL
 }
+
+/// JIT helper for `typeof` operator.
+pub extern "C" fn jit_typeof(val: u64) -> u64 {
+    CURRENT_VM.with(|c| {
+        let vm_ptr = c.get();
+        if !vm_ptr.is_null() {
+            let vm = unsafe { &mut *vm_ptr };
+            let v = JsValue(val);
+            let t = if v.is_symbol() {
+                "symbol"
+            } else if let Some(ptr) = v.as_heap_ptr() {
+                let obj = unsafe { &*(ptr as *mut crate::object::JsObject) };
+                match &obj.kind {
+                    crate::object::ObjectKind::String(_) => "string",
+                    crate::object::ObjectKind::Symbol(_) => {
+                        if v.is_symbol() {
+                            "symbol"
+                        } else {
+                            "object"
+                        }
+                    }
+                    crate::object::ObjectKind::BigInt(_) => "bigint",
+                    crate::object::ObjectKind::Function(_) | crate::object::ObjectKind::NativeFunction(_) => "function",
+                    crate::object::ObjectKind::Proxy { target, .. } => {
+                        let tgt = *target;
+                        if vm.is_callable(tgt) { "function" } else { "object" }
+                    }
+                    _ => "object",
+                }
+            } else {
+                v.js_typeof()
+            };
+            let s_val = vm.alloc_string(t.to_string());
+            return s_val.0;
+        }
+        JIT_DEOPT_SENTINEL
+    })
+}
+
+/// JIT helper for `in` operator (`lhs in rhs`).
+pub extern "C" fn jit_in(lhs: u64, rhs: u64) -> u64 {
+    CURRENT_VM.with(|c| {
+        let vm_ptr = c.get();
+        if !vm_ptr.is_null() {
+            let vm = unsafe { &mut *vm_ptr };
+            let r_val = JsValue(rhs);
+            let l_val = JsValue(lhs);
+            if !r_val.is_js_object() {
+                return JIT_DEOPT_SENTINEL;
+            }
+            if let Ok(prop_key) = vm.to_property_key(l_val) {
+                if let Ok(has) = vm.has_property_key(r_val, &prop_key) {
+                    return TAG_BOOLEAN | (has as u64);
+                }
+            }
+        }
+        JIT_DEOPT_SENTINEL
+    })
+}
+
+/// JIT helper for `instanceof` operator (`lhs instanceof rhs`).
+pub extern "C" fn jit_instanceof(lhs: u64, rhs: u64) -> u64 {
+    CURRENT_VM.with(|c| {
+        let vm_ptr = c.get();
+        if !vm_ptr.is_null() {
+            let vm = unsafe { &mut *vm_ptr };
+            let r_val = JsValue(rhs);
+            let l_val = JsValue(lhs);
+            if !r_val.is_js_object() {
+                return JIT_DEOPT_SENTINEL;
+            }
+            if let Some(has_instance_sym) = vm.symbol_has_instance {
+                if let Ok(handler) = vm.get_symbol_property_result(r_val, has_instance_sym) {
+                    if !handler.is_undefined() && !handler.is_null() {
+                        if !vm.is_callable(handler) {
+                            return JIT_DEOPT_SENTINEL;
+                        }
+                        if let Ok(res) = vm.call(handler, r_val, &[l_val]) {
+                            return TAG_BOOLEAN | (res.is_truthy() as u64);
+                        }
+                        return JIT_DEOPT_SENTINEL;
+                    }
+                }
+            }
+            if !vm.is_callable(r_val) {
+                return JIT_DEOPT_SENTINEL;
+            }
+            if let Ok(is_inst) = vm.ordinary_has_instance(r_val, l_val) {
+                return TAG_BOOLEAN | (is_inst as u64);
+            }
+        }
+        JIT_DEOPT_SENTINEL
+    })
+}
+
+/// JIT helper for allocating / interning constant strings of arbitrary length.
+pub extern "C" fn jit_alloc_string(ptr: *const u8, len: usize) -> u64 {
+    CURRENT_VM.with(|c| {
+        let vm_ptr = c.get();
+        if !vm_ptr.is_null() && !ptr.is_null() {
+            let vm = unsafe { &mut *vm_ptr };
+            let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+            if let Ok(s) = std::str::from_utf8(slice) {
+                let s_val = vm.alloc_string(s.to_string());
+                return s_val.0;
+            }
+        }
+        JIT_DEOPT_SENTINEL
+    })
+}
