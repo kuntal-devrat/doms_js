@@ -245,6 +245,11 @@ impl Compiler {
                 self.chunk.emit(OpCode::Pop, 0);
             }
             Statement::With { object, body } => {
+                if self.is_strict {
+                    return Err(CompileError::General(
+                        "Strict mode code may not include a with statement".to_string(),
+                    ));
+                }
                 self.compile_expression(object)?;
                 self.chunk.emit(OpCode::RequireObjectCoercible, 0);
                 self.emit_push_scope();
