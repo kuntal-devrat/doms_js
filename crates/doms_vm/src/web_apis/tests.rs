@@ -439,3 +439,132 @@ fn test_fetch_with_request_instance() {
     let res = vm.globals.get("fetchResult").copied().unwrap();
     assert_eq!(vm.to_string_value(res), "Passed%20Through%20Request");
 }
+
+#[test]
+fn test_readable_byte_stream_controller_and_byob_reader() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var pullCount = 0;
+        var rs = new ReadableStream({
+            type: "bytes",
+            start: function(controller) {
+                // Initial start
+            },
+            pull: function(controller) {
+                pullCount++;
+                if (controller.byobRequest) {
+                    var v = controller.byobRequest.view;
+                    v[0] = 100;
+                    v[1] = 101;
+                    controller.byobRequest.respond(2);
+                } else {
+                    var u = new Uint8Array([1, 2, 3]);
+                    controller.enqueue(u);
+                }
+            }
+        });
+
+        var reader = rs.getReader({ mode: "byob" });
+        var readBuf = new Uint8Array(4);
+        var readResult = null;
+        var readDone = false;
+
+        reader.read(readBuf).then(function(res) {
+            readResult = res.value;
+            readDone = res.done;
+        });
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+
+    let done = vm.globals.get("readDone").copied().unwrap();
+    assert_eq!(done.is_truthy(), false);
+    let buf = vm.globals.get("readBuf").copied().unwrap();
+    let b0 = vm.get_element(buf, 0);
+    let b1 = vm.get_element(buf, 1);
+    assert_eq!(b0.to_int32(), Some(100));
+    assert_eq!(b1.to_int32(), Some(101));
+}
+
+#[test]
+fn test_byob_reader_non_byte_stream_throws() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var threw = false;
+        try {
+            var stream = new ReadableStream({});
+            stream.getReader({ mode: "byob" });
+        } catch(e) {
+            threw = true;
+        }
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    assert_eq!(vm.globals.get("threw").map(|v| v.is_truthy()), Some(true));
+}
+
+#[test]
+fn test_writable_stream_error_propagation() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var writeErrorCaught = null;
+        var closedErrorCaught = null;
+        var readyErrorCaught = null;
+
+        var ws = new WritableStream({
+            write: function(chunk) {
+                if (chunk === "fail") {
+                    throw new Error("sink write failed");
+                }
+            }
+        });
+
+        var writer = ws.getWriter();
+        writer.closed.catch(function(err) {
+            closedErrorCaught = err.message || String(err);
+        });
+
+        writer.write("ok").then(function() {
+            return writer.write("fail");
+        }).catch(function(err) {
+            writeErrorCaught = err.message || String(err);
+            writer.ready.catch(function(rErr) {
+                readyErrorCaught = rErr.message || String(rErr);
+            });
+        });
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+
+    let w_err = vm.globals.get("writeErrorCaught").copied().unwrap();
+    let c_err = vm.globals.get("closedErrorCaught").copied().unwrap();
+    let r_err = vm.globals.get("readyErrorCaught").copied().unwrap();
+    assert_eq!(vm.to_string_value(w_err), "sink write failed");
+    assert_eq!(vm.to_string_value(c_err), "sink write failed");
+    assert_eq!(vm.to_string_value(r_err), "sink write failed");
+}
+
+#[test]
+fn test_writable_stream_controller_error_propagation() {
+    let mut vm = Vm::new();
+    let script = r#"
+        var ctrl = null;
+        var ws = new WritableStream({
+            start: function(c) {
+                ctrl = c;
+            }
+        });
+        var writer = ws.getWriter();
+        var closedCaught = null;
+        writer.closed.catch(function(e) {
+            closedCaught = e;
+        });
+
+        ctrl.error("stream errored by controller");
+    "#;
+    vm.eval(script).expect("eval should succeed");
+    vm.drain_microtasks().expect("drain microtasks");
+
+    let c_err = vm.globals.get("closedCaught").copied().unwrap();
+    assert_eq!(vm.to_string_value(c_err), "stream errored by controller");
+}
+

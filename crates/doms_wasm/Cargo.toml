@@ -12,6 +12,11 @@ crate-type = ["cdylib", "rlib"]
 doms_vm.workspace = true
 doms_compiler.workspace = true
 doms_parser.workspace = true
+cranelift-codegen.workspace = true
+cranelift-frontend.workspace = true
+cranelift-jit.workspace = true
+cranelift-module.workspace = true
+cranelift-native.workspace = true
 log.workspace = true
 
 [dev-dependencies]

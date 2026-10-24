@@ -145,6 +145,7 @@ impl Vm {
                                             stack_args.as_mut_ptr(),
                                             locals_count,
                                             effective_this.0,
+                                            0,
                                         )
                                     }
                                 } else {
@@ -166,6 +167,7 @@ impl Vm {
                                             raw_args.as_mut_ptr(),
                                             raw_args.len(),
                                             effective_this.0,
+                                            0,
                                         )
                                     }
                                 };
@@ -267,6 +269,67 @@ impl Vm {
                         callee_func.upvalues = fresh_upvalues.clone();
                         callee_func.home_object = fresh_home_object;
 
+                        // Tiered native Cranelift execution for generator start
+                        if callee_func.jit_entry.is_none() && !callee_func.jit_attempted {
+                            let can_jit = crate::jit::JitCompiler::can_compile_native(&callee_func.chunk);
+                            if can_jit {
+                                callee_func.jit_attempted = true;
+                                callee_func.jit_entry =
+                                    crate::jit::JitCompiler::compile_native(&callee_func.chunk);
+                            }
+                        }
+                        if let Some(jit) = &callee_func.jit_entry {
+                            if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } =
+                                &jit.code
+                            {
+                                let locals_count = *num_locals;
+                                let mut raw_locals =
+                                    vec![crate::value::TAG_UNDEFINED; locals_count];
+                                for (i, v) in locals.iter().enumerate() {
+                                    if i < locals_count {
+                                        raw_locals[i] = v.0;
+                                    }
+                                }
+                                let prev_vm = crate::jit::CURRENT_VM.with(|c| c.get());
+                                let prev_gen = crate::jit::CURRENT_GENERATOR.with(|c| c.get());
+                                crate::jit::CURRENT_VM.with(|c| c.set(self as *mut Vm));
+                                crate::jit::CURRENT_GENERATOR.with(|c| c.set(0));
+                                crate::jit::CURRENT_CALLEE_FUNC
+                                    .with(|c| c.borrow_mut().replace(callee_func.clone()));
+
+                                crate::jit::NURSERY_PTRS.with(|cell| {
+                                    let ptrs = unsafe { &mut *cell.get() };
+                                    ptrs.bump = self.heap.nursery.cursor();
+                                    ptrs.limit = self.heap.nursery.limit();
+                                });
+
+                                let native_res = unsafe {
+                                    (func_ptr)(
+                                        raw_locals.as_mut_ptr(),
+                                        raw_locals.len(),
+                                        cur_this.0,
+                                        0,
+                                    )
+                                };
+
+                                crate::jit::NURSERY_PTRS.with(|cell| {
+                                    let ptrs = unsafe { &mut *cell.get() };
+                                    if !ptrs.bump.is_null()
+                                        && ptrs.bump > self.heap.nursery.cursor()
+                                    {
+                                        self.heap.nursery.set_cursor(ptrs.bump);
+                                    }
+                                });
+                                crate::jit::CURRENT_VM.with(|c| c.set(prev_vm));
+                                crate::jit::CURRENT_GENERATOR.with(|c| c.set(prev_gen));
+                                crate::jit::CURRENT_CALLEE_FUNC.with(|c| c.borrow_mut().take());
+
+                                if native_res != crate::jit::JIT_DEOPT_SENTINEL {
+                                    return Ok(Some(JsValue(native_res)));
+                                }
+                            }
+                        }
+
                         let chunk = Arc::clone(&callee_func.chunk);
                         let target_depth = self.frames.len();
                         let base_sp = self.stack.len();
@@ -324,6 +387,67 @@ impl Vm {
                         let mut callee_func = func.clone();
                         callee_func.upvalues = fresh_upvalues.clone();
                         callee_func.home_object = fresh_home_object;
+
+                        // Tiered native Cranelift execution for generator start
+                        if callee_func.jit_entry.is_none() && !callee_func.jit_attempted {
+                            let can_jit = crate::jit::JitCompiler::can_compile_native(&callee_func.chunk);
+                            if can_jit {
+                                callee_func.jit_attempted = true;
+                                callee_func.jit_entry =
+                                    crate::jit::JitCompiler::compile_native(&callee_func.chunk);
+                            }
+                        }
+                        if let Some(jit) = &callee_func.jit_entry {
+                            if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } =
+                                &jit.code
+                            {
+                                let locals_count = *num_locals;
+                                let mut raw_locals =
+                                    vec![crate::value::TAG_UNDEFINED; locals_count];
+                                for (i, v) in locals.iter().enumerate() {
+                                    if i < locals_count {
+                                        raw_locals[i] = v.0;
+                                    }
+                                }
+                                let prev_vm = crate::jit::CURRENT_VM.with(|c| c.get());
+                                let prev_gen = crate::jit::CURRENT_GENERATOR.with(|c| c.get());
+                                crate::jit::CURRENT_VM.with(|c| c.set(self as *mut Vm));
+                                crate::jit::CURRENT_GENERATOR.with(|c| c.set(0));
+                                crate::jit::CURRENT_CALLEE_FUNC
+                                    .with(|c| c.borrow_mut().replace(callee_func.clone()));
+
+                                crate::jit::NURSERY_PTRS.with(|cell| {
+                                    let ptrs = unsafe { &mut *cell.get() };
+                                    ptrs.bump = self.heap.nursery.cursor();
+                                    ptrs.limit = self.heap.nursery.limit();
+                                });
+
+                                let native_res = unsafe {
+                                    (func_ptr)(
+                                        raw_locals.as_mut_ptr(),
+                                        raw_locals.len(),
+                                        cur_this.0,
+                                        0,
+                                    )
+                                };
+
+                                crate::jit::NURSERY_PTRS.with(|cell| {
+                                    let ptrs = unsafe { &mut *cell.get() };
+                                    if !ptrs.bump.is_null()
+                                        && ptrs.bump > self.heap.nursery.cursor()
+                                    {
+                                        self.heap.nursery.set_cursor(ptrs.bump);
+                                    }
+                                });
+                                crate::jit::CURRENT_VM.with(|c| c.set(prev_vm));
+                                crate::jit::CURRENT_GENERATOR.with(|c| c.set(prev_gen));
+                                crate::jit::CURRENT_CALLEE_FUNC.with(|c| c.borrow_mut().take());
+
+                                if native_res != crate::jit::JIT_DEOPT_SENTINEL {
+                                    return Ok(Some(JsValue(native_res)));
+                                }
+                            }
+                        }
 
                         let chunk = Arc::clone(&callee_func.chunk);
                         let target_depth = self.frames.len();

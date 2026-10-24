@@ -85,7 +85,10 @@ pub fn can_compile_native(chunk: &BytecodeChunk) -> bool {
             | OpCode::GetProp(_)
             | OpCode::SetProp(_)
             | OpCode::GetElem
-            | OpCode::SetElem => {}
+            | OpCode::SetElem
+            | OpCode::GeneratorStart
+            | OpCode::Yield
+            | OpCode::Await => {}
             _ => return false,
         }
     }
@@ -155,7 +158,10 @@ pub fn can_compile_native_osr(chunk: &BytecodeChunk, loop_target: usize) -> bool
             | OpCode::GetProp(_)
             | OpCode::SetProp(_)
             | OpCode::GetElem
-            | OpCode::SetElem => {}
+            | OpCode::SetElem
+            | OpCode::GeneratorStart
+            | OpCode::Yield
+            | OpCode::Await => {}
             _ => return false,
         }
     }
@@ -246,6 +252,9 @@ fn compute_stack_depths(chunk: &BytecodeChunk, osr_target: Option<usize>) -> Vec
             OpCode::Call(argc) | OpCode::Construct(argc) => (*argc as usize + 1, 1, Vec::new()),
             OpCode::CallWithThis(argc) => (*argc as usize + 2, 1, Vec::new()),
 
+            OpCode::GeneratorStart => (0, 0, vec![ip + 1]),
+            OpCode::Yield => (1, 1, vec![ip + 1]),
+            OpCode::Await => (1, 1, Vec::new()),
             OpCode::Jump(t) => (0, 0, vec![*t as usize]),
             OpCode::JumpIfFalse(t) | OpCode::JumpIfTrue(t) => (1, 0, vec![*t as usize, ip + 1]),
             OpCode::Return | OpCode::Halt => (cur_depth.min(1), 0, Vec::new()),
@@ -313,6 +322,11 @@ fn compile_native_internal(
     builder_obj.symbol("jit_get_global_safe", jit_get_global_safe as *const u8);
     builder_obj.symbol("jit_set_global", jit_set_global as *const u8);
     builder_obj.symbol("jit_osr_yield", jit_osr_yield as *const u8);
+    builder_obj.symbol("jit_generator_start", jit_generator_start as *const u8);
+    builder_obj.symbol("jit_generator_suspend", jit_generator_suspend as *const u8);
+    builder_obj.symbol("jit_generator_complete", jit_generator_complete as *const u8);
+    builder_obj.symbol("jit_generator_get_send_val", jit_generator_get_send_val as *const u8);
+    builder_obj.symbol("jit_await_trampoline", jit_await_trampoline as *const u8);
     let mut module = JITModule::new(builder_obj);
 
     let mut strict_eq_sig = module.make_signature();
@@ -489,10 +503,46 @@ fn compile_native_internal(
     let osr_yield_func_id =
         module.declare_function("jit_osr_yield", Linkage::Import, &osr_yield_sig).ok()?;
 
+    let mut gen_start_sig = module.make_signature();
+    gen_start_sig.params.push(AbiParam::new(types::I32)); // resume_ip
+    gen_start_sig.params.push(AbiParam::new(types::I64)); // locals_ptr
+    gen_start_sig.params.push(AbiParam::new(types::I32)); // num_locals
+    gen_start_sig.params.push(AbiParam::new(types::I64)); // this_val
+    gen_start_sig.returns.push(AbiParam::new(types::I64));
+    let gen_start_func_id =
+        module.declare_function("jit_generator_start", Linkage::Import, &gen_start_sig).ok()?;
+
+    let mut gen_suspend_sig = module.make_signature();
+    gen_suspend_sig.params.push(AbiParam::new(types::I64)); // yielded_val
+    gen_suspend_sig.params.push(AbiParam::new(types::I32)); // resume_ip
+    gen_suspend_sig.params.push(AbiParam::new(types::I64)); // locals_ptr
+    gen_suspend_sig.params.push(AbiParam::new(types::I32)); // num_locals
+    gen_suspend_sig.returns.push(AbiParam::new(types::I64));
+    let gen_suspend_func_id =
+        module.declare_function("jit_generator_suspend", Linkage::Import, &gen_suspend_sig).ok()?;
+
+    let mut gen_complete_sig = module.make_signature();
+    gen_complete_sig.params.push(AbiParam::new(types::I64)); // return_val
+    gen_complete_sig.returns.push(AbiParam::new(types::I64));
+    let gen_complete_func_id =
+        module.declare_function("jit_generator_complete", Linkage::Import, &gen_complete_sig).ok()?;
+
+    let mut gen_send_val_sig = module.make_signature();
+    gen_send_val_sig.returns.push(AbiParam::new(types::I64));
+    let gen_send_val_func_id =
+        module.declare_function("jit_generator_get_send_val", Linkage::Import, &gen_send_val_sig).ok()?;
+
+    let mut await_sig = module.make_signature();
+    await_sig.params.push(AbiParam::new(types::I64)); // promise_val
+    await_sig.returns.push(AbiParam::new(types::I64));
+    let await_func_id =
+        module.declare_function("jit_await_trampoline", Linkage::Import, &await_sig).ok()?;
+
     let mut sig = module.make_signature();
     sig.params.push(AbiParam::new(types::I64)); // args_ptr
     sig.params.push(AbiParam::new(types::I64)); // num_args
     sig.params.push(AbiParam::new(types::I64)); // this_val
+    sig.params.push(AbiParam::new(types::I64)); // resume_ip
     sig.returns.push(AbiParam::new(types::I64)); // return u64
 
     let self_func_id = module.declare_function("doms_jit_entry", Linkage::Export, &sig).ok()?;
@@ -534,9 +584,18 @@ fn compile_native_internal(
         module.declare_func_in_func(get_global_safe_func_id, &mut builder.func);
     let set_global_func_ref = module.declare_func_in_func(set_global_func_id, &mut builder.func);
     let osr_yield_func_ref = module.declare_func_in_func(osr_yield_func_id, &mut builder.func);
+    let gen_start_func_ref = module.declare_func_in_func(gen_start_func_id, &mut builder.func);
+    let gen_suspend_func_ref = module.declare_func_in_func(gen_suspend_func_id, &mut builder.func);
+    let gen_complete_func_ref = module.declare_func_in_func(gen_complete_func_id, &mut builder.func);
+    let gen_send_val_func_ref = module.declare_func_in_func(gen_send_val_func_id, &mut builder.func);
+    let await_func_ref = module.declare_func_in_func(await_func_id, &mut builder.func);
 
     // Find jump targets (basic block leaders)
     let num_insts = chunk.instructions.len();
+    let is_generator = chunk
+        .instructions
+        .iter()
+        .any(|op| matches!(op, OpCode::Yield | OpCode::GeneratorStart));
     let mut is_leader = vec![false; num_insts + 1];
     is_leader[0] = true;
 
@@ -558,6 +617,11 @@ fn compile_native_internal(
                 }
             }
             OpCode::Return | OpCode::Halt => {
+                if ip + 1 <= num_insts {
+                    is_leader[ip + 1] = true;
+                }
+            }
+            OpCode::GeneratorStart | OpCode::Yield | OpCode::Await => {
                 if ip + 1 <= num_insts {
                     is_leader[ip + 1] = true;
                 }
@@ -596,6 +660,7 @@ fn compile_native_internal(
     let args_ptr = builder.block_params(entry_block)[0];
     let num_args = builder.block_params(entry_block)[1];
     let this_val = builder.block_params(entry_block)[2];
+    let resume_ip = builder.block_params(entry_block)[3];
 
     let this_var = builder.declare_var(types::I64);
     builder.def_var(this_var, this_val);
@@ -638,17 +703,48 @@ fn compile_native_internal(
     ));
     let call_args_ptr = builder.ins().stack_addr(types::I64, call_args_slot, 0);
 
-    // Jump to first instruction block or OSR loop header
-    if let Some(target) = osr_target {
+    // Resumption jump dispatch for generator yields and async await
+    let mut resumption_targets: Vec<usize> = Vec::new();
+    for (ip, op) in chunk.instructions.iter().enumerate() {
+        match op {
+            OpCode::GeneratorStart | OpCode::Yield | OpCode::Await => {
+                if ip + 1 < num_insts && blocks.contains_key(&(ip + 1)) {
+                    resumption_targets.push(ip + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !resumption_targets.is_empty() {
+        let mut curr_block = entry_block;
+        for target in &resumption_targets {
+            let target_block = blocks[target];
+            let is_match = builder.ins().icmp_imm_s(IntCC::Equal, resume_ip, *target as i64);
+            let next_chk = builder.create_block();
+            builder.ins().brif(is_match, target_block, &[], next_chk, &[]);
+            builder.seal_block(curr_block);
+            builder.switch_to_block(next_chk);
+            curr_block = next_chk;
+        }
+        let fallback_block = if let Some(target) = osr_target {
+            blocks.get(&target).copied().unwrap_or(blocks[&0])
+        } else {
+            blocks[&0]
+        };
+        builder.ins().jump(fallback_block, &[]);
+        builder.seal_block(curr_block);
+    } else if let Some(target) = osr_target {
         let target_block = *blocks.get(&target)?;
         let block_zero = blocks[&0];
         let one = builder.ins().iconst(types::I32, 1);
         builder.ins().brif(one, target_block, &[], block_zero, &[]);
+        builder.seal_block(entry_block);
     } else {
         let block_zero = blocks[&0];
         builder.ins().jump(block_zero, &[]);
+        builder.seal_block(entry_block);
     }
-    builder.seal_block(entry_block);
 
     let precomputed_depths = compute_stack_depths(chunk, osr_target);
     let mut stack_depth: usize = precomputed_depths[osr_target.unwrap_or(0)];
@@ -663,6 +759,11 @@ fn compile_native_internal(
             builder.switch_to_block(blk);
             block_terminated = false;
             stack_depth = precomputed_depths[ip];
+            if ip > 0 && matches!(chunk.instructions[ip - 1], OpCode::Yield) {
+                let call_inst = builder.ins().call(gen_send_val_func_ref, &[]);
+                let send_val = builder.inst_results(call_inst)[0];
+                builder.def_var(stack_vars[stack_depth - 1], send_val);
+            }
         }
 
         if block_terminated {
@@ -2379,13 +2480,65 @@ fn compile_native_internal(
                     stack_depth += 1;
                 }
             }
+            OpCode::GeneratorStart => {
+                for (i, var) in local_vars.iter().enumerate() {
+                    let v = builder.use_var(*var);
+                    builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                }
+                let next_ip_val = builder.ins().iconst(types::I32, (ip + 1) as i64);
+                let num_locals_val = builder.ins().iconst(types::I32, num_locals as i64);
+                let this_v = builder.use_var(this_var);
+                let call_inst = builder.ins().call(
+                    gen_start_func_ref,
+                    &[next_ip_val, args_ptr, num_locals_val, this_v],
+                );
+                let gen_val = builder.inst_results(call_inst)[0];
+                builder.ins().return_(&[gen_val]);
+                block_terminated = true;
+            }
+            OpCode::Yield => {
+                let val = if stack_depth > 0 {
+                    let v = builder.use_var(stack_vars[stack_depth - 1]);
+                    stack_depth -= 1;
+                    v
+                } else {
+                    builder.ins().iconst(types::I64, TAG_UNDEFINED as i64)
+                };
+                for (i, var) in local_vars.iter().enumerate() {
+                    let v = builder.use_var(*var);
+                    builder.ins().store(MemFlagsData::trusted(), v, args_ptr, (i * 8) as i32);
+                }
+                let next_ip_val = builder.ins().iconst(types::I32, (ip + 1) as i64);
+                let num_locals_val = builder.ins().iconst(types::I32, num_locals as i64);
+                let call_inst = builder.ins().call(
+                    gen_suspend_func_ref,
+                    &[val, next_ip_val, args_ptr, num_locals_val],
+                );
+                let iter_res = builder.inst_results(call_inst)[0];
+                builder.ins().return_(&[iter_res]);
+                block_terminated = true;
+            }
+            OpCode::Await => {
+                if stack_depth > 0 {
+                    let promise_val = builder.use_var(stack_vars[stack_depth - 1]);
+                    let call_inst = builder.ins().call(await_func_ref, &[promise_val]);
+                    let resolved_val = builder.inst_results(call_inst)[0];
+                    builder.def_var(stack_vars[stack_depth - 1], resolved_val);
+                }
+            }
             OpCode::Return | OpCode::Halt => {
                 let ret_val = if stack_depth > 0 {
                     builder.use_var(stack_vars[stack_depth - 1])
                 } else {
                     builder.ins().iconst(types::I64, TAG_UNDEFINED as i64)
                 };
-                builder.ins().return_(&[ret_val]);
+                if is_generator {
+                    let call_inst = builder.ins().call(gen_complete_func_ref, &[ret_val]);
+                    let final_res = builder.inst_results(call_inst)[0];
+                    builder.ins().return_(&[final_res]);
+                } else {
+                    builder.ins().return_(&[ret_val]);
+                }
                 block_terminated = true;
             }
             _ => {
@@ -2406,7 +2559,13 @@ fn compile_native_internal(
         } else {
             builder.ins().iconst(types::I64, TAG_UNDEFINED as i64)
         };
-        builder.ins().return_(&[ret_val]);
+        if is_generator {
+            let call_inst = builder.ins().call(gen_complete_func_ref, &[ret_val]);
+            let final_res = builder.inst_results(call_inst)[0];
+            builder.ins().return_(&[final_res]);
+        } else {
+            builder.ins().return_(&[ret_val]);
+        }
     }
 
     // Seal all blocks and finalize

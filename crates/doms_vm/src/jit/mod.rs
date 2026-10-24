@@ -699,4 +699,116 @@ mod tests {
             .unwrap();
         assert_eq!(res_inst_true.as_boolean(), Some(true));
     }
+
+    #[test]
+    fn test_cranelift_native_generator_yield_and_resumption() {
+        let mut vm = Vm::new();
+
+        let mut chunk = BytecodeChunk::new();
+        let c0 = chunk.add_constant(Constant::Number(10.0));
+        let c1 = chunk.add_constant(Constant::Number(20.0));
+        let c2 = chunk.add_constant(Constant::Number(30.0));
+
+        // IP 0: LoadConst 10
+        chunk.emit(OpCode::LoadConst(c0), 1);
+        // IP 1: Yield (yields 10, resumes at IP 2)
+        chunk.emit(OpCode::Yield, 1);
+        // IP 2: Pop send_val
+        chunk.emit(OpCode::Pop, 1);
+        // IP 3: LoadConst 20
+        chunk.emit(OpCode::LoadConst(c1), 1);
+        // IP 4: Yield (yields 20, resumes at IP 5)
+        chunk.emit(OpCode::Yield, 1);
+        // IP 5: Pop send_val
+        chunk.emit(OpCode::Pop, 1);
+        // IP 6: LoadConst 30
+        chunk.emit(OpCode::LoadConst(c2), 1);
+        // IP 7: Return 30
+        chunk.emit(OpCode::Return, 1);
+
+        assert!(can_compile_native(&chunk));
+        let jit_fn = JitCompiler::compile_native(&chunk).expect("compile generator chunk");
+        assert!(jit_fn.is_native());
+
+        if let JitCode::Native { func_ptr, num_locals, .. } = &jit_fn.code {
+            let func = *func_ptr;
+            let locals_count = *num_locals;
+            let mut raw_locals = vec![crate::value::TAG_UNDEFINED; locals_count];
+
+            // 1. Initial entry: resume_ip = 0
+            CURRENT_VM.with(|c| c.set(&mut vm as *mut Vm));
+            let r1 = unsafe { (func)(raw_locals.as_mut_ptr(), raw_locals.len(), 0, 0) };
+            assert_ne!(r1, JIT_DEOPT_SENTINEL);
+            let val1 = JsValue(r1);
+            let v1 = vm.get_property(val1, "value");
+            let d1 = vm.get_property(val1, "done");
+            assert_eq!(v1.as_number(), Some(10.0));
+            assert_eq!(d1.as_boolean(), Some(false));
+
+            // 2. Resumption 1: resume_ip = 2
+            CURRENT_GENERATOR_SEND_VAL.with(|c| c.set(JsValue::from_double(99.0).0));
+            let r2 = unsafe { (func)(raw_locals.as_mut_ptr(), raw_locals.len(), 0, 2) };
+            assert_ne!(r2, JIT_DEOPT_SENTINEL);
+            let val2 = JsValue(r2);
+            let v2 = vm.get_property(val2, "value");
+            let d2 = vm.get_property(val2, "done");
+            assert_eq!(v2.as_number(), Some(20.0));
+            assert_eq!(d2.as_boolean(), Some(false));
+
+            // 3. Resumption 2: resume_ip = 5
+            CURRENT_GENERATOR_SEND_VAL.with(|c| c.set(JsValue::from_double(100.0).0));
+            let r3 = unsafe { (func)(raw_locals.as_mut_ptr(), raw_locals.len(), 0, 5) };
+            assert_ne!(r3, JIT_DEOPT_SENTINEL);
+            let val3 = JsValue(r3);
+            let v3 = vm.get_property(val3, "value");
+            let d3 = vm.get_property(val3, "done");
+            assert_eq!(v3.as_number(), Some(30.0));
+            assert_eq!(d3.as_boolean(), Some(true));
+        }
+    }
+
+    #[test]
+    fn test_cranelift_native_async_await_unwinding() {
+        let mut vm = Vm::new();
+
+        let mut chunk = BytecodeChunk::new();
+        // IP 0: GetLocal 0 (promise argument)
+        chunk.emit(OpCode::GetLocal(0), 1);
+        // IP 1: Await
+        chunk.emit(OpCode::Await, 1);
+        // IP 2: Return resolved value
+        chunk.emit(OpCode::Return, 1);
+
+        assert!(can_compile_native(&chunk));
+        let jit_fn = JitCompiler::compile_native(&chunk).expect("compile await chunk");
+        assert!(jit_fn.is_native());
+
+        // Create an already-fulfilled promise
+        let promise = vm.alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+        vm.resolve_promise(promise, JsValue::from_int32(1234));
+
+        let res = jit_fn.call(&mut vm, JsValue::undefined(), &[promise]).unwrap();
+        assert_eq!(res.to_int32(), Some(1234));
+    }
+
+    #[test]
+    fn test_generator_execution_in_vm() {
+        let mut vm = Vm::new();
+        let script = r#"
+            function* gen() {
+                var a = 1;
+                var b = yield a;
+                var c = yield (b + 10);
+                return c + 100;
+            }
+            var g = gen();
+            var r1 = g.next();
+            var r2 = g.next(5);
+            var r3 = g.next(20);
+
+            r1.value + ":" + r1.done + "|" + r2.value + ":" + r2.done + "|" + r3.value + ":" + r3.done;
+        "#;
+        let res = vm.eval(script).expect("eval generator in VM");
+        assert_eq!(vm.to_string_value(res), "1:false|15:false|120:true");
+    }
 }

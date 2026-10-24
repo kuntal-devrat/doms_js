@@ -5,7 +5,10 @@
 
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+pub mod simd;
+
 use doms_vm::Vm;
+use simd::WasmVectorKernel;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::sync::Mutex;
@@ -24,7 +27,9 @@ unsafe impl Sync for DomsWasmSandbox {}
 
 impl DomsWasmSandbox {
     pub fn new() -> Self {
-        Self { vm: Vm::new() }
+        let mut vm = Vm::new();
+        simd::register_wasm_simd(&mut vm);
+        Self { vm }
     }
 
     pub fn eval(&mut self, source: &str) -> Result<String, String> {
@@ -173,6 +178,45 @@ pub extern "C" fn doms_wasm_eval(source_ptr: *const u8, source_len: usize) -> *c
     doms_wasm_isolate_eval(0, source_ptr, source_len)
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn doms_wasm_simd_compile(
+    bytecode_ptr: *const u8,
+    bytecode_len: usize,
+) -> *mut WasmVectorKernel {
+    if bytecode_ptr.is_null() || bytecode_len == 0 {
+        return std::ptr::null_mut();
+    }
+    let slice = unsafe { std::slice::from_raw_parts(bytecode_ptr, bytecode_len) };
+    let engine = simd::WasmSimdEngine::new();
+    match engine.compile_bytecode(slice) {
+        Ok(kernel) => Box::into_raw(Box::new(kernel)),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn doms_wasm_simd_execute(
+    kernel_ptr: *mut WasmVectorKernel,
+    mem_ptr: *mut u8,
+    mem_len: usize,
+) -> i32 {
+    if kernel_ptr.is_null() || mem_ptr.is_null() {
+        return -1;
+    }
+    let kernel = unsafe { &*kernel_ptr };
+    let slice = unsafe { std::slice::from_raw_parts_mut(mem_ptr, mem_len) };
+    kernel.execute(slice)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn doms_wasm_simd_free_kernel(kernel_ptr: *mut WasmVectorKernel) {
+    if !kernel_ptr.is_null() {
+        unsafe {
+            let _ = Box::from_raw(kernel_ptr);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +310,85 @@ mod tests {
     #[test]
     fn test_wasm_alloc_zero_size_returns_null() {
         assert!(doms_wasm_alloc(0).is_null());
+    }
+
+    #[test]
+    fn test_wasm_simd_compile_and_execute_v128_const_and_store() {
+        // v128.const (16 bytes: 1..16) then v128.store offset=0
+        let mut bytecode = vec![0xFD, 0x0C];
+        for b in 1..=16u8 {
+            bytecode.push(b);
+        }
+        // v128.store: 0xFD, 0x0B, align=0, offset=0
+        bytecode.extend_from_slice(&[0xFD, 0x0B, 0x00, 0x00]);
+
+        let engine = simd::WasmSimdEngine::new();
+        let kernel = engine.compile_bytecode(&bytecode).expect("compile Wasm SIMD bytecode");
+
+        let mut mem = vec![0u8; 32];
+        let status = kernel.execute(&mut mem);
+        assert_eq!(status, 0);
+
+        for (i, &byte) in mem.iter().enumerate().take(16) {
+            assert_eq!(byte, (i + 1) as u8);
+        }
+        assert_eq!(mem[16], 0);
+    }
+
+    #[test]
+    fn test_wasm_simd_ml_vector_dot_product_and_math() {
+        let mut sandbox = DomsWasmSandbox::new();
+        let script = r#"
+            var a = new Float32Array([1.0, 2.0, 3.0, 4.0]);
+            var b = new Float32Array([0.5, 0.5, 0.5, 0.5]);
+            var dot = WebAssembly.simd.f32x4Dot(a, b);
+
+            var outAdd = new Float32Array(4);
+            WebAssembly.simd.f32x4Add(outAdd, a, b);
+
+            var outMul = new Float32Array(4);
+            WebAssembly.simd.f32x4Mul(outMul, a, b);
+
+            dot + ":" + outAdd[0] + ":" + outMul[3];
+        "#;
+        let res = sandbox.eval(script).expect("eval SIMD ML script");
+        // dot = 0.5 + 1.0 + 1.5 + 2.0 = 5.0
+        // outAdd[0] = 1.0 + 0.5 = 1.5
+        // outMul[3] = 4.0 * 0.5 = 2.0
+        assert_eq!(res, "5:1.5:2");
+    }
+
+    #[test]
+    fn test_wasm_simd_graphics_rgba_brightness() {
+        let mut sandbox = DomsWasmSandbox::new();
+        let script = r#"
+            var pixels = new Uint8Array([10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255]);
+            WebAssembly.simd.i8x16AdjustBrightness(pixels, 15);
+            pixels[0] + ":" + pixels[1] + ":" + pixels[3];
+        "#;
+        let res = sandbox.eval(script).expect("eval SIMD graphics script");
+        // pixels[0] = 10 + 15 = 25
+        // pixels[1] = 20 + 15 = 35
+        // pixels[3] = 255 clamped = 255
+        assert_eq!(res, "25:35:255");
+    }
+
+    #[test]
+    fn test_wasm_c_ffi_simd_compile_and_execute() {
+        let mut bytecode = vec![0xFD, 0x0C];
+        bytecode.extend(std::iter::repeat_n(42, 16));
+        bytecode.extend_from_slice(&[0xFD, 0x0B, 0x00, 0x00]);
+
+        let kernel_ptr = doms_wasm_simd_compile(bytecode.as_ptr(), bytecode.len());
+        assert!(!kernel_ptr.is_null());
+
+        let mut mem = vec![0u8; 32];
+        let status = doms_wasm_simd_execute(kernel_ptr, mem.as_mut_ptr(), mem.len());
+        assert_eq!(status, 0);
+        for &byte in mem.iter().take(16) {
+            assert_eq!(byte, 42);
+        }
+
+        doms_wasm_simd_free_kernel(kernel_ptr);
     }
 }

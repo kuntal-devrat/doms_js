@@ -368,7 +368,7 @@ impl Vm {
     ) -> Result<JsValue, VmError> {
         let ptr = gen_val.as_object_ptr().ok_or(VmError::TypeError("Not a generator".into()))?;
         let (
-            gen_fn,
+            mut gen_fn,
             ip,
             stack,
             locals,
@@ -425,6 +425,70 @@ impl Vm {
                 return Ok(promise);
             }
             return Ok(res);
+        }
+
+        // Tiered native Cranelift execution for generator resumption
+        if gen_fn.jit_entry.is_none() && !gen_fn.jit_attempted {
+            let can_jit = crate::jit::JitCompiler::can_compile_native(&gen_fn.chunk);
+            if can_jit {
+                gen_fn.jit_attempted = true;
+                gen_fn.jit_entry = crate::jit::JitCompiler::compile_native(&gen_fn.chunk);
+            }
+        }
+        if let Some(jit) = &gen_fn.jit_entry {
+            if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } = &jit.code {
+                let locals_count = *num_locals;
+                let mut raw_locals = vec![crate::value::TAG_UNDEFINED; locals_count];
+                for (i, v) in locals.iter().enumerate() {
+                    if i < locals_count {
+                        raw_locals[i] = v.0;
+                    }
+                }
+                let prev_vm = crate::jit::CURRENT_VM.with(|c| c.get());
+                let prev_gen = crate::jit::CURRENT_GENERATOR.with(|c| c.get());
+                let prev_send = crate::jit::CURRENT_GENERATOR_SEND_VAL.with(|c| c.get());
+
+                crate::jit::CURRENT_VM.with(|c| c.set(self as *mut Vm));
+                crate::jit::CURRENT_GENERATOR.with(|c| c.set(gen_val.0));
+                crate::jit::CURRENT_GENERATOR_SEND_VAL.with(|c| c.set(send_val.0));
+
+                crate::jit::NURSERY_PTRS.with(|cell| {
+                    let ptrs = unsafe { &mut *cell.get() };
+                    ptrs.bump = self.heap.nursery.cursor();
+                    ptrs.limit = self.heap.nursery.limit();
+                });
+
+                let native_res = unsafe {
+                    (func_ptr)(
+                        raw_locals.as_mut_ptr(),
+                        raw_locals.len(),
+                        this_val.0,
+                        ip as u64,
+                    )
+                };
+
+                crate::jit::NURSERY_PTRS.with(|cell| {
+                    let ptrs = unsafe { &mut *cell.get() };
+                    if !ptrs.bump.is_null() && ptrs.bump > self.heap.nursery.cursor() {
+                        self.heap.nursery.set_cursor(ptrs.bump);
+                    }
+                });
+                crate::jit::CURRENT_VM.with(|c| c.set(prev_vm));
+                crate::jit::CURRENT_GENERATOR.with(|c| c.set(prev_gen));
+                crate::jit::CURRENT_GENERATOR_SEND_VAL.with(|c| c.set(prev_send));
+
+                if native_res != crate::jit::JIT_DEOPT_SENTINEL {
+                    let res = JsValue(native_res);
+                    if gen_fn.is_async {
+                        let promise = self
+                            .alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
+                        self.resolve_promise(promise, res);
+                        let _ = self.drain_microtasks();
+                        return Ok(promise);
+                    }
+                    return Ok(res);
+                }
+            }
         }
 
         let mut current_stack = stack;

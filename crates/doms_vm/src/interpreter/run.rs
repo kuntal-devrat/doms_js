@@ -1092,7 +1092,7 @@ impl Vm {
 
                 let cur_this =
                     self.frames.last().map(|f| f.this_val.0).unwrap_or(crate::value::TAG_UNDEFINED);
-                let res = unsafe { (func_ptr)(locals_ptr, locals_len, cur_this) };
+                let res = unsafe { (func_ptr)(locals_ptr, locals_len, cur_this, 0) };
 
                 crate::jit::NURSERY_PTRS.with(|cell| {
                     let ptrs = unsafe { &mut *cell.get() };
