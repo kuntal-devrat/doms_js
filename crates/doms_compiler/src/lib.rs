@@ -37,3 +37,46 @@ pub fn compile_eval(program: &Program, is_strict: bool) -> Result<BytecodeChunk,
     compiler.is_eval = true;
     compiler.compile(program)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use doms_parser::parse;
+
+    #[test]
+    fn test_compile_strict_success() {
+        let program = parse("let x = 10;").unwrap();
+        let chunk = compile_strict(&program).unwrap();
+        assert!(chunk.instructions.len() > 0);
+    }
+
+    #[test]
+    fn test_compile_strict_error() {
+        let program = parse("with (obj) { }").unwrap();
+        let err = compile_strict(&program).unwrap_err();
+        match err {
+            CompileError::General(msg) => {
+                assert!(msg.contains("Strict mode code may not include a with statement"));
+            }
+            _ => panic!("Expected General error for strict mode with statement"),
+        }
+    }
+
+    #[test]
+    fn test_compile_success() {
+        let program = parse("let y = 20;").unwrap();
+        let chunk = compile(&program).unwrap();
+        assert!(chunk.instructions.len() > 0);
+    }
+
+    #[test]
+    fn test_compile_eval_success() {
+        let program = parse("let z = 30;").unwrap();
+
+        let chunk_strict = compile_eval(&program, true).unwrap();
+        assert!(chunk_strict.instructions.len() > 0);
+
+        let chunk_non_strict = compile_eval(&program, false).unwrap();
+        assert!(chunk_non_strict.instructions.len() > 0);
+    }
+}
