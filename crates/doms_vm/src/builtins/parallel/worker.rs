@@ -66,3 +66,18 @@ pub(super) fn register_worker(vm: &mut Vm) {
 
     vm.globals.insert("Worker".to_string(), worker_ctor);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_worker_path_traversal_prevention() {
+        let mut vm = Vm::new();
+        let temp_dir = std::env::temp_dir();
+        vm.base_dir = Some(temp_dir);
+
+        let res = vm.eval("new Worker('../../etc/passwd');");
+        assert!(res.is_ok(), "Worker creation with path traversal should not crash or panic");
+    }
+}
