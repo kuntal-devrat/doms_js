@@ -120,8 +120,8 @@ pub fn js_values_equal(a: JsValue, b: JsValue) -> bool {
         return true;
     }
     if a.is_number() && b.is_number() {
-        let na = a.to_number().unwrap();
-        let nb = b.to_number().unwrap();
+        let na = a.to_number().unwrap_or(f64::NAN);
+        let nb = b.to_number().unwrap_or(f64::NAN);
         if na.is_nan() && nb.is_nan() {
             return true;
         }
@@ -143,14 +143,14 @@ pub fn js_values_equal(a: JsValue, b: JsValue) -> bool {
 /// Compare two JavaScript values according to Strict Equality Comparison (`===`) semantics.
 pub fn js_strict_equal(a: JsValue, b: JsValue) -> bool {
     if a == b {
-        if a.is_double() && a.as_double().unwrap().is_nan() {
+        if a.is_double() && a.as_double().unwrap_or(f64::NAN).is_nan() {
             return false;
         }
         return true;
     }
     if a.is_number() && b.is_number() {
-        let na = a.to_number().unwrap();
-        let nb = b.to_number().unwrap();
+        let na = a.to_number().unwrap_or(f64::NAN);
+        let nb = b.to_number().unwrap_or(f64::NAN);
         if na.is_nan() || nb.is_nan() {
             return false;
         }
