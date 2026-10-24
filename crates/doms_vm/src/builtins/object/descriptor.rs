@@ -292,3 +292,42 @@ pub(super) fn register_descriptor(vm: &mut Vm) -> (JsValue, JsValue) {
 
     (get_own_prop_desc_fn, get_own_prop_descriptors_fn)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_own_property_descriptor_internal() {
+        let mut vm = Vm::new();
+
+        // 1. Non-object target
+        let non_obj = JsValue::from_double(42.0);
+        let prop_key = PropertyKeyVal::String("prop".to_string());
+        let result = get_own_property_descriptor_internal(&mut vm, non_obj, &prop_key).unwrap();
+        assert!(result.is_undefined());
+
+        // 2. Object with a string property
+        let obj = vm.alloc_object();
+        let val = JsValue::from_double(100.0);
+        vm.set_property(obj, "testProp", val);
+
+        let test_prop_key = PropertyKeyVal::String("testProp".to_string());
+        let desc = get_own_property_descriptor_internal(&mut vm, obj, &test_prop_key).unwrap();
+
+        assert!(desc.is_js_object());
+
+        // Check descriptor properties
+        let desc_value = vm.get_property(desc, "value");
+        assert_eq!(desc_value, val);
+
+        let desc_writable = vm.get_property(desc, "writable");
+        assert_eq!(desc_writable, JsValue::from_boolean(true));
+
+        let desc_enumerable = vm.get_property(desc, "enumerable");
+        assert_eq!(desc_enumerable, JsValue::from_boolean(true));
+
+        let desc_configurable = vm.get_property(desc, "configurable");
+        assert_eq!(desc_configurable, JsValue::from_boolean(true));
+    }
+}
