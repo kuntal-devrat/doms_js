@@ -3,23 +3,23 @@ use crate::bytecode::{Constant, OpCode};
 use crate::compiler::{CompileError, TargetScope};
 use doms_parser::ast::*;
 
-fn collect_for_lexical_names(
+fn collect_for_lexical_names<'a>(
     var_kind: &Option<VarKind>,
-    left: &str,
-    body: &Statement,
-) -> Vec<String> {
+    left: &'a str,
+    body: &'a Statement,
+) -> Vec<&'a str> {
     if !matches!(var_kind, Some(VarKind::Let) | Some(VarKind::Const)) {
         return Vec::new();
     }
     if !left.starts_with('@') {
-        return vec![left.to_string()];
+        return vec![left];
     }
     let mut names = Vec::new();
     match body {
         Statement::VarDecl { declarations, .. } => {
             for d in declarations {
                 if !d.name.starts_with('@') {
-                    names.push(d.name.clone());
+                    names.push(d.name.as_str());
                 }
             }
         }
@@ -27,7 +27,7 @@ fn collect_for_lexical_names(
             if let Some(Statement::VarDecl { declarations, .. }) = stmts.first() {
                 for d in declarations {
                     if !d.name.starts_with('@') {
-                        names.push(d.name.clone());
+                        names.push(d.name.as_str());
                     }
                 }
             }
@@ -259,7 +259,7 @@ impl Compiler {
             self.chunk.emit(OpCode::CreateObject, 0);
             for name in &tdz_names {
                 self.chunk.emit(OpCode::Dup, 0);
-                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
                 self.chunk.emit(OpCode::LoadConst(name_idx), 0);
                 self.chunk.emit(OpCode::LoadUninitialized, 0);
                 self.chunk.emit(OpCode::SetElem, 0);
@@ -410,7 +410,7 @@ impl Compiler {
             self.chunk.emit(OpCode::CreateObject, 0);
             for name in &tdz_names {
                 self.chunk.emit(OpCode::Dup, 0);
-                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
                 self.chunk.emit(OpCode::LoadConst(name_idx), 0);
                 self.chunk.emit(OpCode::LoadUninitialized, 0);
                 self.chunk.emit(OpCode::SetElem, 0);
