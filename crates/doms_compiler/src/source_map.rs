@@ -274,6 +274,22 @@ mod tests {
     }
 
     #[test]
+    fn test_vlq_decode_errors() {
+        // Invalid Base64 character
+        let invalid_char = decode_vlq("!").unwrap_err();
+        assert_eq!(invalid_char, "Invalid Base64 character: !");
+
+        // Unexpected end of VLQ input (continuation bit set but no next char)
+        // 'w' is binary 110000 -> pos 48
+        let unexpected_end = decode_vlq("w").unwrap_err();
+        assert_eq!(unexpected_end, "Unexpected end of VLQ input");
+
+        // Empty string should be ok
+        let empty = decode_vlq("").unwrap();
+        assert_eq!(empty, Vec::<i32>::new());
+    }
+
+    #[test]
     fn test_source_map_parsing_and_lookup() {
         let sm_json = r#"{
             "version": 3,
