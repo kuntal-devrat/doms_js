@@ -6,9 +6,7 @@ impl Vm {
     fn is_safe_import_path(src: &str) -> bool {
         let path = std::path::Path::new(src);
         !path.is_absolute()
-            && !path
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
+            && !path.components().any(|c| matches!(c, std::path::Component::ParentDir))
     }
 
     pub(crate) fn op_export(
