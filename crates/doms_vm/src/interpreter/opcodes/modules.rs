@@ -3,6 +3,12 @@
 use super::*;
 
 impl Vm {
+    fn is_safe_import_path(src: &str) -> bool {
+        let path = std::path::Path::new(src);
+        !path.is_absolute()
+            && !path.components().any(|c| matches!(c, std::path::Component::ParentDir))
+    }
+
     pub(crate) fn op_export(
         &mut self,
         name_idx: u16,
@@ -91,6 +97,9 @@ impl Vm {
             Constant::String(s) => s.clone(),
             _ => return Err(VmError::TypeError("Import source must be string".into())),
         };
+        if !Self::is_safe_import_path(&src) {
+            return Err(VmError::TypeError("Invalid module path".into()));
+        }
         let file_path = if let Some(ref base) = self.base_dir {
             base.join(&src)
         } else {
@@ -174,6 +183,9 @@ impl Vm {
     pub(crate) fn op_dynamic_import(&mut self) -> Result<(), VmError> {
         let specifier_val = self.pop()?;
         let src = self.to_string_value(specifier_val);
+        if !Self::is_safe_import_path(&src) {
+            return Err(VmError::TypeError("Invalid module path".into()));
+        }
         let file_path = if let Some(ref base) = self.base_dir {
             base.join(&src)
         } else {
