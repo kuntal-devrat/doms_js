@@ -344,4 +344,30 @@ mod tests {
         let prog = parser.parse_program().unwrap();
         assert_eq!(prog.body.len(), 2);
     }
+
+    #[test]
+    fn test_is_strict_reserved_word() {
+        // True cases
+        let strict_reserved = [
+            "implements",
+            "interface",
+            "let",
+            "package",
+            "private",
+            "protected",
+            "public",
+            "static",
+            "yield",
+        ];
+        for word in strict_reserved {
+            assert!(is_strict_reserved_word(word));
+        }
+
+        // False cases
+        let not_strict_reserved =
+            ["eval", "arguments", "foo", "bar", "var", "const", "function", "await"];
+        for word in not_strict_reserved {
+            assert!(!is_strict_reserved_word(word));
+        }
+    }
 }
