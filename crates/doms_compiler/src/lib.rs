@@ -62,6 +62,16 @@ mod tests {
     }
 
     #[test]
+    fn test_compile_strict_delete_unqualified_identifier_error() {
+        let prog_err = parse("let x = 1; delete x;").unwrap();
+        let err = compile_strict(&prog_err).expect_err("strict mode should reject delete on unqualified identifier");
+        match err {
+            CompileError::General(msg) => assert!(msg.contains("Delete of an unqualified identifier in strict mode.")),
+            _ => panic!("Expected CompileError::General"),
+        }
+    }
+
+    #[test]
     fn test_compile_success() {
         let program = parse("let y = 20;").unwrap();
         let chunk = compile(&program).unwrap();

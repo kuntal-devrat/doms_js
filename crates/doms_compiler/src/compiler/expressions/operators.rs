@@ -142,6 +142,11 @@ impl Compiler {
                     }
                 }
                 Expression::Identifier(name) => {
+                    if self.is_strict {
+                        return Err(CompileError::General(
+                            "Delete of an unqualified identifier in strict mode.".into(),
+                        ));
+                    }
                     let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                     self.chunk.emit(OpCode::DeleteIdent(name_idx), 0);
                 }
