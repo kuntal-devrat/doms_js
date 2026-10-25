@@ -355,6 +355,7 @@ pub struct BytecodeChunk {
     pub feedback_vector: Arc<std::sync::RwLock<FeedbackVector>>,
     pub self_slot: Option<u16>,
     constant_indices: HashMap<ConstantKey, u16>,
+    string_constants: HashMap<String, u16>,
 }
 
 impl PartialEq for BytecodeChunk {
@@ -392,6 +393,7 @@ impl Default for BytecodeChunk {
             feedback_vector: Arc::new(std::sync::RwLock::new(FeedbackVector::default())),
             self_slot: None,
             constant_indices: HashMap::new(),
+            string_constants: HashMap::new(),
         }
     }
 }
@@ -442,22 +444,50 @@ impl BytecodeChunk {
     }
 
     pub fn add_constant(&mut self, val: Constant) -> u16 {
-        let key = match &val {
-            Constant::Number(n) => ConstantKey::Number(n.to_bits()),
-            Constant::String(s) => ConstantKey::String(s.clone()),
-            Constant::Boolean(b) => ConstantKey::Boolean(*b),
-            Constant::Function(f) => ConstantKey::Function(Arc::as_ptr(f) as usize),
-            Constant::BigInt(bi) => ConstantKey::BigInt(bi.clone()),
-            Constant::TemplateObject { site, .. } => ConstantKey::TemplateObject(*site),
-        };
+        match val {
+            Constant::String(s) => {
+                if let Some(&idx) = self.string_constants.get(&s) {
+                    return idx;
+                }
+                let idx = self.constants.len() as u16;
+                self.string_constants.insert(s.clone(), idx);
+                self.constants.push(Constant::String(s.clone()));
+                self.constant_indices.insert(ConstantKey::String(s), idx);
+                idx
+            }
+            _ => {
+                let key = match &val {
+                    Constant::Number(n) => ConstantKey::Number(n.to_bits()),
+                    Constant::Boolean(b) => ConstantKey::Boolean(*b),
+                    Constant::Function(f) => ConstantKey::Function(Arc::as_ptr(f) as usize),
+                    Constant::BigInt(bi) => ConstantKey::BigInt(bi.clone()),
+                    Constant::TemplateObject { site, .. } => ConstantKey::TemplateObject(*site),
+                    Constant::String(_) => unreachable!(),
+                };
 
-        if let Some(&idx) = self.constant_indices.get(&key) {
+                if let Some(&idx) = self.constant_indices.get(&key) {
+                    return idx;
+                }
+
+                let idx = self.constants.len() as u16;
+                self.constants.push(val);
+                self.constant_indices.insert(key, idx);
+                idx
+            }
+        }
+    }
+
+    pub fn add_constant_string(&mut self, s: &str) -> u16 {
+        if let Some(&idx) = self.string_constants.get(s) {
             return idx;
         }
 
+        let s_owned = s.to_string();
         let idx = self.constants.len() as u16;
-        self.constants.push(val);
-        self.constant_indices.insert(key, idx);
+
+        self.string_constants.insert(s_owned.clone(), idx);
+        self.constants.push(Constant::String(s_owned.clone()));
+        self.constant_indices.insert(ConstantKey::String(s_owned), idx);
         idx
     }
 

@@ -259,7 +259,7 @@ impl Compiler {
             self.chunk.emit(OpCode::CreateObject, 0);
             for name in &tdz_names {
                 self.chunk.emit(OpCode::Dup, 0);
-                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                let name_idx = self.chunk.add_constant_string(name);
                 self.chunk.emit(OpCode::LoadConst(name_idx), 0);
                 self.chunk.emit(OpCode::LoadUninitialized, 0);
                 self.chunk.emit(OpCode::SetElem, 0);
@@ -289,7 +289,7 @@ impl Compiler {
 
         self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
         self.chunk.emit(OpCode::GetLocal(keys_slot), 0);
-        let len_idx = self.chunk.add_constant(Constant::String("length".to_string()));
+        let len_idx = self.chunk.add_constant_string("length");
         self.chunk.emit(OpCode::GetProp(len_idx), 0);
         self.chunk.emit(OpCode::Lt, 0);
         let jump_exit_idx = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
@@ -297,7 +297,7 @@ impl Compiler {
         if is_lex {
             self.chunk.emit(OpCode::CreateObject, 0);
             self.chunk.emit(OpCode::Dup, 0);
-            let left_idx = self.chunk.add_constant(Constant::String(left.to_string()));
+            let left_idx = self.chunk.add_constant_string(left);
             self.chunk.emit(OpCode::LoadConst(left_idx), 0);
             self.chunk.emit(OpCode::GetLocal(keys_slot), 0);
             self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
@@ -314,7 +314,7 @@ impl Compiler {
                 self.chunk.emit(OpCode::SetLocal(slot), 0);
                 self.chunk.emit(OpCode::Pop, 0);
             } else {
-                let name_idx = self.chunk.add_constant(Constant::String(left.to_string()));
+                let name_idx = self.chunk.add_constant_string(left);
                 self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
                 self.chunk.emit(OpCode::Pop, 0);
             }
@@ -410,7 +410,7 @@ impl Compiler {
             self.chunk.emit(OpCode::CreateObject, 0);
             for name in &tdz_names {
                 self.chunk.emit(OpCode::Dup, 0);
-                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                let name_idx = self.chunk.add_constant_string(name);
                 self.chunk.emit(OpCode::LoadConst(name_idx), 0);
                 self.chunk.emit(OpCode::LoadUninitialized, 0);
                 self.chunk.emit(OpCode::SetElem, 0);
@@ -473,7 +473,7 @@ impl Compiler {
 
             self.chunk.emit(OpCode::CreateObject, 0);
             self.chunk.emit(OpCode::Dup, 0);
-            let left_idx = self.chunk.add_constant(Constant::String(left.to_string()));
+            let left_idx = self.chunk.add_constant_string(left);
             self.chunk.emit(OpCode::LoadConst(left_idx), 0);
             self.chunk.emit(OpCode::GetLocal(val_slot), 0);
             self.chunk.emit(OpCode::SetElem, 0);
@@ -484,7 +484,7 @@ impl Compiler {
                 self.chunk.emit(OpCode::SetLocal(slot), 0);
                 self.chunk.emit(OpCode::Pop, 0);
             } else {
-                let name_idx = self.chunk.add_constant(Constant::String(left.to_string()));
+                let name_idx = self.chunk.add_constant_string(left);
                 self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
                 self.chunk.emit(OpCode::Pop, 0);
             }
