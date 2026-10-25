@@ -3,6 +3,7 @@
 use num_bigint::BigInt;
 
 use super::Lexer;
+use super::chars::is_identifier_start;
 use super::token::{LexError, TokenKind};
 
 impl<'a> Lexer<'a> {
@@ -229,7 +230,7 @@ impl<'a> Lexer<'a> {
                 return Err(LexError::InvalidNumber(line, col));
             }
             if let Some(next_c) = self.peek() {
-                if next_c.is_alphabetic() || next_c == '_' || next_c == '$' || next_c > '\x7f' {
+                if is_identifier_start(next_c) || next_c.is_ascii_digit() {
                     return Err(LexError::InvalidNumber(line, col));
                 }
             }
@@ -239,7 +240,7 @@ impl<'a> Lexer<'a> {
 
         let num = s.parse::<f64>().map_err(|_| LexError::InvalidNumber(line, col))?;
         if let Some(next_c) = self.peek() {
-            if next_c.is_alphabetic() || next_c == '_' || next_c == '$' || next_c > '\x7f' {
+            if is_identifier_start(next_c) || next_c.is_ascii_digit() {
                 return Err(LexError::InvalidNumber(line, col));
             }
         }

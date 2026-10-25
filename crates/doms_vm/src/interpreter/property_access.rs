@@ -242,6 +242,21 @@ impl Vm {
         if let Some(ptr) = target.as_object_ptr() {
             let obj = unsafe { &*(ptr as *mut JsObject) };
 
+            if matches!(obj.kind, ObjectKind::TypedArray(_)) {
+                if let Some(n) = self.canonical_numeric_index_string(key) {
+                    if let ObjectKind::TypedArray(ta) = &obj.kind {
+                        if n >= 0.0 && n.fract() == 0.0 && (n as usize) < ta.length {
+                            let ta_mut = unsafe { &mut *(ptr as *mut JsObject) };
+                            if let ObjectKind::TypedArray(ta_ref) = &mut ta_mut.kind {
+                                Self::write_typed_array_element(ta_ref, n as usize, value);
+                                return Ok(true);
+                            }
+                        }
+                    }
+                    return Ok(false);
+                }
+            }
+
             // 1. Check own accessor
             if let Some(accs) = &obj.accessors {
                 if let Some(acc) = accs.get(key) {
@@ -286,6 +301,11 @@ impl Vm {
                                 return Ok(false);
                             }
                         }
+                        if matches!(proto_obj.kind, ObjectKind::TypedArray(_)) {
+                            if self.canonical_numeric_index_string(key).is_some() {
+                                return Ok(false);
+                            }
+                        }
                         curr_proto = proto_obj.prototype;
                     } else {
                         break;
@@ -295,6 +315,14 @@ impl Vm {
         }
 
         if !receiver.is_js_object() {
+            return Ok(false);
+        }
+
+        if self.module_namespace_objects.contains(&receiver) {
+            let prop_key = PropertyKeyVal::String(key.to_string());
+            let _ = crate::builtins::object::descriptor::get_own_property_descriptor_internal(
+                self, receiver, &prop_key,
+            )?;
             return Ok(false);
         }
 
@@ -364,6 +392,14 @@ impl Vm {
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
                 return self
                     .proxy_delete_property(target, &PropertyKeyVal::String(key.to_string()));
+            }
+            if self.module_namespace_objects.contains(&target) {
+                if self.shapes.has_property(obj.shape_id, key)
+                    || self.module_reexports.contains_key(&(target, key.to_string()))
+                {
+                    return Ok(false);
+                }
+                return Ok(true);
             }
             if let Some(info) = self.shapes.get_property_info(obj.shape_id, key) {
                 if !info.attributes.configurable {

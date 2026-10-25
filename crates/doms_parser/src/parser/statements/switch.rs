@@ -52,7 +52,7 @@ impl<'a> Parser<'a> {
         for case in &cases {
             all_stmts.extend(case.consequent.clone());
         }
-        self.validate_block_declarations(&all_stmts)?;
+        self.validate_block_declarations(&all_stmts, false)?;
 
         Ok(Statement::Switch { discriminant, cases })
     }

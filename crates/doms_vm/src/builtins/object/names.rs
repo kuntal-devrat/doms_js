@@ -65,29 +65,31 @@ pub fn get_own_property_keys(vm: &mut Vm, target: JsValue) -> Result<Vec<Propert
             }
         }
     }
+    let mut out_keys = Vec::new();
     if vm.module_namespace_objects.contains(&target) {
         raw_names.sort();
-        let out = raw_names.into_iter().map(PropertyKeyVal::String).collect::<Vec<_>>();
-        return Ok(out);
-    }
-    let mut int_keys: Vec<(u32, String)> = Vec::new();
-    let mut str_keys: Vec<String> = Vec::new();
-    for k in raw_names {
-        if let Ok(idx) = k.parse::<u32>() {
-            if idx < u32::MAX && idx.to_string() == k {
-                int_keys.push((idx, k));
-                continue;
-            }
+        for k in raw_names {
+            out_keys.push(PropertyKeyVal::String(k));
         }
-        str_keys.push(k);
-    }
-    int_keys.sort_by_key(|(idx, _)| *idx);
-    let mut out_keys = Vec::new();
-    for (_, k) in int_keys {
-        out_keys.push(PropertyKeyVal::String(k));
-    }
-    for k in str_keys {
-        out_keys.push(PropertyKeyVal::String(k));
+    } else {
+        let mut int_keys: Vec<(u32, String)> = Vec::new();
+        let mut str_keys: Vec<String> = Vec::new();
+        for k in raw_names {
+            if let Ok(idx) = k.parse::<u32>() {
+                if idx < u32::MAX && idx.to_string() == k {
+                    int_keys.push((idx, k));
+                    continue;
+                }
+            }
+            str_keys.push(k);
+        }
+        int_keys.sort_by_key(|(idx, _)| *idx);
+        for (_, k) in int_keys {
+            out_keys.push(PropertyKeyVal::String(k));
+        }
+        for k in str_keys {
+            out_keys.push(PropertyKeyVal::String(k));
+        }
     }
 
     if let Some(ptr) = target.as_object_ptr() {

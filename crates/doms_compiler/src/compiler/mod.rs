@@ -63,6 +63,8 @@ pub struct Compiler {
     pub touched_bindings: std::collections::HashSet<String>,
     pub self_slot: Option<u16>,
     pub shadowed_class_names: Vec<String>,
+    pub tdz_names: Vec<String>,
+    pub private_names: std::collections::HashMap<String, String>,
 }
 
 impl Compiler {
@@ -84,6 +86,8 @@ impl Compiler {
             touched_bindings: std::collections::HashSet::new(),
             self_slot: None,
             shadowed_class_names: Vec::new(),
+            tdz_names: Vec::new(),
+            private_names: std::collections::HashMap::new(),
         }
     }
 
@@ -106,7 +110,7 @@ impl Compiler {
     pub fn is_anonymous_function_definition(expr: &doms_parser::ast::Expression) -> bool {
         use doms_parser::ast::Expression;
         match expr {
-            Expression::ArrowExpr { .. } => true,
+            Expression::ArrowExpr { .. } | Expression::AsyncArrowExpr { .. } => true,
             Expression::FunctionExpr { name, .. } => name.is_none(),
             Expression::AsyncFunctionExpr { name, .. } => name.is_none(),
             Expression::GeneratorExpr { name, .. } => name.is_none(),

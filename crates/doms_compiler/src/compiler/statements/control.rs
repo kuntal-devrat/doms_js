@@ -11,6 +11,10 @@ impl Compiler {
         else_branch: &Option<Box<Statement>>,
         is_last: bool,
     ) -> Result<(), CompileError> {
+        if !self.is_in_function && !self.internal_statements {
+            self.chunk.emit(OpCode::Pop, 0);
+            self.chunk.emit(OpCode::LoadUndefined, 0);
+        }
         self.compile_expression(condition)?;
         let jump_false_idx = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
 
@@ -100,7 +104,7 @@ impl Compiler {
                 self.chunk.emit(OpCode::Dup, 0);
                 let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                 self.chunk.emit(OpCode::LoadConst(name_idx), 0);
-                self.chunk.emit(OpCode::LoadUndefined, 0);
+                self.chunk.emit(OpCode::LoadUninitialized, 0);
                 self.chunk.emit(OpCode::SetElem, 0);
                 self.chunk.emit(OpCode::Pop, 0);
             }

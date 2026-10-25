@@ -113,6 +113,9 @@ impl Vm {
         for name in &chunk.top_lex_names {
             self.global_lexicals.insert(name.clone(), JsValue::uninitialized());
         }
+        for name in &chunk.top_const_names {
+            self.const_bindings.insert(name.clone());
+        }
 
         let in_eval = self.in_eval;
         for name in &chunk.top_var_names {
@@ -154,20 +157,88 @@ impl Vm {
             self.var_names.insert(name.clone());
             if !in_eval {
                 self.script_var_names.insert(name.clone());
-                if !self.is_module && self.global_object.is_object() {
-                    self.set_property_non_configurable(self.global_object, name);
-                }
             }
-            if !self.globals.contains_key(name) {
+            let has = if let Some(ptr) = self.global_object.as_object_ptr() {
+                let obj = unsafe { &*(ptr as *mut JsObject) };
+                self.shapes.has_property(obj.shape_id, name)
+            } else {
+                false
+            };
+            if !has {
+                if !in_eval && !self.is_extensible_object(self.global_object) {
+                    return Err(VmError::TypeError(format!(
+                        "Cannot declare global function '{}' on non-extensible global object",
+                        name
+                    )));
+                }
                 self.globals.insert(name.clone(), JsValue::undefined());
                 if !self.is_module && self.global_object.is_object() {
-                    self.set_property(self.global_object, name, JsValue::undefined());
+                    if !in_eval {
+                        self.define_builtin_property(
+                            self.global_object,
+                            name,
+                            JsValue::undefined(),
+                            crate::shape::PropertyAttributes {
+                                writable: true,
+                                enumerable: true,
+                                configurable: false,
+                            },
+                        );
+                    } else {
+                        self.set_property(self.global_object, name, JsValue::undefined());
+                    }
+                }
+            } else {
+                let is_configurable = self.is_own_property_configurable(self.global_object, name);
+                if !in_eval && !self.is_module && self.global_object.is_object() {
+                    let existing_info = self.get_own_property_info(self.global_object, name);
+                    if !is_configurable {
+                        if let Some(info) = existing_info {
+                            if !info.attributes.writable || !info.attributes.enumerable {
+                                return Err(VmError::TypeError(format!(
+                                    "Cannot declare global function '{}': existing property is non-configurable and not writable/enumerable",
+                                    name
+                                )));
+                            }
+                        }
+                    } else {
+                        let cur_val = self.get_property(self.global_object, name);
+                        self.define_builtin_property(
+                            self.global_object,
+                            name,
+                            cur_val,
+                            crate::shape::PropertyAttributes {
+                                writable: true,
+                                enumerable: true,
+                                configurable: false,
+                            },
+                        );
+                    }
+                }
+                if !self.globals.contains_key(name) {
+                    let existing_val = self.get_property(self.global_object, name);
+                    self.globals.insert(name.clone(), existing_val);
                 }
             }
         }
 
         if self.is_module {
             if let Some(mod_obj) = self.current_module_obj {
+                let env = self.module_envs.entry(mod_obj).or_default();
+                for name in &chunk.top_lex_names {
+                    env.lexicals.insert(name.clone(), JsValue::uninitialized());
+                }
+                for name in &chunk.top_const_names {
+                    env.consts.insert(name.clone());
+                }
+                for name in &chunk.top_var_names {
+                    env.vars.insert(name.clone(), JsValue::undefined());
+                }
+                for name in &chunk.top_func_names {
+                    env.vars.insert(name.clone(), JsValue::undefined());
+                }
+                self.module_export_aliases.insert(mod_obj, chunk.export_aliases.clone());
+
                 for name in &chunk.export_names {
                     let local_name = chunk
                         .export_aliases

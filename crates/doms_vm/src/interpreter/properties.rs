@@ -16,6 +16,28 @@ impl Vm {
         Some(idx as usize)
     }
 
+    /// ECMA-262 7.1.21 CanonicalNumericIndexString ( argument )
+    pub(crate) fn canonical_numeric_index_string(&self, key: &str) -> Option<f64> {
+        if key == "-0" {
+            return Some(-0.0);
+        }
+        let n: f64 = if key == "NaN" {
+            f64::NAN
+        } else if key == "Infinity" {
+            f64::INFINITY
+        } else if key == "-Infinity" {
+            f64::NEG_INFINITY
+        } else {
+            key.parse().ok()?
+        };
+        let s = self.to_string_value(JsValue::from_double(n));
+        if s == key {
+            Some(n)
+        } else {
+            None
+        }
+    }
+
     /// Store a sparse array element (an index beyond the dense `elements`
     /// representation) as a shape property and grow `length` to `idx + 1`.
     ///

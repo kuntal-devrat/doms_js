@@ -53,6 +53,7 @@ pub struct CallFrame {
     pub scopes: Vec<JsValue>,
     pub upvalues_count: usize,
     pub env_obj: Option<JsValue>,
+    pub param_env_obj: Option<JsValue>,
     pub arguments: Option<JsValue>,
     pub raw_args: Option<Vec<JsValue>>,
     pub is_strict: bool,
@@ -67,6 +68,8 @@ pub struct CallFrame {
     pub callee_val: Option<JsValue>,
     pub mapped_arguments: Option<Vec<bool>>,
     pub home_object: Option<JsValue>,
+    pub module: Option<JsValue>,
+    pub in_field_init: bool,
 }
 
 /// Simplified primitive value representation.

@@ -96,10 +96,10 @@ impl JsObject {
         crate::jit::clear_jit_array_cache();
     }
 
-    pub fn insert_private_element(&mut self, name: String, val: JsValue) {
+    pub fn insert_private_element(&mut self, name: String, val: JsValue, brand: Option<JsValue>) {
         let privs =
             self.private_elements.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-        privs.insert(name, PrivateElement::Field(val));
+        privs.insert(name, PrivateElement::Field { value: val, brand });
     }
 
     pub fn insert_private_method(&mut self, name: String, val: JsValue) {
@@ -174,7 +174,13 @@ impl JsObject {
             let privs = self
                 .private_elements
                 .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
-            privs.insert(key, PrivateElement::Field(val));
+            if let Some(entry) = privs.get_mut(&key) {
+                if let PrivateElement::Field { value, .. } = entry {
+                    *value = val;
+                    return true;
+                }
+            }
+            privs.insert(key, PrivateElement::Field { value: val, brand: None });
             true
         } else {
             false

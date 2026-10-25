@@ -8,6 +8,15 @@ impl Vm {
         target: JsValue,
         key: JsValue,
     ) -> Result<JsValue, VmError> {
+        self.get_symbol_property_with_receiver_result(target, key, target)
+    }
+
+    pub fn get_symbol_property_with_receiver_result(
+        &mut self,
+        target: JsValue,
+        key: JsValue,
+        receiver: JsValue,
+    ) -> Result<JsValue, VmError> {
         if target.is_null() || target.is_undefined() {
             return Err(VmError::TypeError("Cannot read property of null or undefined".into()));
         }
@@ -68,7 +77,7 @@ impl Vm {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             if matches!(obj.kind, ObjectKind::Proxy { .. }) {
                 let prop_key = PropertyKeyVal::Symbol(key);
-                return self.proxy_get(target, &prop_key, target);
+                return self.proxy_get(target, &prop_key, receiver);
             }
         }
 
@@ -81,7 +90,7 @@ impl Vm {
             if let Some(accs) = &obj.symbol_accessors {
                 if let Some(acc) = accs.get(&key) {
                     if let Some(getter) = acc.getter {
-                        return self.call(getter, target, &[]);
+                        return self.call(getter, receiver, &[]);
                     } else {
                         return Ok(JsValue::undefined());
                     }
@@ -121,12 +130,12 @@ impl Vm {
                 let proto_obj = unsafe { &*(proto_ptr as *mut JsObject) };
                 if matches!(proto_obj.kind, ObjectKind::Proxy { .. }) {
                     let prop_key = PropertyKeyVal::Symbol(key);
-                    return self.proxy_get(proto_val, &prop_key, target);
+                    return self.proxy_get(proto_val, &prop_key, receiver);
                 }
                 if let Some(accs) = &proto_obj.symbol_accessors {
                     if let Some(acc) = accs.get(&key) {
                         if let Some(getter) = acc.getter {
-                            return self.call(getter, target, &[]);
+                            return self.call(getter, receiver, &[]);
                         } else {
                             return Ok(JsValue::undefined());
                         }
@@ -160,9 +169,6 @@ impl Vm {
             return Ok(false);
         }
         let is_to_string_tag = self.symbol_to_string_tag.is_some_and(|t| t == key);
-        if is_to_string_tag && (self.is_module || self.module_namespace_objects.contains(&target)) {
-            return Ok(false);
-        }
         if !target.is_js_object() {
             return Ok(false);
         }
@@ -318,10 +324,10 @@ impl Vm {
         value: JsValue,
         attrs: crate::shape::PropertyAttributes,
     ) {
-        let _ = self.set_symbol_property_result(target, key, value);
         if let Some(ptr) = target.as_object_ptr() {
             if self.is_valid_heap_object(ptr) {
                 let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                obj.insert_symbol_property(key, value);
                 obj.set_symbol_attributes(key, attrs);
             }
         }

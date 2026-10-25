@@ -27,12 +27,23 @@ impl Vm {
                 } else {
                     None
                 };
-                let (lexical_this, lexical_new_target) = if f.is_arrow {
+                let (lexical_this, lexical_new_target, lexical_callee) = if f.is_arrow {
                     let frame = self.frames.last();
-                    (frame.map(|fr| fr.this_val), frame.and_then(|fr| fr.new_target))
+                    (
+                        frame.map(|fr| fr.this_val),
+                        frame.and_then(|fr| fr.new_target),
+                        frame.and_then(|fr| {
+                            if fr.is_arrow {
+                                fr.callee_func.as_ref().and_then(|func| func.lexical_callee)
+                            } else {
+                                fr.callee_val
+                            }
+                        }),
+                    )
                 } else {
-                    (None, None)
+                    (None, None, None)
                 };
+                let cur_mod = self.frames.last().and_then(|f| f.module).or(self.current_module_obj);
                 let js_fn = JsFunction {
                     name: f.name.clone(),
                     params: f.params.clone(),
@@ -54,10 +65,12 @@ impl Vm {
                     home_object,
                     lexical_this,
                     lexical_new_target,
+                    lexical_callee,
                     prototype: None,
                     initial_shape: None,
                     is_class_constructor: f.is_class_constructor,
                     is_derived_constructor: f.is_derived_constructor,
+                    module: cur_mod,
                 };
                 self.alloc_function(js_fn)
             }
@@ -74,7 +87,7 @@ impl Vm {
     pub(crate) fn op_set_local(&mut self, slot: u16) -> Result<(), VmError> {
         let val = *self.peek()?;
         let slot_idx = slot as usize;
-        let (name_opt, args_and_idx) = {
+        let (name_opt, args_and_idx, sync_to_scopes) = {
             let frame = self.frames.last_mut().unwrap();
             if slot_idx < frame.locals.len() {
                 frame.locals[slot_idx] = val;
@@ -92,25 +105,57 @@ impl Vm {
             } else {
                 None
             };
-            (name, args_and_idx)
+            let sync = !frame.has_param_exprs || frame.in_param_init;
+            (name, args_and_idx, sync)
         };
         if let Some(ref name) = name_opt {
-            let mut updated_scope = false;
-            let scopes = self.frames.last().map(|f| f.scopes.clone()).unwrap_or_default();
-            for scope in scopes.iter().rev() {
-                if scope.is_object() && self.has_property(*scope, name).unwrap_or(false) {
-                    self.set_property(*scope, name, val);
-                    updated_scope = true;
-                    break;
+            if !name.starts_with('@') {
+                let mut updated_scope = false;
+                if sync_to_scopes {
+                    let (scopes, uv_count) = self
+                        .frames
+                        .last()
+                        .map(|f| (f.scopes.clone(), f.upvalues_count))
+                        .unwrap_or_default();
+                    let min_idx = uv_count.min(scopes.len());
+                    for scope in scopes[min_idx..].iter().rev() {
+                        if scope.is_object() && self.has_property(*scope, name).unwrap_or(false) {
+                            self.set_property(*scope, name, val);
+                            updated_scope = true;
+                            break;
+                        }
+                    }
                 }
-            }
-            if !updated_scope {
-                if let Some(env) = self.frames.last().and_then(|f| f.env_obj) {
-                    self.set_property(env, name, val);
-                }
-                let is_fn = self.frames.last().map(|f| f.is_function).unwrap_or(false);
-                if !is_fn && self.global_lexicals.contains_key(name) {
-                    self.global_lexicals.insert(name.clone(), val);
+                if !updated_scope {
+                    let is_top = self
+                        .frames
+                        .last()
+                        .and_then(|f| f.chunk.is_top_local.get(slot_idx).copied())
+                        .unwrap_or(true);
+                    if is_top {
+                        if let Some(env) = self
+                            .frames
+                            .last()
+                            .and_then(|f| if f.in_param_init { f.param_env_obj } else { f.env_obj })
+                        {
+                            self.set_property(env, name, val);
+                        }
+                    }
+                    let is_fn = self.frames.last().map(|f| f.is_function).unwrap_or(false);
+                    if !is_fn && self.global_lexicals.contains_key(name) {
+                        self.global_lexicals.insert(name.clone(), val);
+                    }
+                    let cur_mod = self.frames.last().and_then(|f| f.module).or(self.current_module_obj);
+                    if let Some(mod_obj) = cur_mod {
+                        if let Some(env) = self.module_envs.get_mut(&mod_obj) {
+                            if env.lexicals.contains_key(name) {
+                                env.lexicals.insert(name.clone(), val);
+                            } else if env.vars.contains_key(name) {
+                                env.vars.insert(name.clone(), val);
+                            }
+                        }
+                        self.update_module_export(mod_obj, name, val);
+                    }
                 }
             }
         }

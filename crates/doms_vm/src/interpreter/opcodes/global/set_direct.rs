@@ -56,13 +56,51 @@ impl Vm {
                 }
             }
         }
+        if let Some(target_opt) = self.touched_targets.remove(&name) {
+            if let Some(target_scope) = target_opt {
+                let still_exists = match self.has_property(target_scope, &name) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        self.handle_exception_at_depth(e, target_depth)?;
+                        return Ok(None);
+                    }
+                };
+                let is_strict = self.is_strict
+                    || self.frames.last().map(|f| f.is_strict).unwrap_or(false);
+                if !still_exists && is_strict {
+                    self.handle_exception_at_depth(
+                        VmError::ReferenceError(format!("{} is not defined", name)),
+                        target_depth,
+                    )?;
+                    return Ok(None);
+                }
+                if let Err(e) = self.set_property_result(target_scope, &name, val) {
+                    self.handle_exception_at_depth(e, target_depth)?;
+                    return Ok(None);
+                }
+                for f in &mut self.frames {
+                    if f.env_obj == Some(target_scope) {
+                        for (i, l_name) in f.local_names.iter().enumerate() {
+                            if l_name == &name && i < f.locals.len() {
+                                f.locals[i] = val;
+                            }
+                        }
+                    }
+                }
+                return Ok(None);
+            } else {
+                return self.op_set_global(name_idx, chunk, target_depth);
+            }
+        }
         let mut in_scope = false;
-        let scopes = self.frames.last().map(|f| f.scopes.clone()).unwrap_or_default();
-        for scope_val in scopes.iter().rev() {
-            if scope_val.is_object() && self.has_property(*scope_val, &name).unwrap_or(false) {
-                self.set_property(*scope_val, &name, val);
-                in_scope = true;
-                break;
+        if !name.starts_with('@') {
+            let scopes = self.frames.last().map(|f| f.scopes.clone()).unwrap_or_default();
+            for scope_val in scopes.iter().rev() {
+                if scope_val.is_object() && self.has_property(*scope_val, &name).unwrap_or(false) {
+                    self.set_property(*scope_val, &name, val);
+                    in_scope = true;
+                    break;
+                }
             }
         }
         if !in_scope {

@@ -134,7 +134,21 @@ impl Vm {
         args: &[JsValue],
         target_depth: usize,
     ) -> Result<(), VmError> {
-        let ctor_frame_idx = match self.frames.iter().rposition(|f| !f.is_arrow) {
+        let active_callee = self.frames.last().and_then(|f| {
+            if f.is_arrow {
+                f.callee_func.as_ref().and_then(|func| func.lexical_callee)
+            } else {
+                f.callee_val
+            }
+        });
+
+        let ctor_frame_idx = match self.frames.iter().rposition(|f| {
+            if let Some(target) = active_callee {
+                f.callee_val == Some(target)
+            } else {
+                !f.is_arrow
+            }
+        }) {
             Some(i) => i,
             None => {
                 self.handle_exception_at_depth(
@@ -145,7 +159,7 @@ impl Vm {
             }
         };
 
-        let callee_val = match self.frames[ctor_frame_idx].callee_val {
+        let callee_val = match active_callee.or_else(|| self.frames[ctor_frame_idx].callee_val) {
             Some(v) => v,
             None => {
                 self.handle_exception_at_depth(

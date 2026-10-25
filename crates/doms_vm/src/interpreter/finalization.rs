@@ -3,6 +3,7 @@
 use super::*;
 
 impl Vm {
+    #[allow(dead_code)]
     pub(crate) fn get_finalization_registry_method(
         &mut self,
         target: JsValue,

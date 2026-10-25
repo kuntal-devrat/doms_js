@@ -2607,6 +2607,7 @@ fn compile_native_internal(
                 scopes: Vec::new(),
                 upvalues_count: 0,
                 env_obj: None,
+                param_env_obj: None,
                 arguments: None,
                 raw_args: Some(args.to_vec()),
                 is_strict: false,
@@ -2621,6 +2622,8 @@ fn compile_native_internal(
                 callee_val: None,
                 mapped_arguments: None,
                 home_object: None,
+                module: None,
+                in_field_init: false,
             });
 
             vm.run_until_depth(target_depth)

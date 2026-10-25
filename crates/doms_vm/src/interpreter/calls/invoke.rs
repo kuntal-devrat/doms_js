@@ -129,11 +129,36 @@ impl Vm {
                                 let func_fn = *func_ptr;
                                 let cur_callee = self.temp_roots[prev_temp];
 
+                                let jit_has_rest =
+                                    f.params.last().map(|p| p.starts_with("...")).unwrap_or(false);
+                                let jit_rest_idx =
+                                    if jit_has_rest { f.params.len() - 1 } else { usize::MAX };
+                                let rest_arr = if jit_has_rest {
+                                    let rest_args = if args_len > jit_rest_idx {
+                                        self.temp_roots[args_start + jit_rest_idx..args_start + args_len]
+                                            .to_vec()
+                                    } else {
+                                        Vec::new()
+                                    };
+                                    Some(self.alloc_array(rest_args))
+                                } else {
+                                    None
+                                };
+
                                 let res = if locals_count <= 16 {
                                     let mut stack_args = [crate::value::TAG_UNDEFINED; 16];
-                                    let to_copy = args_len.min(locals_count);
+                                    let to_copy = if jit_has_rest {
+                                        args_len.min(jit_rest_idx).min(locals_count)
+                                    } else {
+                                        args_len.min(locals_count)
+                                    };
                                     for i in 0..to_copy {
                                         stack_args[i] = self.temp_roots[args_start + i].0;
+                                    }
+                                    if let Some(arr) = rest_arr {
+                                        if jit_rest_idx < locals_count {
+                                            stack_args[jit_rest_idx] = arr.0;
+                                        }
                                     }
                                     if let Some(slot) = self_slot {
                                         if (slot as usize) < locals_count {
@@ -149,13 +174,20 @@ impl Vm {
                                         )
                                     }
                                 } else {
-                                    let mut raw_args: Vec<u64> = self.temp_roots
-                                        [args_start..args_start + args_len]
-                                        .iter()
-                                        .map(|v| v.0)
-                                        .collect();
-                                    if raw_args.len() < locals_count {
-                                        raw_args.resize(locals_count, crate::value::TAG_UNDEFINED);
+                                    let mut raw_args =
+                                        vec![crate::value::TAG_UNDEFINED; locals_count];
+                                    let to_copy = if jit_has_rest {
+                                        args_len.min(jit_rest_idx).min(locals_count)
+                                    } else {
+                                        args_len.min(locals_count)
+                                    };
+                                    for i in 0..to_copy {
+                                        raw_args[i] = self.temp_roots[args_start + i].0;
+                                    }
+                                    if let Some(arr) = rest_arr {
+                                        if jit_rest_idx < locals_count {
+                                            raw_args[jit_rest_idx] = arr.0;
+                                        }
                                     }
                                     if let Some(slot) = self_slot {
                                         if (slot as usize) < raw_args.len() {
@@ -208,7 +240,23 @@ impl Vm {
                                 self.temp_roots.push(JsValue::undefined());
                             }
                         } else {
-                            self.temp_roots.push(JsValue::undefined());
+                            if !func.is_arrow
+                                && func.local_names.get(i).map(|n| n == "arguments").unwrap_or(false)
+                                && !func.params.iter().any(|p| p == "arguments")
+                            {
+                                let cur_callee = self.temp_roots[prev_temp];
+                                let raw = self.temp_roots[args_start..args_start + args_len].to_vec();
+                                let a_obj = self.alloc_arguments(cur_callee, raw, is_strict_func);
+                                self.temp_roots.push(a_obj);
+                            } else if let Some(name) = func.local_names.get(i) {
+                                if func.lexical_local_names.contains(name) {
+                                    self.temp_roots.push(JsValue::uninitialized());
+                                } else {
+                                    self.temp_roots.push(JsValue::undefined());
+                                }
+                            } else {
+                                self.temp_roots.push(JsValue::undefined());
+                            }
                         }
                     }
                     if !has_rest && args_len > func.local_names.len() {
@@ -270,7 +318,7 @@ impl Vm {
                         callee_func.home_object = fresh_home_object;
 
                         // Tiered native Cranelift execution for generator start
-                        if callee_func.jit_entry.is_none() && !callee_func.jit_attempted {
+                        if !callee_func.is_async && callee_func.jit_entry.is_none() && !callee_func.jit_attempted {
                             let can_jit = crate::jit::JitCompiler::can_compile_native(&callee_func.chunk);
                             if can_jit {
                                 callee_func.jit_attempted = true;
@@ -278,10 +326,11 @@ impl Vm {
                                     crate::jit::JitCompiler::compile_native(&callee_func.chunk);
                             }
                         }
-                        if let Some(jit) = &callee_func.jit_entry {
-                            if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } =
-                                &jit.code
-                            {
+                        if !callee_func.is_async {
+                            if let Some(jit) = &callee_func.jit_entry {
+                                if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } =
+                                    &jit.code
+                                {
                                 let locals_count = *num_locals;
                                 let mut raw_locals =
                                     vec![crate::value::TAG_UNDEFINED; locals_count];
@@ -296,6 +345,9 @@ impl Vm {
                                 crate::jit::CURRENT_GENERATOR.with(|c| c.set(0));
                                 crate::jit::CURRENT_CALLEE_FUNC
                                     .with(|c| c.borrow_mut().replace(callee_func.clone()));
+                                crate::jit::CURRENT_RAW_ARGS
+                                    .with(|c| *c.borrow_mut() = raw_args.clone());
+                                crate::jit::CURRENT_CALLEE_VAL.with(|c| c.set(cur_callee.0));
 
                                 crate::jit::NURSERY_PTRS.with(|cell| {
                                     let ptrs = unsafe { &mut *cell.get() };
@@ -323,12 +375,44 @@ impl Vm {
                                 crate::jit::CURRENT_VM.with(|c| c.set(prev_vm));
                                 crate::jit::CURRENT_GENERATOR.with(|c| c.set(prev_gen));
                                 crate::jit::CURRENT_CALLEE_FUNC.with(|c| c.borrow_mut().take());
+                                crate::jit::CURRENT_RAW_ARGS.with(|c| c.borrow_mut().take());
+                                crate::jit::CURRENT_CALLEE_VAL.with(|c| c.set(0));
 
                                 if native_res != crate::jit::JIT_DEOPT_SENTINEL {
                                     return Ok(Some(JsValue(native_res)));
                                 }
                             }
                         }
+                    }
+
+                        let (param_env_obj, scopes, upvalues_count) = if callee_func.has_param_exprs {
+                            let prev_temp = self.temp_roots.len();
+                            let param_env = self.alloc_object();
+                            self.temp_roots.push(param_env);
+                            for (i, p) in callee_func.params.iter().enumerate() {
+                                let clean_name = p.split('=').next().unwrap().trim();
+                                let clean_name =
+                                    clean_name.strip_prefix("...").unwrap_or(clean_name);
+                                if !clean_name.is_empty()
+                                    && !clean_name.starts_with('@')
+                                    && !clean_name.starts_with('[')
+                                    && !clean_name.starts_with('{')
+                                {
+                                    let val = raw_args
+                                        .as_ref()
+                                        .and_then(|a| a.get(i).copied())
+                                        .unwrap_or(JsValue::undefined());
+                                    self.set_property(param_env, clean_name, val);
+                                }
+                            }
+                            self.temp_roots.truncate(prev_temp);
+                            let mut sc = fresh_upvalues.clone();
+                            sc.push(param_env);
+                            let uv_len = sc.len();
+                            (Some(param_env), sc, uv_len)
+                        } else {
+                            (None, fresh_upvalues.clone(), fresh_upvalues.len())
+                        };
 
                         let chunk = Arc::clone(&callee_func.chunk);
                         let target_depth = self.frames.len();
@@ -342,9 +426,10 @@ impl Vm {
                             locals,
                             local_names: callee_func.local_names.clone(),
                             lexical_local_names: callee_func.lexical_local_names.clone(),
-                            scopes: fresh_upvalues.clone(),
-                            upvalues_count: fresh_upvalues.len(),
+                            scopes,
+                            upvalues_count,
                             env_obj: None,
+                            param_env_obj,
                             arguments: None,
                             raw_args: raw_args.clone(),
                             is_strict: is_strict_func,
@@ -355,10 +440,16 @@ impl Vm {
                             has_param_exprs: callee_func.has_param_exprs,
                             in_param_init: callee_func.has_param_exprs,
                             is_indirect_eval: false,
-                            callee_func: Some(callee_func),
+                            module: callee_func.module,
+                            callee_func: Some(callee_func.clone()),
                             callee_val: Some(cur_callee),
                             mapped_arguments: mapped_args.clone(),
                             home_object: fresh_home_object,
+                            in_field_init: if callee_func.is_arrow {
+                                callee_func.lexical_in_field_init || self.frames.last().map(|f| f.in_field_init).unwrap_or(false)
+                            } else {
+                                false
+                            },
                         });
                         let gen_val = self.run_until_depth(target_depth)?;
                         Ok(Some(gen_val))
@@ -389,7 +480,7 @@ impl Vm {
                         callee_func.home_object = fresh_home_object;
 
                         // Tiered native Cranelift execution for generator start
-                        if callee_func.jit_entry.is_none() && !callee_func.jit_attempted {
+                        if !callee_func.is_async && callee_func.jit_entry.is_none() && !callee_func.jit_attempted {
                             let can_jit = crate::jit::JitCompiler::can_compile_native(&callee_func.chunk);
                             if can_jit {
                                 callee_func.jit_attempted = true;
@@ -397,10 +488,11 @@ impl Vm {
                                     crate::jit::JitCompiler::compile_native(&callee_func.chunk);
                             }
                         }
-                        if let Some(jit) = &callee_func.jit_entry {
-                            if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } =
-                                &jit.code
-                            {
+                        if !callee_func.is_async {
+                            if let Some(jit) = &callee_func.jit_entry {
+                                if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } =
+                                    &jit.code
+                                {
                                 let locals_count = *num_locals;
                                 let mut raw_locals =
                                     vec![crate::value::TAG_UNDEFINED; locals_count];
@@ -415,6 +507,9 @@ impl Vm {
                                 crate::jit::CURRENT_GENERATOR.with(|c| c.set(0));
                                 crate::jit::CURRENT_CALLEE_FUNC
                                     .with(|c| c.borrow_mut().replace(callee_func.clone()));
+                                crate::jit::CURRENT_RAW_ARGS
+                                    .with(|c| *c.borrow_mut() = raw_args.clone());
+                                crate::jit::CURRENT_CALLEE_VAL.with(|c| c.set(cur_callee.0));
 
                                 crate::jit::NURSERY_PTRS.with(|cell| {
                                     let ptrs = unsafe { &mut *cell.get() };
@@ -442,12 +537,49 @@ impl Vm {
                                 crate::jit::CURRENT_VM.with(|c| c.set(prev_vm));
                                 crate::jit::CURRENT_GENERATOR.with(|c| c.set(prev_gen));
                                 crate::jit::CURRENT_CALLEE_FUNC.with(|c| c.borrow_mut().take());
+                                crate::jit::CURRENT_RAW_ARGS.with(|c| c.borrow_mut().take());
+                                crate::jit::CURRENT_CALLEE_VAL.with(|c| c.set(0));
 
                                 if native_res != crate::jit::JIT_DEOPT_SENTINEL {
-                                    return Ok(Some(JsValue(native_res)));
+                                    let cur_p = self.temp_roots[promise_idx];
+                                    self.resolve_promise(cur_p, JsValue(native_res));
+                                    let _ = self.drain_microtasks();
+                                    let res_promise = self.temp_roots[promise_idx];
+                                    self.temp_roots.truncate(prev_temp);
+                                    return Ok(Some(res_promise));
                                 }
                             }
                         }
+                    }
+
+                        let (param_env_obj, scopes, upvalues_count) = if callee_func.has_param_exprs {
+                            let prev_temp = self.temp_roots.len();
+                            let param_env = self.alloc_object();
+                            self.temp_roots.push(param_env);
+                            for (i, p) in callee_func.params.iter().enumerate() {
+                                let clean_name = p.split('=').next().unwrap().trim();
+                                let clean_name =
+                                    clean_name.strip_prefix("...").unwrap_or(clean_name);
+                                if !clean_name.is_empty()
+                                    && !clean_name.starts_with('@')
+                                    && !clean_name.starts_with('[')
+                                    && !clean_name.starts_with('{')
+                                {
+                                    let val = raw_args
+                                        .as_ref()
+                                        .and_then(|a| a.get(i).copied())
+                                        .unwrap_or(JsValue::undefined());
+                                    self.set_property(param_env, clean_name, val);
+                                }
+                            }
+                            self.temp_roots.truncate(prev_temp);
+                            let mut sc = fresh_upvalues.clone();
+                            sc.push(param_env);
+                            let uv_len = sc.len();
+                            (Some(param_env), sc, uv_len)
+                        } else {
+                            (None, fresh_upvalues.clone(), fresh_upvalues.len())
+                        };
 
                         let chunk = Arc::clone(&callee_func.chunk);
                         let target_depth = self.frames.len();
@@ -461,9 +593,10 @@ impl Vm {
                             locals,
                             local_names: callee_func.local_names.clone(),
                             lexical_local_names: callee_func.lexical_local_names.clone(),
-                            scopes: fresh_upvalues.clone(),
-                            upvalues_count: fresh_upvalues.len(),
+                            scopes,
+                            upvalues_count,
                             env_obj: None,
+                            param_env_obj,
                             arguments: None,
                             raw_args: raw_args.clone(),
                             is_strict: is_strict_func,
@@ -474,10 +607,16 @@ impl Vm {
                             has_param_exprs: callee_func.has_param_exprs,
                             in_param_init: callee_func.has_param_exprs,
                             is_indirect_eval: false,
-                            callee_func: Some(callee_func),
+                            module: callee_func.module,
+                            callee_func: Some(callee_func.clone()),
                             callee_val: Some(cur_callee),
                             mapped_arguments: mapped_args.clone(),
                             home_object: fresh_home_object,
+                            in_field_init: if callee_func.is_arrow {
+                                callee_func.lexical_in_field_init || self.frames.last().map(|f| f.in_field_init).unwrap_or(false)
+                            } else {
+                                false
+                            },
                         });
                         match self.run_until_depth(target_depth) {
                             Ok(res) => {
@@ -516,6 +655,35 @@ impl Vm {
                         callee_func.upvalues = fresh_upvalues.clone();
                         callee_func.home_object = fresh_home_object;
 
+                        let (param_env_obj, scopes, upvalues_count) = if callee_func.has_param_exprs {
+                            let prev_temp = self.temp_roots.len();
+                            let param_env = self.alloc_object();
+                            self.temp_roots.push(param_env);
+                            for (i, p) in callee_func.params.iter().enumerate() {
+                                let clean_name = p.split('=').next().unwrap().trim();
+                                let clean_name =
+                                    clean_name.strip_prefix("...").unwrap_or(clean_name);
+                                if !clean_name.is_empty()
+                                    && !clean_name.starts_with('@')
+                                    && !clean_name.starts_with('[')
+                                    && !clean_name.starts_with('{')
+                                {
+                                    let val = raw_args
+                                        .as_ref()
+                                        .and_then(|a| a.get(i).copied())
+                                        .unwrap_or(JsValue::undefined());
+                                    self.set_property(param_env, clean_name, val);
+                                }
+                            }
+                            self.temp_roots.truncate(prev_temp);
+                            let mut sc = fresh_upvalues.clone();
+                            sc.push(param_env);
+                            let uv_len = sc.len();
+                            (Some(param_env), sc, uv_len)
+                        } else {
+                            (None, fresh_upvalues.clone(), fresh_upvalues.len())
+                        };
+
                         let new_frame = CallFrame {
                             chunk: Arc::clone(&callee_func.chunk),
                             ip: 0,
@@ -525,9 +693,10 @@ impl Vm {
                             locals,
                             local_names: callee_func.local_names.clone(),
                             lexical_local_names: callee_func.lexical_local_names.clone(),
-                            scopes: fresh_upvalues.clone(),
-                            upvalues_count: fresh_upvalues.len(),
+                            scopes,
+                            upvalues_count,
                             env_obj: None,
+                            param_env_obj,
                             arguments: None,
                             raw_args,
                             is_strict: is_strict_func,
@@ -539,9 +708,15 @@ impl Vm {
                             in_param_init: callee_func.has_param_exprs,
                             is_indirect_eval: false,
                             home_object: fresh_home_object,
-                            callee_func: Some(callee_func),
+                            module: callee_func.module,
+                            callee_func: Some(callee_func.clone()),
                             callee_val: Some(cur_callee),
                             mapped_arguments: mapped_args,
+                            in_field_init: if callee_func.is_arrow {
+                                callee_func.lexical_in_field_init || self.frames.last().map(|f| f.in_field_init).unwrap_or(false)
+                            } else {
+                                false
+                            },
                         };
                         self.frames.push(new_frame);
                         Ok(None)

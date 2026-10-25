@@ -62,7 +62,17 @@ impl Vm {
         res
     }
     pub fn alloc_function(&mut self, func: JsFunction) -> JsValue {
-        let fn_proto = self.function_proto.or(self.object_proto);
+        let fn_proto = if func.is_async && func.is_generator {
+            self.async_generator_function_proto
+                .or(self.function_proto)
+                .or(self.object_proto)
+        } else if func.is_generator {
+            self.generator_function_proto
+                .or(self.function_proto)
+                .or(self.object_proto)
+        } else {
+            self.function_proto.or(self.object_proto)
+        };
         let fn_len = func.length;
         let has_prototype =
             !func.is_arrow && !func.is_method && !func.is_generator && !func.is_async;
@@ -114,6 +124,45 @@ impl Vm {
                 let jsobj = unsafe { &mut *(p as *mut JsObject) };
                 if let ObjectKind::Function(ref mut f) = jsobj.kind {
                     f.prototype = Some(proto);
+                }
+            }
+        } else if let Some(p) = current_fn_val.as_object_ptr() {
+            let is_gen = unsafe {
+                let jsobj = &*(p as *mut JsObject);
+                if let ObjectKind::Function(ref f) = jsobj.kind {
+                    f.is_generator
+                } else {
+                    false
+                }
+            };
+            if is_gen {
+                let is_async = unsafe {
+                    let jsobj = &*(p as *mut JsObject);
+                    if let ObjectKind::Function(ref f) = jsobj.kind {
+                        f.is_async
+                    } else {
+                        false
+                    }
+                };
+                let default_proto = if is_async {
+                    self.async_generator_proto
+                } else {
+                    self.generator_proto
+                };
+                let gen_instance_proto = self.alloc_object_with_exact_proto(default_proto);
+                self.define_builtin_property(
+                    current_fn_val,
+                    "prototype",
+                    gen_instance_proto,
+                    crate::shape::PropertyAttributes {
+                        writable: true,
+                        enumerable: false,
+                        configurable: false,
+                    },
+                );
+                let jsobj = unsafe { &mut *(p as *mut JsObject) };
+                if let ObjectKind::Function(ref mut f) = jsobj.kind {
+                    f.prototype = Some(gen_instance_proto);
                 }
             }
         }

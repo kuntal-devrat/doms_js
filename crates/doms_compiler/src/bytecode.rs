@@ -80,6 +80,9 @@ pub enum OpCode {
     DefinePrivateSetter(u16),
     DefineDataProp(u16),
     DefineDataPropComputed,
+    SetMethodHomeObject,
+    EnterFieldInit,
+    LeaveFieldInit,
     SetProtoOrNoop,
     ToPropertyKey,
     SetFunctionNameFromKey(u8),
@@ -110,6 +113,7 @@ pub enum OpCode {
     Export(u16),
     ExportAll,
     ImportModule(u16),
+    AwaitImports,
     DynamicImport,
     BindImport(u16, u16),
     ReExport(u16, u16),
@@ -163,6 +167,7 @@ pub enum OpCode {
 
     // Exceptions
     Throw,
+    ThrowConstAssignment(u16),
     PushCatch(i32),
     PushFinally(i32, i32, u16),
     PopCatch,
@@ -183,6 +188,9 @@ pub enum OpCode {
     DeleteElem,
     DeleteIdent(u16),
     DeleteSuper,
+    CheckLRefStrict(u16),
+    SetGlobalStrictResolved(u16),
+    TouchBinding(u16),
 
     // Scopes
     PushScope,
@@ -190,6 +198,7 @@ pub enum OpCode {
     PushCatchScope(u16),
     PushClassScope(u16),
     InitClassBinding(u16),
+    StoreScopeBinding(u16),
     EnterFunctionBody,
 
     // Stack Management
@@ -345,6 +354,7 @@ pub struct BytecodeChunk {
     pub constants: Vec<Constant>,
     pub lines: Vec<usize>,
     pub top_lex_names: Vec<String>,
+    pub top_const_names: Vec<String>,
     pub top_var_names: Vec<String>,
     pub top_func_names: Vec<String>,
     pub imported_bindings: std::collections::HashSet<String>,
@@ -352,8 +362,10 @@ pub struct BytecodeChunk {
     pub export_aliases: HashMap<String, Vec<String>>,
     pub local_names: Arc<Vec<String>>,
     pub lexical_local_names: Arc<Vec<String>>,
+    pub is_top_local: Arc<Vec<bool>>,
     pub feedback_vector: Arc<std::sync::RwLock<FeedbackVector>>,
     pub self_slot: Option<u16>,
+    pub private_names: HashMap<String, String>,
     constant_indices: HashMap<ConstantKey, u16>,
 }
 
@@ -363,6 +375,7 @@ impl PartialEq for BytecodeChunk {
             && self.constants == other.constants
             && self.lines == other.lines
             && self.top_lex_names == other.top_lex_names
+            && self.top_const_names == other.top_const_names
             && self.top_var_names == other.top_var_names
             && self.top_func_names == other.top_func_names
             && self.imported_bindings == other.imported_bindings
@@ -370,7 +383,9 @@ impl PartialEq for BytecodeChunk {
             && self.export_aliases == other.export_aliases
             && self.local_names == other.local_names
             && self.lexical_local_names == other.lexical_local_names
+            && self.is_top_local == other.is_top_local
             && self.self_slot == other.self_slot
+            && self.private_names == other.private_names
     }
 }
 
@@ -382,6 +397,7 @@ impl Default for BytecodeChunk {
             constants: Vec::new(),
             lines: Vec::new(),
             top_lex_names: Vec::new(),
+            top_const_names: Vec::new(),
             top_var_names: Vec::new(),
             top_func_names: Vec::new(),
             imported_bindings: std::collections::HashSet::new(),
@@ -389,8 +405,10 @@ impl Default for BytecodeChunk {
             export_aliases: HashMap::new(),
             local_names: Arc::new(Vec::new()),
             lexical_local_names: Arc::new(Vec::new()),
+            is_top_local: Arc::new(Vec::new()),
             feedback_vector: Arc::new(std::sync::RwLock::new(FeedbackVector::default())),
             self_slot: None,
+            private_names: HashMap::new(),
             constant_indices: HashMap::new(),
         }
     }

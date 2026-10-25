@@ -37,6 +37,7 @@ pub struct Vm {
     pub pending_alloc: Option<*mut JsObject>,
     pub object_proto: Option<JsValue>,
     pub array_proto: Option<JsValue>,
+    pub array_proto_tainted: bool,
     pub function_proto: Option<JsValue>,
     pub regexp_proto: Option<JsValue>,
     pub string_proto: Option<JsValue>,
@@ -52,12 +53,19 @@ pub struct Vm {
     pub string_iterator_proto: Option<JsValue>,
     pub regexp_string_iterator_proto: Option<JsValue>,
     pub generator_proto: Option<JsValue>,
+    pub generator_function_proto: Option<JsValue>,
+    pub async_iterator_proto: Option<JsValue>,
+    pub async_generator_proto: Option<JsValue>,
+    pub async_generator_function_proto: Option<JsValue>,
     pub wrap_for_valid_iterator_proto: Option<JsValue>,
     pub iterator_helper_proto: Option<JsValue>,
+    pub weak_ref_proto: Option<JsValue>,
+    pub finalization_registry_proto: Option<JsValue>,
     pub current_new_target: Option<JsValue>,
     pub global_object: JsValue,
     pub global_lexicals: HashMap<String, JsValue>,
     pub const_bindings: HashSet<String>,
+    pub touched_targets: HashMap<String, Option<JsValue>>,
     pub var_names: HashSet<String>,
     pub script_var_names: HashSet<String>,
     pub in_eval: bool,
@@ -85,11 +93,32 @@ pub struct Vm {
     pub imported_bindings: HashMap<String, (JsValue, String)>,
     pub star_exports: HashMap<String, JsValue>,
     pub module_reexports: HashMap<(JsValue, String), (JsValue, String)>,
+    pub module_eval_promises: HashMap<JsValue, JsValue>,
+    pub module_eval_errors: HashMap<JsValue, JsValue>,
+    pub module_eval_status: HashMap<JsValue, ModuleStatus>,
+    pub module_envs: HashMap<JsValue, ModuleEnv>,
+    pub module_export_aliases: HashMap<JsValue, HashMap<String, Vec<String>>>,
+    pub module_async_deps: HashMap<JsValue, Vec<(JsValue, JsValue)>>,
+    pub module_cycle_roots: HashMap<JsValue, JsValue>,
     pub in_import_module: bool,
     pub loop_hotness: HashMap<(u64, usize), u32>,
     pub osr_cache: HashMap<(u64, usize), Option<crate::jit::JitFunction>>,
     pub regexp_last_match: RegExpLastMatch,
     pub template_map: HashMap<(u64, u64), JsValue>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleStatus {
+    Evaluating,
+    EvaluatingAsync,
+    Evaluated,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ModuleEnv {
+    pub vars: HashMap<String, JsValue>,
+    pub lexicals: HashMap<String, JsValue>,
+    pub consts: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -148,6 +177,7 @@ impl Vm {
             pending_alloc: None,
             object_proto: None,
             array_proto: None,
+            array_proto_tainted: false,
             function_proto: None,
             regexp_proto: None,
             string_proto: None,
@@ -163,12 +193,19 @@ impl Vm {
             string_iterator_proto: None,
             regexp_string_iterator_proto: None,
             generator_proto: None,
+            generator_function_proto: None,
+            async_iterator_proto: None,
+            async_generator_proto: None,
+            async_generator_function_proto: None,
             wrap_for_valid_iterator_proto: None,
             iterator_helper_proto: None,
+            weak_ref_proto: None,
+            finalization_registry_proto: None,
             current_new_target: None,
             global_object: JsValue::undefined(),
             global_lexicals: HashMap::new(),
             const_bindings: HashSet::new(),
+            touched_targets: HashMap::new(),
             var_names: HashSet::new(),
             script_var_names: HashSet::new(),
             in_eval: false,
@@ -196,6 +233,13 @@ impl Vm {
             imported_bindings: HashMap::new(),
             star_exports: HashMap::new(),
             module_reexports: HashMap::new(),
+            module_eval_promises: HashMap::new(),
+            module_eval_errors: HashMap::new(),
+            module_eval_status: HashMap::new(),
+            module_envs: HashMap::new(),
+            module_export_aliases: HashMap::new(),
+            module_async_deps: HashMap::new(),
+            module_cycle_roots: HashMap::new(),
             in_import_module: false,
             loop_hotness: HashMap::new(),
             osr_cache: HashMap::new(),
@@ -216,6 +260,7 @@ impl Vm {
         vm.gc_suppressed = true;
         register_builtins(&mut vm);
         vm.gc_suppressed = false;
+        vm.array_proto_tainted = false;
         vm
     }
 

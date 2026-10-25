@@ -60,7 +60,7 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
                 return Ok(code_val);
             }
             let code_str = vm.to_string_value(code_val);
-            let program = doms_parser::parse_eval(&code_str, false, false, false)
+            let program = doms_parser::parse_eval(&code_str, false, false, false, None)
                 .map_err(|e| VmError::SyntaxError(e.to_string()))?;
             let has_use_strict = program.body.iter()
                 .take_while(|s| matches!(s, doms_parser::ast::Statement::Expression(doms_parser::ast::Expression::Literal(doms_parser::ast::Literal::String { .. }))))
@@ -112,6 +112,7 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
                 scopes: eval_scopes.clone(),
                 upvalues_count: eval_scopes.len(),
                 env_obj: None,
+                param_env_obj: None,
                 arguments: None,
                 raw_args: None,
                 is_strict: has_use_strict,
@@ -126,6 +127,8 @@ pub(super) fn register_test262_harness(vm: &mut Vm) {
                 callee_val: None,
                 mapped_arguments: None,
                 home_object: None,
+                module: None,
+                in_field_init: false,
             });
             vm.run_until_depth(target_depth)
         }));

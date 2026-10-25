@@ -11,8 +11,11 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         for decl in declarations {
             if decl.name.starts_with("@touch_") || decl.name.starts_with("__touch_") {
-                if let Some(Expression::Identifier(ref target)) = decl.init {
-                    self.touched_bindings.insert(target.clone());
+                match &decl.init {
+                    Some(Expression::Identifier(target)) | Some(Expression::TouchBinding(target)) => {
+                        self.touched_bindings.insert(target.clone());
+                    }
+                    _ => {}
                 }
             }
         }
@@ -27,6 +30,10 @@ impl Compiler {
             };
 
             if let Some(init_expr) = &decl.init {
+                if self.with_depth > 0 && !decl.name.starts_with('@') {
+                    let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
+                    self.chunk.emit(OpCode::TouchBinding(name_idx), 0);
+                }
                 match init_expr {
                     Expression::Conditional { condition, then_expr, else_expr }
                         if inferred_name.is_some() =>
@@ -73,6 +80,10 @@ impl Compiler {
                     };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
+                } else if self.with_depth > 0 && !decl.name.starts_with('@') {
+                    let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
+                    self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
+                    self.chunk.emit(OpCode::Pop, 0);
                 } else if *kind == VarKind::Var && !self.is_in_function {
                     let is_touched = self.touched_bindings.remove(&decl.name);
                     let name_idx = self.chunk.add_constant(Constant::String(decl.name.clone()));
@@ -105,6 +116,9 @@ impl Compiler {
                     };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
+                    if *kind == VarKind::Const {
+                        self.symbols.mark_const(&decl.name);
+                    }
                 } else if !self.is_in_function
                     && (*kind == VarKind::Let || *kind == VarKind::Const)
                     && self.with_depth == 0
@@ -122,6 +136,9 @@ impl Compiler {
                     };
                     self.chunk.emit(OpCode::SetLocal(slot), 0);
                     self.chunk.emit(OpCode::Pop, 0);
+                    if *kind == VarKind::Const {
+                        self.symbols.mark_const(&decl.name);
+                    }
                 } else {
                     if !self.is_in_function && self.symbols.scope_depth > 0 {
                         if self.symbols.is_local_in_current_scope(&decl.name) {
@@ -253,7 +270,7 @@ impl Compiler {
                 self.chunk.emit(OpCode::Dup, 0);
                 let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                 self.chunk.emit(OpCode::LoadConst(name_idx), 0);
-                self.chunk.emit(OpCode::LoadUndefined, 0);
+                self.chunk.emit(OpCode::LoadUninitialized, 0);
                 self.chunk.emit(OpCode::SetElem, 0);
                 self.chunk.emit(OpCode::Pop, 0);
             }

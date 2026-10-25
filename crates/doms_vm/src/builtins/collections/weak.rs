@@ -3,17 +3,156 @@
 use super::*;
 
 pub(super) fn register_weak_builtins(vm: &mut Vm) {
-    // WeakRef & FinalizationRegistry
-    let weakref_ctor = vm.alloc_native_function("WeakRef", 1, |vm, _this, args| {
+    // WeakRef
+    let weakref_proto = vm.alloc_object();
+    vm.weak_ref_proto = Some(weakref_proto);
+
+    let wr_deref = vm.alloc_native_function("deref", 0, |_vm, this, _args| {
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::WeakRef(target) = &obj.kind {
+                return Ok(*target);
+            }
+        }
+        Err(VmError::TypeError(
+            "Method WeakRef.prototype.deref called on incompatible receiver".into(),
+        ))
+    });
+    vm.set_property(weakref_proto, "deref", wr_deref);
+    vm.set_property_non_enumerable(weakref_proto, "deref".to_string());
+    if let Some(sym_tag) = vm.symbol_to_string_tag {
+        let tag_str = vm.alloc_string("WeakRef".into());
+        vm.set_symbol_property(weakref_proto, sym_tag, tag_str);
+    }
+
+    let weakref_ctor = vm.alloc_native_function("WeakRef", 1, |vm, this, args| {
+        if !vm.is_constructing {
+            return Err(VmError::TypeError("Constructor WeakRef requires 'new'".into()));
+        }
         let target = args.first().copied().unwrap_or(JsValue::undefined());
+        if !target.is_object() && !target.is_symbol() {
+            return Err(VmError::TypeError("WeakRef target must be an object or a symbol".into()));
+        }
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if matches!(obj.kind, ObjectKind::Ordinary) {
+                obj.kind = ObjectKind::WeakRef(target);
+                return Ok(this);
+            }
+        }
         Ok(vm.alloc_weak_ref(target))
     });
+    vm.set_property(weakref_ctor, "prototype", weakref_proto);
+    vm.set_property_non_enumerable(weakref_ctor, "prototype".to_string());
+    vm.set_property_non_writable(weakref_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(weakref_ctor, "prototype".to_string());
+    vm.set_property(weakref_proto, "constructor", weakref_ctor);
+    vm.set_property_non_enumerable(weakref_proto, "constructor".to_string());
     vm.globals.insert("WeakRef".to_string(), weakref_ctor);
 
-    let fr_ctor = vm.alloc_native_function("FinalizationRegistry", 1, |vm, _this, args| {
+    // FinalizationRegistry
+    let fr_proto = vm.alloc_object();
+    vm.finalization_registry_proto = Some(fr_proto);
+
+    let fr_register = vm.alloc_native_function("register", 2, |_vm, this, args| {
+        let target = args.first().copied().unwrap_or(JsValue::undefined());
+        if !target.is_object() && !target.is_symbol() {
+            return Err(VmError::TypeError(
+                "FinalizationRegistry.prototype.register: target must be an object or a symbol".into(),
+            ));
+        }
+        let held_value = args.get(1).copied().unwrap_or(JsValue::undefined());
+        if target == held_value {
+            return Err(VmError::TypeError(
+                "FinalizationRegistry.prototype.register: target and heldValue cannot be identical".into(),
+            ));
+        }
+        let unreg_token = args.get(2).copied().filter(|v| !v.is_undefined());
+        if let Some(tok) = unreg_token {
+            if !tok.is_object() && !tok.is_symbol() {
+                return Err(VmError::TypeError(
+                    "FinalizationRegistry.prototype.register: unregisterToken must be an object or a symbol".into(),
+                ));
+            }
+        }
+
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::FinalizationRegistry { entries, .. } = &mut obj.kind {
+                entries.push((target, held_value, unreg_token));
+                return Ok(JsValue::undefined());
+            }
+        }
+        Err(VmError::TypeError(
+            "Method FinalizationRegistry.prototype.register called on incompatible receiver".into(),
+        ))
+    });
+
+    let fr_unregister = vm.alloc_native_function("unregister", 1, |_vm, this, args| {
+        let token = args.first().copied().unwrap_or(JsValue::undefined());
+        if !token.is_object() && !token.is_symbol() {
+            return Err(VmError::TypeError(
+                "FinalizationRegistry.prototype.unregister: unregisterToken must be an object or a symbol".into(),
+            ));
+        }
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if let ObjectKind::FinalizationRegistry { entries, .. } = &mut obj.kind {
+                let len_before = entries.len();
+                entries.retain(|(_, _, tok)| {
+                    if let Some(t) = tok {
+                        !crate::object::js_values_equal(*t, token)
+                    } else {
+                        true
+                    }
+                });
+                return Ok(JsValue::from_boolean(entries.len() < len_before));
+            }
+        }
+        Err(VmError::TypeError(
+            "Method FinalizationRegistry.prototype.unregister called on incompatible receiver".into(),
+        ))
+    });
+
+    vm.set_property(fr_proto, "register", fr_register);
+    vm.set_property_non_enumerable(fr_proto, "register".to_string());
+    vm.set_property(fr_proto, "unregister", fr_unregister);
+    vm.set_property_non_enumerable(fr_proto, "unregister".to_string());
+    if let Some(sym_tag) = vm.symbol_to_string_tag {
+        let tag_str = vm.alloc_string("FinalizationRegistry".into());
+        vm.set_symbol_property(fr_proto, sym_tag, tag_str);
+    }
+
+    let fr_ctor = vm.alloc_native_function("FinalizationRegistry", 1, |vm, this, args| {
+        if !vm.is_constructing {
+            return Err(VmError::TypeError(
+                "Constructor FinalizationRegistry requires 'new'".into(),
+            ));
+        }
         let cb = args.first().copied().unwrap_or(JsValue::undefined());
+        if !vm.is_callable(cb) {
+            return Err(VmError::TypeError(
+                "FinalizationRegistry cleanupCallback must be callable".into(),
+            ));
+        }
+        if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            if matches!(obj.kind, ObjectKind::Ordinary) {
+                obj.kind = ObjectKind::FinalizationRegistry {
+                    callback: cb,
+                    entries: Vec::new(),
+                };
+                return Ok(this);
+            }
+        }
         Ok(vm.alloc_finalization_registry(cb))
     });
+    vm.set_property(fr_ctor, "prototype", fr_proto);
+    vm.set_property_non_enumerable(fr_ctor, "prototype".to_string());
+    vm.set_property_non_writable(fr_ctor, "prototype".to_string());
+    vm.set_property_non_configurable(fr_ctor, "prototype".to_string());
+    vm.set_property(fr_proto, "constructor", fr_ctor);
+    vm.set_property_non_enumerable(fr_proto, "constructor".to_string());
     vm.globals.insert("FinalizationRegistry".to_string(), fr_ctor);
 
     // WeakMap

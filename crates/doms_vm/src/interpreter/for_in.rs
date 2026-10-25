@@ -14,6 +14,7 @@ impl Vm {
             return Ok(Vec::new());
         }
         let mut visited: Vec<String> = Vec::new();
+        let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut current_val = Some(curr);
 
         while let Some(obj_val) = current_val {
@@ -24,8 +25,10 @@ impl Vm {
                     let keys = self.proxy_own_property_keys(obj_val)?;
                     for k in keys {
                         if let PropertyKeyVal::String(s) = k {
+                            let is_new = seen_keys.insert(s.clone());
                             let desc = crate::builtins::object::descriptor::get_own_property_descriptor_internal(self, obj_val, &PropertyKeyVal::String(s.clone()))?;
-                            if !desc.is_undefined()
+                            if is_new
+                                && !desc.is_undefined()
                                 && self.get_property(desc, "enumerable").is_truthy()
                             {
                                 if !visited.contains(&s) {
@@ -52,12 +55,13 @@ impl Vm {
                             continue;
                         }
                         let k = i.to_string();
+                        let is_new = seen_keys.insert(k.clone());
                         if let Some(info) = self.shapes.get_property_info(obj.shape_id, &k) {
                             if !info.attributes.enumerable {
                                 continue;
                             }
                         }
-                        if !visited.contains(&k) {
+                        if is_new && !visited.contains(&k) {
                             int_keys.push((i, k));
                         }
                     }
@@ -65,7 +69,7 @@ impl Vm {
                 {
                     for (i, _) in s.chars().enumerate() {
                         let k = i.to_string();
-                        if !visited.contains(&k) {
+                        if seen_keys.insert(k.clone()) && !visited.contains(&k) {
                             int_keys.push((i, k));
                         }
                     }
@@ -74,7 +78,8 @@ impl Vm {
                 // 2. Accessors
                 if let Some(accs) = &obj.accessors {
                     for (k, acc) in accs.iter() {
-                        if acc.enumerable && !visited.contains(k) {
+                        let is_new = seen_keys.insert(k.clone());
+                        if is_new && acc.enumerable && !visited.contains(k) {
                             if let Ok(idx) = k.parse::<usize>() {
                                 if idx.to_string() == *k {
                                     if !int_keys.iter().any(|(_, ik)| ik == k) {
@@ -92,7 +97,8 @@ impl Vm {
 
                 // 3. Properties from shape in insertion order
                 for (prop, _, attrs) in self.shapes.all_properties_with_attributes(obj.shape_id) {
-                    if attrs.enumerable && !visited.contains(&prop) {
+                    let is_new = seen_keys.insert(prop.clone());
+                    if is_new && attrs.enumerable && !visited.contains(&prop) {
                         if let Ok(idx) = prop.parse::<usize>() {
                             if idx.to_string() == prop {
                                 if !int_keys.iter().any(|(_, ik)| ik == &prop) {

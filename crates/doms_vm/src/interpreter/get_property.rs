@@ -25,9 +25,13 @@ impl Vm {
         let mut cur_tgt = target;
         let mut cur_key = key.to_string();
         let mut hops = 0;
+        let mut visited = std::collections::HashSet::new();
         while let Some((tgt_mod, tgt_key)) =
             self.module_reexports.get(&(cur_tgt, cur_key.clone())).cloned()
         {
+            if !visited.insert((cur_tgt, cur_key.clone())) {
+                break;
+            }
             hops += 1;
             if hops > 100 {
                 return JsValue::uninitialized();
@@ -263,24 +267,6 @@ impl Vm {
                 }
             }
 
-            // Special properties on WeakRef
-            if let ObjectKind::WeakRef(target_ref) = &obj.kind {
-                let tr = *target_ref;
-                if key == "deref" {
-                    return self.alloc_closure_native_function(
-                        "deref",
-                        0,
-                        Arc::new(move |_vm, _this, _args| Ok(tr)),
-                    );
-                }
-            }
-
-            // Special properties on FinalizationRegistry
-            if let ObjectKind::FinalizationRegistry { .. } = &obj.kind {
-                if let Some(m) = self.get_finalization_registry_method(target, key) {
-                    return m;
-                }
-            }
 
             // Shape offset lookup (own properties take precedence)
             if let Some(offset) = self.shapes.lookup_offset(obj.shape_id, key) {

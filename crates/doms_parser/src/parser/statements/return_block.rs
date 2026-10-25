@@ -30,7 +30,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokenKind::RBrace)?;
         self.in_single_statement_context = prev_single;
-        self.validate_block_declarations(&stmts)?;
+        self.validate_block_declarations(&stmts, false)?;
         Ok(Statement::Block(stmts))
     }
 }

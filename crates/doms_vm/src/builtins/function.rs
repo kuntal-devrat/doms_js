@@ -2,6 +2,53 @@
 
 use super::*;
 
+pub fn create_dynamic_function(
+    vm: &mut Vm,
+    kind: &str,
+    args: &[JsValue],
+) -> Result<JsValue, VmError> {
+    let (params_str, body_str) = if args.is_empty() {
+        (String::new(), String::new())
+    } else if args.len() == 1 {
+        (String::new(), vm.to_string_value(args[0]))
+    } else {
+        let param_parts: Vec<String> =
+            args[..args.len() - 1].iter().map(|a| vm.to_string_value(*a)).collect();
+        let p = param_parts.join(", ");
+        let b = vm.to_string_value(args[args.len() - 1]);
+        (p, b)
+    };
+    let code = format!("({}({}) {{\n{}\n}})", kind, params_str, body_str);
+    let program = doms_parser::parse(&code).map_err(|e| VmError::SyntaxError(e.to_string()))?;
+    let chunk =
+        doms_compiler::compile(&program).map_err(|e| VmError::SyntaxError(e.to_string()))?;
+    let fn_val = vm.run(&chunk)?;
+
+    let name_val = vm.alloc_string("anonymous".to_string());
+    vm.define_builtin_property(
+        fn_val,
+        "name",
+        name_val,
+        crate::shape::PropertyAttributes {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+
+    if let Some(new_target) = vm.current_new_target {
+        let proto = vm.get_property(new_target, "prototype");
+        if proto.is_js_object() {
+            if let Some(ptr) = fn_val.as_object_ptr() {
+                let obj = unsafe { &mut *(ptr as *mut JsObject) };
+                obj.prototype = Some(proto);
+            }
+        }
+    }
+
+    Ok(fn_val)
+}
+
 pub(super) fn register_function_builtins(vm: &mut Vm) {
     let call_fn = vm.alloc_native_function("call", 1, |vm, this, args| {
         if !vm.is_callable(this) {
@@ -114,15 +161,60 @@ pub(super) fn register_function_builtins(vm: &mut Vm) {
         let _ = vm.set_symbol_property(function_proto, has_instance_sym, has_instance_fn);
     }
 
-    let thrower = vm.alloc_native_function("%ThrowTypeError%", 0, |_vm, _this, _args| {
-        Err(VmError::TypeError("'arguments' or 'caller' cannot be accessed in strict mode".into()))
+    let thrower = vm.alloc_native_function("%ThrowTypeError%", 0, |_vm, this, _args| {
+        let is_restricted = if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref f) = obj.kind {
+                f.is_strict
+                    || f.is_generator
+                    || f.is_async
+                    || f.is_arrow
+                    || f.is_class_constructor
+                    || f.is_method
+            } else {
+                true
+            }
+        } else {
+            true
+        };
+        if is_restricted {
+            Err(VmError::TypeError(
+                "'arguments' or 'caller' cannot be accessed in strict mode or on restricted functions".into(),
+            ))
+        } else {
+            Ok(JsValue::undefined())
+        }
+    });
+    let setter = vm.alloc_native_function("%ThrowTypeErrorSetter%", 1, |_vm, this, _args| {
+        let is_restricted = if let Some(ptr) = this.as_object_ptr() {
+            let obj = unsafe { &*(ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref f) = obj.kind {
+                f.is_strict
+                    || f.is_generator
+                    || f.is_async
+                    || f.is_arrow
+                    || f.is_class_constructor
+                    || f.is_method
+            } else {
+                true
+            }
+        } else {
+            true
+        };
+        if is_restricted {
+            Err(VmError::TypeError(
+                "'arguments' or 'caller' cannot be accessed in strict mode or on restricted functions".into(),
+            ))
+        } else {
+            Ok(JsValue::undefined())
+        }
     });
     if let Some(ptr) = function_proto.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut JsObject) };
         obj.define_getter("arguments".into(), thrower);
-        obj.define_setter("arguments".into(), thrower);
+        obj.define_setter("arguments".into(), setter);
         obj.define_getter("caller".into(), thrower);
-        obj.define_setter("caller".into(), thrower);
+        obj.define_setter("caller".into(), setter);
         if let Some(accs) = &mut obj.accessors {
             if let Some(acc) = accs.get_mut("arguments") {
                 acc.enumerable = false;
@@ -136,22 +228,7 @@ pub(super) fn register_function_builtins(vm: &mut Vm) {
     }
 
     let function_constructor = vm.alloc_native_function("Function", 1, |vm, _this, args| {
-        let (params_str, body_str) = if args.is_empty() {
-            (String::new(), String::new())
-        } else if args.len() == 1 {
-            (String::new(), vm.to_string_value(args[0]))
-        } else {
-            let param_parts: Vec<String> =
-                args[..args.len() - 1].iter().map(|a| vm.to_string_value(*a)).collect();
-            let p = param_parts.join(", ");
-            let b = vm.to_string_value(args[args.len() - 1]);
-            (p, b)
-        };
-        let code = format!("(function({}) {{\n{}\n}})", params_str, body_str);
-        let program = doms_parser::parse(&code).map_err(|e| VmError::SyntaxError(e.to_string()))?;
-        let chunk =
-            doms_compiler::compile(&program).map_err(|e| VmError::SyntaxError(e.to_string()))?;
-        vm.run(&chunk)
+        create_dynamic_function(vm, "function", args)
     });
 
     vm.set_property(function_proto, "constructor", function_constructor);

@@ -111,7 +111,10 @@ impl Vm {
         let is_strict = self.frames.last().map(|f| f.is_strict).unwrap_or(self.is_strict);
         let mut scope_found = false;
         let num_frames = self.frames.len();
-        for f_idx in (0..num_frames).rev() {
+        let is_indirect = self.frames.last().map(|f| f.is_indirect_eval).unwrap_or(false);
+        let is_func = self.frames.last().map(|f| f.is_function).unwrap_or(false);
+        let min_frame_idx = if is_indirect || is_func { num_frames.saturating_sub(1) } else { 0 };
+        for f_idx in (min_frame_idx..num_frames).rev() {
             let scopes = self.frames[f_idx].scopes.clone();
             for scope_obj in scopes.into_iter().rev() {
                 if scope_obj.is_object() && self.has_property(scope_obj, &name).unwrap_or(false) {
@@ -141,7 +144,7 @@ impl Vm {
             return Ok(None);
         }
 
-        let is_local = self.frames.iter().any(|f| f.local_names.iter().any(|n| n == &name));
+        let is_local = self.frames.last().map(|f| f.local_names.iter().any(|n| n == &name)).unwrap_or(false);
         if is_local || self.global_lexicals.contains_key(&name) || self.var_names.contains(&name) {
             if is_strict {
                 self.handle_exception_at_depth(

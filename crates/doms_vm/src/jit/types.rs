@@ -39,6 +39,12 @@ thread_local! {
     pub static CURRENT_CALLEE_FUNC: std::cell::RefCell<Option<crate::object::JsFunction>> = const {
         std::cell::RefCell::new(None)
     };
+    pub static CURRENT_RAW_ARGS: std::cell::RefCell<Option<Vec<JsValue>>> = const {
+        std::cell::RefCell::new(None)
+    };
+    pub static CURRENT_CALLEE_VAL: std::cell::Cell<u64> = const {
+        std::cell::Cell::new(0)
+    };
 }
 
 pub const JS_OBJECT_SIZE: usize = std::mem::size_of::<crate::object::JsObject>();
@@ -571,6 +577,9 @@ pub extern "C" fn jit_call_trampoline(
             }
         }
         if let crate::object::ObjectKind::Function(ref mut f) = obj.kind {
+            if f.params.last().map(|p| p.starts_with("...")).unwrap_or(false) {
+                return JIT_DEOPT_SENTINEL;
+            }
             if f.jit_entry.is_none() && !f.jit_attempted {
                 f.jit_attempted = true;
                 f.jit_entry = crate::jit::JitCompiler::compile_native(&f.chunk);
@@ -673,6 +682,9 @@ pub extern "C" fn jit_construct_trampoline(callee: u64, args_ptr: *const u64, ar
     if let Some(ptr) = callee_val.as_object_ptr() {
         let obj = unsafe { &mut *(ptr as *mut crate::object::JsObject) };
         if let crate::object::ObjectKind::Function(ref mut f) = obj.kind {
+            if f.params.last().map(|p| p.starts_with("...")).unwrap_or(false) {
+                return JIT_DEOPT_SENTINEL;
+            }
             if let Some(shape_id) = f.initial_shape {
                 if f.jit_entry.is_none() && !f.jit_attempted {
                     f.jit_attempted = true;
@@ -1107,6 +1119,14 @@ pub extern "C" fn jit_generator_start(
         Vec::new()
     };
 
+    let raw_args = CURRENT_RAW_ARGS.with(|c| c.borrow().clone());
+    let callee_val_bits = CURRENT_CALLEE_VAL.with(|c| c.get());
+    let callee_val = if callee_val_bits != 0 {
+        Some(JsValue(callee_val_bits))
+    } else {
+        None
+    };
+
     let generator_instance = crate::object::JsGenerator {
         function: func,
         ip: resume_ip as usize,
@@ -1119,6 +1139,8 @@ pub extern "C" fn jit_generator_start(
         this_val: JsValue(this_val),
         arguments: None,
         mapped_arguments: None,
+        raw_args,
+        callee_val,
         async_queue: Vec::new(),
     };
     let gen_val = vm.alloc_generator(generator_instance);

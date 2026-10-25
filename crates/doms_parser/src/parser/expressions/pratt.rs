@@ -71,7 +71,6 @@ impl<'a> Parser<'a> {
                     if prop.starts_with('#') {
                         prop = match self.resolve_private_name(&prop) {
                             Some(scoped) => scoped,
-                            None if self.is_eval => prop,
                             None => {
                                 return Err(ParseError::UnexpectedToken(
                                     prop_tok.kind,
@@ -124,6 +123,7 @@ impl<'a> Parser<'a> {
                 if matches!(lhs, Expression::Super)
                     && !self.in_method
                     && !self.in_derived_constructor
+                    && !self.in_class_constructor
                 {
                     return Err(ParseError::UnexpectedToken(
                         TokenKind::Super,
@@ -153,7 +153,6 @@ impl<'a> Parser<'a> {
                     }
                     prop = match self.resolve_private_name(&prop) {
                         Some(scoped) => scoped,
-                        None if self.is_eval => prop,
                         None => {
                             return Err(ParseError::UnexpectedToken(
                                 prop_tok.kind,
@@ -178,6 +177,7 @@ impl<'a> Parser<'a> {
                 if matches!(lhs, Expression::Super)
                     && !self.in_method
                     && !self.in_derived_constructor
+                    && !self.in_class_constructor
                 {
                     return Err(ParseError::UnexpectedToken(
                         TokenKind::Super,

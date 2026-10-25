@@ -76,4 +76,4 @@ mod tests;
 
 pub use helpers::*;
 pub use types::*;
-pub use vm::Vm;
+pub use vm::{ModuleStatus, Vm};

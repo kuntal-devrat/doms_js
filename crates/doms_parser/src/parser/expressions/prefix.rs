@@ -40,7 +40,7 @@ impl<'a> Parser<'a> {
                         ));
                     }
                 } else if self.check(&TokenKind::Dot) || self.check(&TokenKind::LBracket) {
-                    if !self.in_method && !self.in_derived_constructor {
+                    if !self.in_method && !self.in_derived_constructor && !self.in_class_constructor {
                         return Err(ParseError::UnexpectedToken(
                             TokenKind::Super,
                             tok.line,
@@ -146,8 +146,8 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::Yield => {
-                if !self.in_generator {
-                    if self.is_strict {
+                if self.in_param || !self.in_generator {
+                    if self.is_strict || (self.in_param && self.in_generator) {
                         return Err(ParseError::UnexpectedToken(
                             TokenKind::Yield,
                             tok.line,
@@ -203,7 +203,6 @@ impl<'a> Parser<'a> {
                 let prop = format!("#{}", s);
                 let scoped = match self.resolve_private_name(&prop) {
                     Some(n) => n,
-                    None if self.is_eval => prop,
                     None => {
                         return Err(ParseError::UnexpectedToken(
                             TokenKind::PrivateIdent(s),

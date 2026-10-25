@@ -19,6 +19,9 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
+                if kind == VarKind::Const && init.is_none() {
+                    return Err(ParseError::General("Missing initializer in const declaration".to_string()));
+                }
                 for d in &destruct_decls {
                     if !d.name.starts_with('@')
                         && (kind == VarKind::Let || kind == VarKind::Const)
@@ -46,6 +49,9 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
+                if kind == VarKind::Const && init.is_none() {
+                    return Err(ParseError::General("Missing initializer in const declaration".to_string()));
+                }
                 for d in &destruct_decls {
                     if !d.name.starts_with('@')
                         && (kind == VarKind::Let || kind == VarKind::Const)
@@ -77,6 +83,9 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
+                if kind == VarKind::Const && init.is_none() {
+                    return Err(ParseError::General("Missing initializer in const declaration".to_string()));
+                }
                 declarations.push(VarDeclarator { name, init });
             }
 

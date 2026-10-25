@@ -20,6 +20,7 @@ impl Compiler {
         collect_var_names(&program.body, &mut top_vars);
 
         let mut top_lex_names = Vec::new();
+        let mut top_const_names = Vec::new();
         let mut top_func_names = Vec::new();
 
         for stmt in &program.body {
@@ -32,6 +33,9 @@ impl Compiler {
                     if *kind != VarKind::Var {
                         for decl in declarations {
                             top_lex_names.push(decl.name.clone());
+                            if *kind == VarKind::Const {
+                                top_const_names.push(decl.name.clone());
+                            }
                         }
                     }
                 }
@@ -72,6 +76,7 @@ impl Compiler {
         }
 
         self.chunk.top_lex_names = top_lex_names;
+        self.chunk.top_const_names = top_const_names;
         self.chunk.top_var_names = top_vars;
         self.chunk.top_func_names = top_func_names;
 
@@ -80,6 +85,23 @@ impl Compiler {
             if let Statement::Export { decl, is_default, specifiers, all_as, .. } = stmt {
                 if *is_default {
                     export_names.push("default".to_string());
+                    if let Some(inner) = decl {
+                        match &**inner {
+                            Statement::FunctionDecl { name, .. }
+                            | Statement::AsyncFunctionDecl { name, .. }
+                            | Statement::GeneratorDecl { name, .. }
+                            | Statement::AsyncGeneratorDecl { name, .. } => {
+                                if !name.is_empty() {
+                                    self.chunk
+                                        .export_aliases
+                                        .entry(name.clone())
+                                        .or_default()
+                                        .push("default".to_string());
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 if let Some(alias) = all_as {
                     export_names.push(alias.clone());
@@ -118,19 +140,6 @@ impl Compiler {
             }
         }
         self.chunk.export_names = export_names;
-
-        // Hoist imports and indirect re-exports
-        for stmt in &program.body {
-            match stmt {
-                Statement::Import { .. } => {
-                    self.compile_statement(stmt, false)?;
-                }
-                Statement::Export { source: Some(_), .. } => {
-                    self.compile_statement(stmt, false)?;
-                }
-                _ => {}
-            }
-        }
 
         // Hoist top-level function declarations
         for stmt in &program.body {
@@ -175,8 +184,10 @@ impl Compiler {
                     body,
                     self.is_strict,
                     is_gen,
-                    is_async,
                     false,
+                    false,
+                    self.chunk.imported_bindings.clone(),
+                    self.chunk.export_aliases.clone(),
                 )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 if is_async && is_gen {
@@ -194,6 +205,13 @@ impl Compiler {
                         let dflt_idx =
                             self.chunk.add_constant(Constant::String("default".to_string()));
                         self.chunk.emit(OpCode::Export(dflt_idx), 0);
+                        if !name.is_empty() {
+                            self.chunk
+                                .export_aliases
+                                .entry(name.clone())
+                                .or_default()
+                                .push("default".to_string());
+                        }
                     }
                     if !name.is_empty() && !is_dflt {
                         self.chunk.emit(OpCode::Dup, 0);
@@ -213,6 +231,25 @@ impl Compiler {
                     self.chunk.emit(OpCode::Pop, 0);
                 }
             }
+        }
+
+        // Hoist imports and indirect re-exports
+        let mut has_imports = false;
+        for stmt in &program.body {
+            match stmt {
+                Statement::Import { .. } => {
+                    self.compile_statement(stmt, false)?;
+                    has_imports = true;
+                }
+                Statement::Export { source: Some(_), .. } => {
+                    self.compile_statement(stmt, false)?;
+                    has_imports = true;
+                }
+                _ => {}
+            }
+        }
+        if has_imports {
+            self.chunk.emit(OpCode::AwaitImports, 0);
         }
 
         self.chunk.emit(OpCode::LoadUndefined, 0);
@@ -239,6 +276,13 @@ impl Compiler {
         let local_names_arc = Arc::new(self.symbols.all_local_names.clone());
         self.chunk.local_names = Arc::clone(&local_names_arc);
         self.chunk.lexical_local_names = local_names_arc;
+        let mut is_top = vec![false; self.symbols.all_local_names.len()];
+        for local in &self.symbols.locals {
+            if (local.slot as usize) < is_top.len() {
+                is_top[local.slot as usize] = true;
+            }
+        }
+        self.chunk.is_top_local = Arc::new(is_top);
         Ok(self.chunk)
     }
 }

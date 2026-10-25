@@ -9,6 +9,7 @@ impl<'a> Parser<'a> {
         let mut ctor_body = Vec::new();
         let mut has_ctor = false;
         let mut elements = Vec::new();
+        let mut instance_methods = Vec::new();
         let mut instance_fields = Vec::new();
 
         let prev_strict = self.is_strict;
@@ -49,6 +50,9 @@ impl<'a> Parser<'a> {
                 if self.peeked.kind == TokenKind::LParen
                     || self.peeked.kind == TokenKind::Colon
                     || self.peeked.kind == TokenKind::Eq
+                    || self.peeked.kind == TokenKind::Semicolon
+                    || self.peeked.kind == TokenKind::RBrace
+                    || self.peeked.has_preceding_line_terminator
                 {
                     false
                 } else {
@@ -93,6 +97,7 @@ impl<'a> Parser<'a> {
                     is_static: true,
                     key: PropertyKey::Literal(String::new()),
                     kind: ClassElementKind::StaticBlock(body),
+                    computed_key_var: None,
                 });
                 continue;
             }
@@ -196,18 +201,19 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
+                    let priv_var = if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
+                        Some(format!("__doms_priv_g_{}_{}", class_id, elements.len()))
+                    } else {
+                        None
+                    };
+                    if let Some(ref pv) = priv_var {
                         if let PropertyKey::Literal(k) = &key {
-                            instance_fields.push(Statement::Expression(
+                            instance_methods.push(Statement::Expression(
                                 Expression::DefinePrivateAccessor {
                                     target: Box::new(Expression::This),
                                     property: k.clone(),
                                     is_getter: true,
-                                    accessor: Box::new(Expression::MethodExpr {
-                                        name: priv_func_name.clone(),
-                                        params: vec![],
-                                        body: body.clone(),
-                                    }),
+                                    accessor: Box::new(Expression::Identifier(pv.clone())),
                                 },
                             ));
                         }
@@ -220,6 +226,7 @@ impl<'a> Parser<'a> {
                             params: vec![],
                             body,
                         }),
+                        computed_key_var: priv_var,
                     });
                 } else {
                     let prev_ctor = self.in_derived_constructor;
@@ -253,18 +260,19 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
+                    let priv_var = if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
+                        Some(format!("__doms_priv_s_{}_{}", class_id, elements.len()))
+                    } else {
+                        None
+                    };
+                    if let Some(ref pv) = priv_var {
                         if let PropertyKey::Literal(k) = &key {
-                            instance_fields.push(Statement::Expression(
+                            instance_methods.push(Statement::Expression(
                                 Expression::DefinePrivateAccessor {
                                     target: Box::new(Expression::This),
                                     property: k.clone(),
                                     is_getter: false,
-                                    accessor: Box::new(Expression::MethodExpr {
-                                        name: priv_func_name.clone(),
-                                        params: params.clone(),
-                                        body: body.clone(),
-                                    }),
+                                    accessor: Box::new(Expression::Identifier(pv.clone())),
                                 },
                             ));
                         }
@@ -277,6 +285,7 @@ impl<'a> Parser<'a> {
                             params,
                             body,
                         }),
+                        computed_key_var: priv_var,
                     });
                 }
                 continue;
@@ -329,10 +338,12 @@ impl<'a> Parser<'a> {
                         ));
                     }
                     let prev_ctor = self.in_derived_constructor;
+                    let prev_in_class_ctor = self.in_class_constructor;
                     let prev_method = self.in_method;
                     let prev_gen = self.in_generator;
                     let prev_async = self.in_async;
                     self.in_derived_constructor = is_derived;
+                    self.in_class_constructor = true;
                     self.in_method = false;
                     self.in_generator = false;
                     self.in_async = false;
@@ -344,12 +355,22 @@ impl<'a> Parser<'a> {
                     self.in_generator = prev_gen;
                     self.in_async = prev_async;
                     self.in_derived_constructor = prev_ctor;
+                    self.in_class_constructor = prev_in_class_ctor;
                     self.in_method = prev_method;
                     Self::apply_parameter_defaults(&mut body, defaults);
                     ctor_params = params;
                     ctor_body = body;
                     has_ctor = true;
                     continue;
+                } else {
+                    if self.check(&TokenKind::Lt) {
+                        self.skip_type_parameters()?;
+                    }
+                    if !self.check(&TokenKind::LParen) {
+                        return Err(ParseError::General(
+                            "Classes may not have a static field named 'constructor'".to_string(),
+                        ));
+                    }
                 }
             }
 
@@ -392,13 +413,18 @@ impl<'a> Parser<'a> {
                 } else {
                     Expression::MethodExpr { name: priv_func_name, params, body }
                 };
-                if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
+                let priv_var = if !is_static && matches!(&key, PropertyKey::Literal(k) if k.starts_with('#')) {
+                    Some(format!("__doms_priv_m_{}_{}", class_id, elements.len()))
+                } else {
+                    None
+                };
+                if let Some(ref pv) = priv_var {
                     if let PropertyKey::Literal(k) = &key {
-                        instance_fields.push(Statement::Expression(
+                        instance_methods.push(Statement::Expression(
                             Expression::DefinePrivateMethod {
                                 target: Box::new(Expression::This),
                                 property: k.clone(),
-                                value: Box::new(method_expr.clone()),
+                                value: Box::new(Expression::Identifier(pv.clone())),
                             },
                         ));
                     }
@@ -407,6 +433,7 @@ impl<'a> Parser<'a> {
                     is_static,
                     key,
                     kind: ClassElementKind::Method(method_expr),
+                    computed_key_var: priv_var,
                 });
             } else {
                 let _ = self.match_token(&TokenKind::Question)?;
@@ -415,7 +442,11 @@ impl<'a> Parser<'a> {
                     self.skip_type_annotation()?;
                 }
                 let init_opt = if self.match_token(&TokenKind::Eq)? {
-                    let expr = self.parse_expression(0)?;
+                    let prev_in_method = self.in_method;
+                    self.in_method = true;
+                    let expr_res = self.parse_expression(0);
+                    self.in_method = prev_in_method;
+                    let expr = expr_res?;
                     self.check_field_initializer(&expr)?;
                     Some(expr)
                 } else {
@@ -433,10 +464,16 @@ impl<'a> Parser<'a> {
                         ));
                     }
                 }
+                let computed_key_var = if !is_static && matches!(key, PropertyKey::Computed(_)) {
+                    Some(format!("__doms_field_key_{}_{}", self.class_id_counter, elements.len()))
+                } else {
+                    None
+                };
                 elements.push(ClassElement {
                     is_static,
                     key: key.clone(),
                     kind: ClassElementKind::Field(init_opt.clone()),
+                    computed_key_var: computed_key_var.clone(),
                 });
                 if !is_static {
                     let init_val = init_opt.unwrap_or(Expression::Literal(Literal::Undefined));
@@ -449,16 +486,17 @@ impl<'a> Parser<'a> {
                             })
                         }
                         PropertyKey::Literal(k) => {
-                            Statement::Expression(Expression::MemberAssignment {
-                                object: Box::new(Expression::This),
+                            Statement::Expression(Expression::DefineDataProperty {
+                                target: Box::new(Expression::This),
                                 property: k,
                                 value: Box::new(init_val),
                             })
                         }
-                        PropertyKey::Computed(expr) => {
-                            Statement::Expression(Expression::IndexAssignment {
-                                object: Box::new(Expression::This),
-                                index: Box::new(expr),
+                        PropertyKey::Computed(_) => {
+                            let key_var = computed_key_var.unwrap();
+                            Statement::Expression(Expression::DefineComputedDataProperty {
+                                target: Box::new(Expression::This),
+                                key: Box::new(Expression::Identifier(key_var)),
                                 value: Box::new(init_val),
                             })
                         }
@@ -473,9 +511,12 @@ impl<'a> Parser<'a> {
         self.in_static_block = prev_in_static;
         let _ = self.match_token(&TokenKind::Semicolon)?;
 
-        if !instance_fields.is_empty() {
+        let mut instance_init = instance_methods;
+        instance_init.extend(instance_fields);
+
+        if !instance_init.is_empty() {
             if !has_ctor {
-                ctor_body = instance_fields;
+                ctor_body = instance_init;
             } else if is_derived {
                 let super_pos = ctor_body.iter().position(|stmt| {
                     if let Statement::Expression(Expression::Call { callee, .. }) = stmt {
@@ -487,16 +528,16 @@ impl<'a> Parser<'a> {
                 if let Some(pos) = super_pos {
                     let mut new_body = Vec::new();
                     new_body.extend(ctor_body[..=pos].iter().cloned());
-                    new_body.extend(instance_fields);
+                    new_body.extend(instance_init);
                     new_body.extend(ctor_body[pos + 1..].iter().cloned());
                     ctor_body = new_body;
                 } else {
-                    let mut new_body = instance_fields;
+                    let mut new_body = instance_init;
                     new_body.extend(ctor_body);
                     ctor_body = new_body;
                 }
             } else {
-                let mut new_body = instance_fields;
+                let mut new_body = instance_init;
                 new_body.extend(ctor_body);
                 ctor_body = new_body;
             }
@@ -725,7 +766,8 @@ impl<'a> Parser<'a> {
                 }
                 Ok(())
             }
-            Expression::ArrowExpr { params, body } => {
+            Expression::ArrowExpr { params, body }
+            | Expression::AsyncArrowExpr { params, body } => {
                 for p in params {
                     if p == "arguments" {
                         return Err(ParseError::General("cannot use 'arguments'".into()));
@@ -821,9 +863,6 @@ impl<'a> Parser<'a> {
             Expression::Identifier(name) if name == "arguments" => {
                 Err(ParseError::General("Class field initializer cannot use 'arguments'".into()))
             }
-            Expression::Super => {
-                Err(ParseError::General("Class field initializer cannot call super()".into()))
-            }
             Expression::Binary { left, right, .. } => {
                 self.check_field_expr(left)?;
                 self.check_field_expr(right)
@@ -900,7 +939,8 @@ impl<'a> Parser<'a> {
             Expression::Grouping(inner) => self.check_field_expr(inner),
             Expression::Spread(inner) => self.check_field_expr(inner),
             Expression::Update { expr, .. } => self.check_field_expr(expr),
-            Expression::ArrowExpr { params, body } => {
+            Expression::ArrowExpr { params, body }
+            | Expression::AsyncArrowExpr { params, body } => {
                 for p in params {
                     if p == "arguments" {
                         return Err(ParseError::General(

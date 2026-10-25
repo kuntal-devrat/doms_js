@@ -134,6 +134,7 @@ impl Vm {
         } else {
             val
         };
+        self.drain_microtasks()?;
         Ok(resolved)
     }
 
@@ -166,6 +167,8 @@ impl Vm {
             this_val: frame.this_val,
             arguments: frame.arguments,
             mapped_arguments: frame.mapped_arguments,
+            raw_args: frame.raw_args,
+            callee_val: frame.callee_val,
             async_queue: Vec::new(),
         };
         let gen_val = self.alloc_generator(generator_instance);

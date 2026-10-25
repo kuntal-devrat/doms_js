@@ -41,6 +41,7 @@ pub struct Parser<'a> {
     pub in_non_arrow_function: bool,
     pub in_method: bool,
     pub in_derived_constructor: bool,
+    pub in_class_constructor: bool,
     pub allow_in: bool,
     pub in_param: bool,
     pub in_single_statement_context: bool,
@@ -91,6 +92,7 @@ impl<'a> Parser<'a> {
             in_non_arrow_function: false,
             in_method: false,
             in_derived_constructor: false,
+            in_class_constructor: false,
             allow_in: true,
             in_param: false,
             in_single_statement_context: false,
@@ -128,6 +130,7 @@ impl<'a> Parser<'a> {
             in_non_arrow_function: false,
             in_method: false,
             in_derived_constructor: false,
+            in_class_constructor: false,
             allow_in: true,
             in_param: false,
             in_single_statement_context: false,
@@ -146,12 +149,16 @@ impl<'a> Parser<'a> {
         is_strict: bool,
         in_method: bool,
         in_function: bool,
+        private_names: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Self, ParseError> {
         let mut p = if is_strict { Self::new_strict(source)? } else { Self::new(source)? };
         p.in_method = in_method;
-        p.in_function = in_function;
+        p.in_function = false;
         p.in_non_arrow_function = in_function;
         p.is_eval = true;
+        if let Some(names) = private_names {
+            p.private_names_stack.push(names.clone());
+        }
         Ok(p)
     }
 

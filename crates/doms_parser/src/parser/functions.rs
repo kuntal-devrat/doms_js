@@ -47,20 +47,48 @@ impl<'a> Parser<'a> {
             loop {
                 if self.match_token(&TokenKind::DotDotDot)? {
                     self.current_params_simple = false;
-                    if self.check(&TokenKind::LBracket) {
-                        self.skip_balanced(TokenKind::LBracket, TokenKind::RBracket)?;
-                        params.push(format!("...__rest_{}", self.destruct_counter));
+                    let mut destruct_decls = Vec::new();
+                    let (name, is_destruct) = if self.match_token(&TokenKind::LBracket)? {
+                        let name = format!("__rest_{}", self.destruct_counter);
                         self.destruct_counter += 1;
-                    } else if self.check(&TokenKind::LBrace) {
-                        self.skip_balanced(TokenKind::LBrace, TokenKind::RBrace)?;
-                        params.push(format!("...__rest_{}", self.destruct_counter));
+                        self.parse_array_destructuring_into(&name, &mut destruct_decls)?;
+                        (name, true)
+                    } else if self.match_token(&TokenKind::LBrace)? {
+                        let name = format!("__rest_{}", self.destruct_counter);
                         self.destruct_counter += 1;
+                        self.parse_object_destructuring_into(&name, &mut destruct_decls)?;
+                        (name, true)
                     } else {
                         let id = self.expect_identifier()?;
                         if self.match_token(&TokenKind::Colon)? {
                             self.skip_type_annotation()?;
                         }
-                        params.push(format!("...{}", id));
+                        (id, false)
+                    };
+                    params.push(format!("...{}", name));
+                    if is_destruct {
+                        defaults.push(Statement::If {
+                            condition: Expression::Binary {
+                                op: BinaryOp::Eq,
+                                left: Box::new(Expression::Identifier(name.clone())),
+                                right: Box::new(Expression::Literal(Literal::Null)),
+                            },
+                            then_branch: Box::new(Statement::Throw(Expression::New {
+                                callee: Box::new(Expression::Identifier("TypeError".to_string())),
+                                args: vec![Expression::Literal(Literal::String {
+                                    value: "Cannot destructure 'undefined' or 'null'".to_string(),
+                                    has_escape: false,
+                                    has_legacy_escape: false,
+                                })],
+                            })),
+                            else_branch: None,
+                        });
+                        if !destruct_decls.is_empty() {
+                            defaults.push(Statement::VarDecl {
+                                kind: VarKind::Var,
+                                declarations: destruct_decls,
+                            });
+                        }
                     }
                     break;
                 }
@@ -174,22 +202,34 @@ impl<'a> Parser<'a> {
         &mut self,
         allow_anon: bool,
     ) -> Result<(String, Vec<String>, Vec<Statement>), ParseError> {
-        let name = if allow_anon && !matches!(&self.current.kind, TokenKind::Ident(_)) {
-            "".to_string()
-        } else {
-            self.expect_identifier()?
-        };
-        if self.check(&TokenKind::Lt) {
-            self.skip_type_parameters()?;
-        }
-        let (params, defaults) = self.parse_formal_parameters()?;
-        if self.match_token(&TokenKind::Colon)? {
-            self.skip_type_annotation()?;
-        }
-        let mut body =
-            self.parse_function_body(&params, if name.is_empty() { None } else { Some(&name) })?;
-        Self::apply_parameter_defaults(&mut body, defaults);
-        Ok((name, params, body))
+        let prev_in_method = self.in_method;
+        let prev_in_class_ctor = self.in_class_constructor;
+        let prev_in_derived_ctor = self.in_derived_constructor;
+        self.in_method = false;
+        self.in_class_constructor = false;
+        self.in_derived_constructor = false;
+        let res = (|| -> Result<(String, Vec<String>, Vec<Statement>), ParseError> {
+            let name = if allow_anon && !matches!(&self.current.kind, TokenKind::Ident(_)) {
+                "".to_string()
+            } else {
+                self.expect_identifier()?
+            };
+            if self.check(&TokenKind::Lt) {
+                self.skip_type_parameters()?;
+            }
+            let (params, defaults) = self.parse_formal_parameters()?;
+            if self.match_token(&TokenKind::Colon)? {
+                self.skip_type_annotation()?;
+            }
+            let mut body =
+                self.parse_function_body(&params, if name.is_empty() { None } else { Some(&name) })?;
+            Self::apply_parameter_defaults(&mut body, defaults);
+            Ok((name, params, body))
+        })();
+        self.in_method = prev_in_method;
+        self.in_class_constructor = prev_in_class_ctor;
+        self.in_derived_constructor = prev_in_derived_ctor;
+        res
     }
 
     pub(crate) fn parse_function_signature_and_body(
@@ -258,14 +298,32 @@ impl<'a> Parser<'a> {
         params: &[String],
         name: Option<&str>,
     ) -> Result<Vec<Statement>, ParseError> {
+        self.parse_function_body_internal(params, name, false)
+    }
+
+    pub(crate) fn parse_arrow_function_body(
+        &mut self,
+        params: &[String],
+    ) -> Result<Vec<Statement>, ParseError> {
+        self.parse_function_body_internal(params, None, true)
+    }
+
+    fn parse_function_body_internal(
+        &mut self,
+        params: &[String],
+        name: Option<&str>,
+        is_arrow: bool,
+    ) -> Result<Vec<Statement>, ParseError> {
         self.expect(TokenKind::LBrace)?;
         let prev_strict = self.is_strict;
         let prev_in_func = self.in_function;
         let prev_in_non_arrow = self.in_non_arrow_function;
         let prev_in_static = self.in_static_block;
         self.in_function = true;
-        self.in_non_arrow_function = true;
         self.in_static_block = false;
+        if !is_arrow {
+            self.in_non_arrow_function = true;
+        }
         if prev_strict {
             Self::validate_strict_params_and_name(
                 params,
@@ -348,6 +406,43 @@ impl<'a> Parser<'a> {
         self.in_function = prev_in_func;
         self.in_non_arrow_function = prev_in_non_arrow;
         self.in_static_block = prev_in_static;
+
+        self.validate_block_declarations(&body, true)?;
+        let mut lex_names = Vec::new();
+        for stmt in &body {
+            match stmt {
+                Statement::VarDecl { kind, declarations } if *kind != VarKind::Var => {
+                    for decl in declarations {
+                        if !decl.name.starts_with("__") && !decl.name.starts_with('@') {
+                            lex_names.push(decl.name.clone());
+                        }
+                    }
+                }
+                Statement::ClassDecl(class_def) => {
+                    if let Some(ref name) = class_def.name {
+                        lex_names.push(name.clone());
+                    }
+                }
+                Statement::FunctionDecl { name, .. } if self.is_strict => {
+                    lex_names.push(name.clone());
+                }
+                Statement::AsyncFunctionDecl { name, .. }
+                | Statement::GeneratorDecl { name, .. }
+                | Statement::AsyncGeneratorDecl { name, .. } => {
+                    lex_names.push(name.clone());
+                }
+                _ => {}
+            }
+        }
+        for p in params {
+            let param_name = if let Some(rest) = p.strip_prefix("...") { rest } else { p.as_str() };
+            if lex_names.iter().any(|n| n == param_name) {
+                return Err(ParseError::General(format!(
+                    "Identifier '{}' has already been declared",
+                    param_name
+                )));
+            }
+        }
         Ok(body)
     }
 
@@ -368,12 +463,23 @@ impl<'a> Parser<'a> {
         let is_generator = self.match_token(&TokenKind::Star)?;
         let prev_gen = self.in_generator;
         let prev_async = self.in_async;
+        let prev_in_static = self.in_static_block;
+        self.in_static_block = false;
+        let name = self.expect_identifier()?;
         self.in_generator = is_generator;
         self.in_async = true;
-        let res = self.parse_function_signature_and_body();
+        if self.check(&TokenKind::Lt) {
+            self.skip_type_parameters()?;
+        }
+        let (params, defaults) = self.parse_formal_parameters()?;
+        if self.match_token(&TokenKind::Colon)? {
+            self.skip_type_annotation()?;
+        }
+        let mut body = self.parse_function_body(&params, Some(&name))?;
+        Self::apply_parameter_defaults(&mut body, defaults);
         self.in_generator = prev_gen;
         self.in_async = prev_async;
-        let (name, params, body) = res?;
+        self.in_static_block = prev_in_static;
         if is_generator {
             Ok(Statement::AsyncGeneratorDecl { name, params, body })
         } else {
@@ -384,16 +490,33 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_generator_decl(&mut self) -> Result<Statement, ParseError> {
         let prev_gen = self.in_generator;
         let prev_async = self.in_async;
-        self.in_generator = true;
+        let prev_in_static = self.in_static_block;
+        self.in_static_block = false;
         self.in_async = false;
-        let res = self.parse_function_signature_and_body();
+        let name = self.expect_identifier()?;
+        self.in_generator = true;
+        if self.check(&TokenKind::Lt) {
+            self.skip_type_parameters()?;
+        }
+        let (params, defaults) = self.parse_formal_parameters()?;
+        if self.match_token(&TokenKind::Colon)? {
+            self.skip_type_annotation()?;
+        }
+        let mut body = self.parse_function_body(&params, Some(&name))?;
+        Self::apply_parameter_defaults(&mut body, defaults);
         self.in_generator = prev_gen;
         self.in_async = prev_async;
-        let (name, params, body) = res?;
+        self.in_static_block = prev_in_static;
         Ok(Statement::GeneratorDecl { name, params, body })
     }
 
     pub(crate) fn parse_function_expr(&mut self) -> Result<Expression, ParseError> {
+        let prev_in_method = self.in_method;
+        let prev_in_class_ctor = self.in_class_constructor;
+        let prev_in_derived_ctor = self.in_derived_constructor;
+        self.in_method = false;
+        self.in_class_constructor = false;
+        self.in_derived_constructor = false;
         let prev_in_static = self.in_static_block;
         self.in_static_block = false;
         let is_generator = self.match_token(&TokenKind::Star)?;
@@ -401,62 +524,52 @@ impl<'a> Parser<'a> {
         let prev_async = self.in_async;
         self.in_generator = is_generator;
         self.in_async = false;
-        let name = if let TokenKind::Ident(id) = &self.current.kind {
-            if self.is_strict && (is_strict_reserved_word(id) || id == "eval" || id == "arguments")
-            {
-                self.in_generator = prev_gen;
-                self.in_async = prev_async;
-                self.in_static_block = prev_in_static;
-                return Err(ParseError::UnexpectedToken(
-                    TokenKind::Ident(id.clone()),
-                    self.current.line,
-                    self.current.col,
-                ));
-            }
-            let n = id.clone();
-            self.advance()?;
-            Some(n)
-        } else if !self.is_module && !self.in_async && self.check(&TokenKind::Await) {
-            self.advance()?;
-            Some("await".to_string())
-        } else {
-            None
-        };
+        let res = (|| -> Result<Expression, ParseError> {
+            let name = if let TokenKind::Ident(id) = &self.current.kind {
+                if self.is_strict && (is_strict_reserved_word(id) || id == "eval" || id == "arguments")
+                {
+                    return Err(ParseError::UnexpectedToken(
+                        TokenKind::Ident(id.clone()),
+                        self.current.line,
+                        self.current.col,
+                    ));
+                }
+                let n = id.clone();
+                self.advance()?;
+                Some(n)
+            } else if !self.is_strict && (!is_generator || !prev_gen) && self.check(&TokenKind::Yield) {
+                self.advance()?;
+                Some("yield".to_string())
+            } else if !self.is_module && !self.in_async && self.check(&TokenKind::Await) {
+                self.advance()?;
+                Some("await".to_string())
+            } else {
+                None
+            };
 
-        if self.check(&TokenKind::Lt) {
-            self.skip_type_parameters()?;
-        }
-
-        let (params, defaults) = match self.parse_formal_parameters() {
-            Ok(p) => p,
-            Err(e) => {
-                self.in_generator = prev_gen;
-                self.in_async = prev_async;
-                self.in_static_block = prev_in_static;
-                return Err(e);
+            if self.check(&TokenKind::Lt) {
+                self.skip_type_parameters()?;
             }
-        };
-        if self.match_token(&TokenKind::Colon)? {
-            self.skip_type_annotation()?;
-        }
-        let mut body = match self.parse_function_body(&params, name.as_deref()) {
-            Ok(b) => b,
-            Err(e) => {
-                self.in_generator = prev_gen;
-                self.in_async = prev_async;
-                self.in_static_block = prev_in_static;
-                return Err(e);
-            }
-        };
-        Self::apply_parameter_defaults(&mut body, defaults);
 
+            let (params, defaults) = self.parse_formal_parameters()?;
+            if self.match_token(&TokenKind::Colon)? {
+                self.skip_type_annotation()?;
+            }
+            let mut body = self.parse_function_body(&params, name.as_deref())?;
+            Self::apply_parameter_defaults(&mut body, defaults);
+
+            if is_generator {
+                Ok(Expression::GeneratorExpr { name, params, body })
+            } else {
+                Ok(Expression::FunctionExpr { name, params, body })
+            }
+        })();
         self.in_generator = prev_gen;
         self.in_async = prev_async;
         self.in_static_block = prev_in_static;
-        if is_generator {
-            Ok(Expression::GeneratorExpr { name, params, body })
-        } else {
-            Ok(Expression::FunctionExpr { name, params, body })
-        }
+        self.in_method = prev_in_method;
+        self.in_class_constructor = prev_in_class_ctor;
+        self.in_derived_constructor = prev_in_derived_ctor;
+        res
     }
 }

@@ -28,6 +28,7 @@ impl Test262Runner {
         let meta = Self::parse_metadata(&content);
         for feat in &meta.features {
             if feat == "resizable-arraybuffer"
+                || feat == "decorators"
                 || feat == "import-defer"
                 || feat == "import-attributes"
                 || feat == "import-bytes"
@@ -59,7 +60,7 @@ impl Test262Runner {
 
         // 1. Parsing Phase
         let parsed = if meta.is_module {
-            doms_parser::parse_module(&full_source)
+            doms_parser::parse_module(&content)
         } else if meta.is_only_strict {
             doms_parser::parse_strict(&full_source)
         } else {
@@ -124,12 +125,29 @@ impl Test262Runner {
         vm.max_evals = Some(100_000);
         vm.deadline = Some(Instant::now() + std::time::Duration::from_millis(3_000));
 
+        if meta.is_module && !meta.is_raw {
+            let harness_src = self.build_harness(&meta);
+            if let Ok(h_prog) = doms_parser::parse(&harness_src) {
+                if let Ok(h_chunk) = doms_compiler::compile(&h_prog) {
+                    let old_mod = vm.is_module;
+                    vm.is_module = false;
+                    let _ = vm.run(&h_chunk);
+                    vm.is_module = old_mod;
+                }
+            }
+        }
+
         if meta.is_module {
             let m = vm.alloc_object();
             vm.set_prototype(m, doms_vm::JsValue::null());
             if let Some(tag_sym) = vm.symbol_to_string_tag {
                 let tag_val = vm.alloc_string("Module".to_string());
-                vm.set_symbol_property(m, tag_sym, tag_val);
+                vm.define_symbol_property(
+                    m,
+                    tag_sym,
+                    tag_val,
+                    doms_vm::PropertyAttributes::NON_WRITABLE_NON_ENUMERABLE,
+                );
             }
             vm.module_namespace_objects.insert(m);
             vm.prevent_extensions_object(m);
@@ -148,7 +166,12 @@ impl Test262Runner {
             vm.current_module_obj = Some(m);
         }
 
-        let result = vm.run(&chunk);
+        let mut result = vm.run(&chunk);
+        if result.is_ok() {
+            if let Err(e) = vm.drain_microtasks() {
+                result = Err(e);
+            }
+        }
 
         match result {
             Ok(_) => {

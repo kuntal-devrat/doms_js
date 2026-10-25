@@ -194,7 +194,7 @@ impl Default for Accessor {
 
 #[derive(Debug, Clone)]
 pub enum PrivateElement {
-    Field(JsValue),
+    Field { value: JsValue, brand: Option<JsValue> },
     Method(JsValue),
     Accessor(Accessor),
 }

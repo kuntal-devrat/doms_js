@@ -9,18 +9,28 @@ impl Vm {
         let target_depth = self.frames.len();
         let local_names = Arc::clone(&root_chunk.local_names);
         let lexical_local_names = Arc::clone(&root_chunk.lexical_local_names);
+        let mut initial_locals = vec![JsValue::undefined(); local_names.len()];
+        for (i, name) in local_names.iter().enumerate() {
+            if root_chunk.top_lex_names.contains(name) {
+                initial_locals[i] = JsValue::uninitialized();
+            }
+        }
+        for name in &root_chunk.top_const_names {
+            self.const_bindings.insert(name.clone());
+        }
         self.frames.push(CallFrame {
             chunk: root_chunk,
             ip: 0,
             base_sp: self.stack.len(),
             this_val: if self.is_module { JsValue::undefined() } else { self.global_object },
             gen_val: None,
-            locals: vec![JsValue::undefined(); local_names.len()],
+            locals: initial_locals,
             local_names,
             lexical_local_names,
             scopes: Vec::new(),
             upvalues_count: 0,
             env_obj: None,
+            param_env_obj: None,
             arguments: None,
             raw_args: None,
             is_strict: self.is_strict,
@@ -35,6 +45,8 @@ impl Vm {
             callee_val: None,
             mapped_arguments: None,
             home_object: None,
+            module: self.current_module_obj,
+            in_field_init: false,
         });
         let result = self.run_until_depth(target_depth)?;
         if let Some(frame) = self.frames.get(target_depth) {
@@ -46,7 +58,9 @@ impl Vm {
                 }
             }
         }
-        self.drain_microtasks()?;
+        if target_depth == 0 {
+            self.drain_microtasks()?;
+        }
         Ok(result)
     }
 
@@ -296,6 +310,25 @@ impl Vm {
                     };
                     let val = self.pop()?;
                     let obj = *self.stack.last().ok_or(VmError::StackUnderflow)?;
+                    if let Some(val_ptr) = val.as_object_ptr() {
+                        let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+                        if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                            if f.name.as_deref().unwrap_or("").is_empty() {
+                                f.name = Some(name.clone());
+                                let name_val = self.alloc_string(name.clone());
+                                self.define_builtin_property(
+                                    val,
+                                    "name",
+                                    name_val,
+                                    crate::shape::PropertyAttributes {
+                                        writable: false,
+                                        enumerable: false,
+                                        configurable: true,
+                                    },
+                                );
+                            }
+                        }
+                    }
                     self.create_data_property_or_throw(obj, &name, val)?;
                 }
                 OpCode::DefineDataPropComputed => {
@@ -305,6 +338,14 @@ impl Vm {
                     let prop_key = self.to_property_key(key_val)?;
                     match prop_key {
                         PropertyKeyVal::String(s) => {
+                            if let Some(val_ptr) = val.as_object_ptr() {
+                                let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+                                if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                                    if f.name.as_deref().unwrap_or("").is_empty() {
+                                        f.name = Some(s.clone());
+                                    }
+                                }
+                            }
                             self.create_data_property_or_throw(obj, &s, val)?;
                         }
                         PropertyKeyVal::Symbol(sym) => {
@@ -321,6 +362,16 @@ impl Vm {
                                 }
                             }
                         }
+                    }
+                }
+                OpCode::EnterFieldInit => {
+                    if let Some(frame) = self.frames.last_mut() {
+                        frame.in_field_init = true;
+                    }
+                }
+                OpCode::LeaveFieldInit => {
+                    if let Some(frame) = self.frames.last_mut() {
+                        frame.in_field_init = false;
                     }
                 }
                 OpCode::SetProtoOrNoop => {
@@ -414,6 +465,7 @@ impl Vm {
                                                 && (jsobj.prototype.is_none()
                                                     || jsobj.prototype == self.array_proto)
                                                 && is_extensible
+                                                && !self.array_proto_tainted
                                             {
                                                 elements.push(val);
                                                 self.stack[stack_len - 3] = val;
@@ -463,7 +515,38 @@ impl Vm {
                     let obj = self.pop()?;
                     if let Some(ptr) = obj.as_object_ptr() {
                         let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
-                        jsobj.insert_private_element(name, val);
+                        if !jsobj.is_extensible() {
+                            return Err(VmError::TypeError(
+                                "Cannot add private field to non-extensible object".into(),
+                            ));
+                        }
+                        if jsobj.private_elements.as_ref().map_or(false, |p| p.contains_key(&name)) {
+                            return Err(VmError::TypeError(
+                                format!("Cannot add private field {} twice", name),
+                            ));
+                        }
+                        if let Some(val_ptr) = val.as_object_ptr() {
+                            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+                            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                                if f.name.as_deref().unwrap_or("").is_empty() {
+                                    let display_name = name.split('@').next().unwrap_or(&name);
+                                    f.name = Some(display_name.to_string());
+                                    let name_val = self.alloc_string(display_name.to_string());
+                                    self.define_builtin_property(
+                                        val,
+                                        "name",
+                                        name_val,
+                                        crate::shape::PropertyAttributes {
+                                            writable: false,
+                                            enumerable: false,
+                                            configurable: true,
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                        let brand = self.current_class_brand();
+                        jsobj.insert_private_element(name, val, brand);
                         self.push(val);
                     } else {
                         return Err(VmError::TypeError(format!(
@@ -485,6 +568,28 @@ impl Vm {
                     let obj = self.pop()?;
                     if let Some(ptr) = obj.as_object_ptr() {
                         let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                        if !jsobj.is_extensible() {
+                            return Err(VmError::TypeError(
+                                "Cannot add private method to non-extensible object".into(),
+                            ));
+                        }
+                        if jsobj.private_elements.as_ref().map_or(false, |p| p.contains_key(&name)) {
+                            return Err(VmError::TypeError(
+                                format!("Cannot add private method {} twice", name),
+                            ));
+                        }
+                        if let Some(val_ptr) = val.as_object_ptr() {
+                            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+                            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                                if f.name.as_deref().unwrap_or("").is_empty() {
+                                    let display_name = name.split('@').next().unwrap_or(&name);
+                                    f.name = Some(display_name.to_string());
+                                }
+                                if f.is_method && f.home_object.is_none() {
+                                    f.home_object = Some(obj);
+                                }
+                            }
+                        }
                         jsobj.insert_private_method(name, val);
                         self.push(val);
                     } else {
@@ -507,6 +612,36 @@ impl Vm {
                     let obj = self.pop()?;
                     if let Some(ptr) = obj.as_object_ptr() {
                         let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                        if !jsobj.is_extensible() {
+                            return Err(VmError::TypeError(
+                                "Cannot add private getter to non-extensible object".into(),
+                            ));
+                        }
+                        if let Some(p) = jsobj.private_elements.as_ref() {
+                            if let Some(entry) = p.get(&name) {
+                                match entry {
+                                    crate::object::PrivateElement::Accessor(acc)
+                                        if acc.getter.is_none() => {}
+                                    _ => {
+                                        return Err(VmError::TypeError(
+                                            format!("Cannot define private getter {} twice", name),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(val_ptr) = getter.as_object_ptr() {
+                            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+                            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                                if f.name.as_deref().unwrap_or("").is_empty() {
+                                    let display_name = name.split('@').next().unwrap_or(&name);
+                                    f.name = Some(format!("get {}", display_name));
+                                }
+                                if f.is_method && f.home_object.is_none() {
+                                    f.home_object = Some(obj);
+                                }
+                            }
+                        }
                         jsobj.insert_private_getter(name, getter);
                         self.push(getter);
                     } else {
@@ -529,6 +664,36 @@ impl Vm {
                     let obj = self.pop()?;
                     if let Some(ptr) = obj.as_object_ptr() {
                         let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
+                        if !jsobj.is_extensible() {
+                            return Err(VmError::TypeError(
+                                "Cannot add private setter to non-extensible object".into(),
+                            ));
+                        }
+                        if let Some(p) = jsobj.private_elements.as_ref() {
+                            if let Some(entry) = p.get(&name) {
+                                match entry {
+                                    crate::object::PrivateElement::Accessor(acc)
+                                        if acc.setter.is_none() => {}
+                                    _ => {
+                                        return Err(VmError::TypeError(
+                                            format!("Cannot define private setter {} twice", name),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(val_ptr) = setter.as_object_ptr() {
+                            let val_obj = unsafe { &mut *(val_ptr as *mut JsObject) };
+                            if let ObjectKind::Function(ref mut f) = val_obj.kind {
+                                if f.name.as_deref().unwrap_or("").is_empty() {
+                                    let display_name = name.split('@').next().unwrap_or(&name);
+                                    f.name = Some(format!("set {}", display_name));
+                                }
+                                if f.is_method && f.home_object.is_none() {
+                                    f.home_object = Some(obj);
+                                }
+                            }
+                        }
                         jsobj.insert_private_setter(name, setter);
                         self.push(setter);
                     } else {
@@ -616,7 +781,185 @@ impl Vm {
                     }
                 }
                 OpCode::Await => {
-                    self.op_await(target_depth)?;
+                    let val = self.pop()?;
+                    let is_rejected = if let Some(ptr) = val.as_object_ptr() {
+                        let obj = unsafe { &*(ptr as *mut JsObject) };
+                        if let ObjectKind::Promise(p) = &obj.kind {
+                            if p.state == PromiseState::Rejected {
+                                Some(p.result)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(err_val) = is_rejected {
+                        return Err(VmError::Thrown(err_val));
+                    }
+
+                    let is_top_level_module = self.frames.last().map(|f| !f.is_function).unwrap_or(false)
+                        && target_depth > 0
+                        && self.is_module;
+                    if is_top_level_module {
+                        let finished = self.frames.pop().unwrap();
+                        let next_ip = finished.ip;
+                        let chunk_to_resume = Arc::clone(&finished.chunk);
+                        let saved_locals = finished.locals.clone();
+                        let saved_mod = self.current_module_obj;
+                        let saved_base = self.base_dir.clone();
+                        let saved_is_strict = finished.is_strict;
+
+                        if let Some(mod_val) = saved_mod {
+                            self.module_eval_status.insert(mod_val, ModuleStatus::EvaluatingAsync);
+                        }
+
+                        let mut resolved_val = val;
+                        if let Some(ptr) = val.as_object_ptr() {
+                            let obj = unsafe { &*(ptr as *mut JsObject) };
+                            if let ObjectKind::Promise(p) = &obj.kind {
+                                if p.state == PromiseState::Fulfilled {
+                                    resolved_val = p.result;
+                                }
+                            }
+                        }
+
+                        let continuation = self.alloc_closure_native_function(
+                            "tla_continuation",
+                            1,
+                            Arc::new(move |vm, _this, args| {
+                                let arg_val = args.first().copied().unwrap_or(resolved_val);
+                                let old_mod = vm.current_module_obj;
+                                let old_base = vm.base_dir.clone();
+                                let old_is_mod = vm.is_module;
+                                vm.is_module = true;
+                                vm.current_module_obj = saved_mod;
+                                vm.base_dir = saved_base.clone();
+                                if let Some(mod_val) = saved_mod {
+                                    vm.module_eval_status.insert(mod_val, ModuleStatus::Evaluating);
+                                }
+
+                                let target_depth = vm.frames.len();
+                                let base_sp = vm.stack.len();
+                                vm.push(arg_val);
+                                vm.frames.push(crate::interpreter::CallFrame {
+                                    chunk: Arc::clone(&chunk_to_resume),
+                                    ip: next_ip,
+                                    base_sp,
+                                    this_val: JsValue::undefined(),
+                                    gen_val: None,
+                                    locals: saved_locals.clone(),
+                                    local_names: Arc::clone(&chunk_to_resume.local_names),
+                                    lexical_local_names: Arc::clone(&chunk_to_resume.lexical_local_names),
+                                    scopes: Vec::new(),
+                                    upvalues_count: 0,
+                                    env_obj: None,
+                                    param_env_obj: None,
+                                    arguments: None,
+                                    raw_args: None,
+                                    is_strict: saved_is_strict,
+                                    new_target: None,
+                                    is_function: false,
+                                    is_method: false,
+                                    is_arrow: false,
+                                    has_param_exprs: false,
+                                    in_param_init: false,
+                                    is_indirect_eval: false,
+                                    callee_func: None,
+                                    callee_val: None,
+                                    mapped_arguments: None,
+                                    home_object: None,
+                                    module: saved_mod,
+                                    in_field_init: false,
+                                });
+
+                                let run_res = vm.run_until_depth(target_depth);
+
+                                vm.is_module = old_is_mod;
+                                vm.current_module_obj = old_mod;
+                                vm.base_dir = old_base;
+
+                                if let Some(mod_val) = saved_mod {
+                                    match &run_res {
+                                        Ok(_) => {
+                                            let current_st = vm
+                                                .module_eval_status
+                                                .get(&mod_val)
+                                                .copied()
+                                                .unwrap_or(ModuleStatus::Evaluating);
+                                            if current_st != ModuleStatus::EvaluatingAsync {
+                                                vm.prevent_extensions_object(mod_val);
+                                                vm.module_eval_status.insert(mod_val, ModuleStatus::Evaluated);
+                                                if let Some(eval_p) = vm.module_eval_promises.get(&mod_val).copied() {
+                                                    vm.resolve_promise(eval_p, mod_val);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            vm.prevent_extensions_object(mod_val);
+                                            let err_val = vm.vm_error_to_js_value(e);
+                                            vm.module_eval_errors.insert(mod_val, err_val);
+                                            vm.module_eval_status.insert(mod_val, ModuleStatus::Evaluated);
+                                            if let Some(eval_p) = vm.module_eval_promises.get(&mod_val).copied() {
+                                                vm.reject_promise(eval_p, err_val);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                run_res
+                            }),
+                        );
+
+                        let is_pending = if let Some(ptr) = val.as_object_ptr() {
+                            let obj = unsafe { &*(ptr as *mut JsObject) };
+                            if let ObjectKind::Promise(p) = &obj.kind {
+                                p.state == PromiseState::Pending
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        if is_pending {
+                            let cont_c = continuation;
+                            let on_fulfill = self.alloc_closure_native_function(
+                                "tla_on_fulfill",
+                                1,
+                                Arc::new(move |vm, _this, args| {
+                                    let resolved = args.first().copied().unwrap_or(JsValue::undefined());
+                                    vm.call(cont_c, JsValue::undefined(), &[resolved])
+                                }),
+                            );
+                            let on_reject = self.alloc_closure_native_function(
+                                "tla_on_reject",
+                                1,
+                                Arc::new(move |vm, _this, args| {
+                                    let reason = args.first().copied().unwrap_or(JsValue::undefined());
+                                    if let Some(mod_val) = saved_mod {
+                                        vm.module_eval_errors.insert(mod_val, reason);
+                                        vm.module_eval_status.insert(mod_val, ModuleStatus::Evaluated);
+                                        if let Some(eval_p) = vm.module_eval_promises.get(&mod_val).copied() {
+                                            vm.reject_promise(eval_p, reason);
+                                        }
+                                    }
+                                    Ok(JsValue::undefined())
+                                }),
+                            );
+                            let _ = self.promise_then(val, on_fulfill, on_reject);
+                        } else {
+                            self.enqueue_microtask(continuation, Vec::new());
+                        }
+
+                        return Ok(JsValue::undefined());
+                    } else {
+                        self.push(val);
+                        self.op_await(target_depth)?;
+                    }
                 }
                 OpCode::Yield => {
                     if let Some(v) = self.op_yield(target_depth)? {
@@ -641,6 +984,9 @@ impl Vm {
                 }
                 OpCode::ImportModule(src_idx) => {
                     self.op_import_module(src_idx, &chunk)?;
+                }
+                OpCode::AwaitImports => {
+                    self.op_await_imports()?;
                 }
                 OpCode::DynamicImport => {
                     self.op_dynamic_import()?;
@@ -862,15 +1208,28 @@ impl Vm {
                     }
                 }
                 OpCode::JumpIfLocalDefined(slot, target) => {
-                    let frame = self.frames.last_mut().unwrap();
-                    let slot_idx = slot as usize;
-                    let arg = frame
-                        .raw_args
-                        .as_ref()
-                        .and_then(|args| args.get(slot_idx).copied())
-                        .unwrap_or(JsValue::undefined());
+                    let (arg, param_env_opt, name_opt) = {
+                        let frame = self.frames.last_mut().unwrap();
+                        let slot_idx = slot as usize;
+                        let arg = frame
+                            .raw_args
+                            .as_ref()
+                            .and_then(|args| args.get(slot_idx).copied())
+                            .unwrap_or(JsValue::undefined());
+                        if !arg.is_undefined() {
+                            frame.locals[slot_idx] = arg;
+                            (arg, frame.param_env_obj, frame.local_names.get(slot_idx).cloned())
+                        } else {
+                            (JsValue::undefined(), None, None)
+                        }
+                    };
                     if !arg.is_undefined() {
-                        frame.locals[slot_idx] = arg;
+                        if let (Some(param_env), Some(name)) = (param_env_opt, name_opt) {
+                            if !name.starts_with('@') && !name.starts_with('[') && !name.starts_with('{') {
+                                self.set_property(param_env, &name, arg);
+                            }
+                        }
+                        let frame = self.frames.last_mut().unwrap();
                         frame.ip = target as usize;
                     }
                 }
@@ -954,6 +1313,17 @@ impl Vm {
                         self.set_property_non_writable(scope_obj, &name);
                     }
                 }
+                OpCode::StoreScopeBinding(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Binding name must be string".into())),
+                    };
+                    let val = self.pop()?;
+                    let frame = self.frames.last().unwrap();
+                    if let Some(&scope_obj) = frame.scopes.last() {
+                        self.set_own_property(scope_obj, &name, val);
+                    }
+                }
                 OpCode::EnterFunctionBody => {
                     let frame = self.frames.last_mut().unwrap();
                     frame.in_param_init = false;
@@ -1007,6 +1377,85 @@ impl Vm {
                         return Ok(v);
                     }
                 }
+                OpCode::TouchBinding(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.as_str(),
+                        _ => return Err(VmError::TypeError("Binding name must be string".into())),
+                    };
+                    self.touch_identifier_reference(name)?;
+                }
+                OpCode::ThrowConstAssignment(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.as_str(),
+                        _ => "variable",
+                    };
+                    self.handle_exception_at_depth(
+                        VmError::TypeError(format!("Assignment to constant variable '{}'", name)),
+                        target_depth,
+                    )?;
+                    continue;
+                }
+                OpCode::CheckLRefStrict(name_idx) => {
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.as_str(),
+                        _ => return Err(VmError::TypeError("Binding name must be string".into())),
+                    };
+                    let resolvable = self.is_identifier_resolvable(name)?;
+                    self.push(JsValue::from_boolean(resolvable));
+                }
+                OpCode::SetGlobalStrictResolved(name_idx) => {
+                    let val = self.pop()?;
+                    let is_resolvable = self.pop()?.as_boolean().unwrap_or(false);
+                    let name = match &chunk.constants[name_idx as usize] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("Binding name must be string".into())),
+                    };
+                    if !is_resolvable {
+                        self.handle_exception_at_depth(
+                            VmError::ReferenceError(format!("Assignment to undeclared variable {}", name)),
+                            target_depth,
+                        )?;
+                        continue;
+                    }
+                    if let Some(target_opt) = self.touched_targets.remove(&name) {
+                        if let Some(target_scope) = target_opt {
+                            let still_exists = match self.has_property(target_scope, &name) {
+                                Ok(h) => h,
+                                Err(e) => {
+                                    self.handle_exception_at_depth(e, target_depth)?;
+                                    continue;
+                                }
+                            };
+                            let is_strict = self.is_strict
+                                || self.frames.last().map(|f| f.is_strict).unwrap_or(false);
+                            if !still_exists && is_strict {
+                                self.handle_exception_at_depth(
+                                    VmError::ReferenceError(format!("{} is not defined", name)),
+                                    target_depth,
+                                )?;
+                                continue;
+                            }
+                            self.push(val);
+                            if let Err(e) = self.set_property_result(target_scope, &name, val) {
+                                self.handle_exception_at_depth(e, target_depth)?;
+                            }
+                            for f in &mut self.frames {
+                                if f.env_obj == Some(target_scope) {
+                                    for (i, l_name) in f.local_names.iter().enumerate() {
+                                        if l_name == &name && i < f.locals.len() {
+                                            f.locals[i] = val;
+                                        }
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                    self.push(val);
+                    if let Some(v) = self.op_set_global(name_idx, &chunk, target_depth)? {
+                        return Ok(v);
+                    }
+                }
 
                 OpCode::Pop => {
                     self.pop()?;
@@ -1014,6 +1463,17 @@ impl Vm {
                 OpCode::Dup => {
                     let val = *self.peek()?;
                     self.push(val);
+                }
+                OpCode::SetMethodHomeObject => {
+                    let func_val = self.pop()?;
+                    let home_obj = self.pop()?;
+                    if let Some(f_ptr) = func_val.as_object_ptr() {
+                        let f_obj = unsafe { &mut *(f_ptr as *mut JsObject) };
+                        if let ObjectKind::Function(ref mut f) = f_obj.kind {
+                            f.home_object = Some(home_obj);
+                        }
+                    }
+                    self.push(func_val);
                 }
                 OpCode::Halt => {
                     let finished = self.frames.pop().unwrap();
@@ -1029,6 +1489,35 @@ impl Vm {
         }
 
         Ok(self.pop().unwrap_or_default())
+    }
+
+    pub(crate) fn current_class_brand(&self) -> Option<JsValue> {
+        self.frames.iter().rev().find_map(|f| f.home_object.or(f.callee_val))
+    }
+
+    pub(crate) fn check_private_brand(&mut self, brand: JsValue) -> bool {
+        let caller_brand = self.current_class_brand();
+        let Some(home) = caller_brand else { return false; };
+        if home == brand {
+            return true;
+        }
+        if let Some(f_ptr) = home.as_object_ptr() {
+            let f_obj = unsafe { &*(f_ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref f) = f_obj.kind {
+                if f.prototype == Some(brand) || f.home_object == Some(brand) {
+                    return true;
+                }
+            }
+        }
+        if let Some(b_ptr) = brand.as_object_ptr() {
+            let b_obj = unsafe { &*(b_ptr as *mut JsObject) };
+            if let ObjectKind::Function(ref f) = b_obj.kind {
+                if f.prototype == Some(home) || f.home_object == Some(home) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 

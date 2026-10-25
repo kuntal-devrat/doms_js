@@ -78,6 +78,9 @@ impl Compiler {
             Expression::ArrowExpr { params, body } => {
                 self.compile_arrow_expr(params, body)?;
             }
+            Expression::AsyncArrowExpr { params, body } => {
+                self.compile_async_arrow_expr(params, body)?;
+            }
             Expression::MethodExpr { name, params, body } => {
                 self.compile_method_expr(name, params, body)?;
             }
@@ -163,9 +166,27 @@ impl Compiler {
             }
             Expression::DefineField { target, property, value } => {
                 self.compile_expression(target)?;
+                self.chunk.emit(OpCode::EnterFieldInit, 0);
                 self.compile_expression(value)?;
+                self.chunk.emit(OpCode::LeaveFieldInit, 0);
                 let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
                 self.chunk.emit(OpCode::DefinePrivateField(prop_idx), 0);
+            }
+            Expression::DefineDataProperty { target, property, value } => {
+                self.compile_expression(target)?;
+                self.chunk.emit(OpCode::EnterFieldInit, 0);
+                self.compile_expression(value)?;
+                self.chunk.emit(OpCode::LeaveFieldInit, 0);
+                let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                self.chunk.emit(OpCode::DefineDataProp(prop_idx), 0);
+            }
+            Expression::DefineComputedDataProperty { target, key, value } => {
+                self.compile_expression(target)?;
+                self.compile_expression(key)?;
+                self.chunk.emit(OpCode::EnterFieldInit, 0);
+                self.compile_expression(value)?;
+                self.chunk.emit(OpCode::LeaveFieldInit, 0);
+                self.chunk.emit(OpCode::DefineDataPropComputed, 0);
             }
             Expression::DefinePrivateMethod { target, property, value } => {
                 self.compile_expression(target)?;
@@ -188,6 +209,11 @@ impl Compiler {
             }
             Expression::TaggedTemplate { tag, quasis, raw_quasis, exprs } => {
                 self.compile_tagged_template(tag, quasis, raw_quasis, exprs)?;
+            }
+            Expression::TouchBinding(name) => {
+                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit(OpCode::TouchBinding(name_idx), 0);
+                self.chunk.emit(OpCode::LoadUndefined, 0);
             }
         }
         Ok(())

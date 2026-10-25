@@ -189,6 +189,10 @@ pub enum Expression {
         params: Vec<String>,
         body: Vec<Statement>,
     },
+    AsyncArrowExpr {
+        params: Vec<String>,
+        body: Vec<Statement>,
+    },
     MethodExpr {
         name: Option<String>,
         params: Vec<String>,
@@ -222,6 +226,7 @@ pub enum Expression {
     },
     Grouping(Box<Expression>),
     Spread(Box<Expression>),
+    TouchBinding(String),
     PrivateIdentifier(String),
     ObjectRest {
         target: Box<Expression>,
@@ -234,6 +239,16 @@ pub enum Expression {
     DefineField {
         target: Box<Expression>,
         property: String,
+        value: Box<Expression>,
+    },
+    DefineDataProperty {
+        target: Box<Expression>,
+        property: String,
+        value: Box<Expression>,
+    },
+    DefineComputedDataProperty {
+        target: Box<Expression>,
+        key: Box<Expression>,
         value: Box<Expression>,
     },
     DefinePrivateAccessor {
@@ -347,6 +362,7 @@ pub struct ClassElement {
     pub is_static: bool,
     pub key: PropertyKey,
     pub kind: ClassElementKind,
+    pub computed_key_var: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

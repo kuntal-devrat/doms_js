@@ -377,8 +377,14 @@ impl Vm {
                 self.string_iterator_proto,
                 self.regexp_string_iterator_proto,
                 self.generator_proto,
+                self.generator_function_proto,
+                self.async_iterator_proto,
+                self.async_generator_proto,
+                self.async_generator_function_proto,
                 self.wrap_for_valid_iterator_proto,
                 self.iterator_helper_proto,
+                self.weak_ref_proto,
+                self.finalization_registry_proto,
                 self.current_new_target,
                 self.symbol_iterator,
                 self.symbol_async_iterator,
@@ -430,6 +436,9 @@ impl Vm {
                 if let Some(env) = frame.env_obj {
                     mark!(env);
                 }
+                if let Some(penv) = frame.param_env_obj {
+                    mark!(penv);
+                }
                 if let Some(args_val) = frame.arguments {
                     mark!(args_val);
                 }
@@ -459,6 +468,9 @@ impl Vm {
                     }
                     if let Some(proto) = f.prototype {
                         mark!(proto);
+                    }
+                    for &b in &f.lexical_brands {
+                        mark!(b);
                     }
                 }
             }
@@ -665,8 +677,14 @@ impl Vm {
                 self.string_iterator_proto,
                 self.regexp_string_iterator_proto,
                 self.generator_proto,
+                self.generator_function_proto,
+                self.async_iterator_proto,
+                self.async_generator_proto,
+                self.async_generator_function_proto,
                 self.wrap_for_valid_iterator_proto,
                 self.iterator_helper_proto,
+                self.weak_ref_proto,
+                self.finalization_registry_proto,
                 self.current_new_target,
                 self.symbol_iterator,
                 self.symbol_async_iterator,

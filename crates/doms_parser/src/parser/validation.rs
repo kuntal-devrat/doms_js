@@ -25,7 +25,7 @@ impl<'a> Parser<'a> {
                     ))
                 }
             }
-            Statement::Labeled { body, .. } => self.check_sub_statement(body, allow_sloppy_func),
+            Statement::Labeled { body, .. } => self.check_sub_statement(body, false),
             _ => Ok(()),
         }
     }
@@ -33,6 +33,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn validate_block_declarations(
         &self,
         stmts: &[Statement],
+        is_function_body: bool,
     ) -> Result<(), ParseError> {
         let mut lex_names: Vec<(String, bool)> = Vec::new();
         for stmt in stmts {
@@ -76,8 +77,11 @@ impl<'a> Parser<'a> {
             for stmt in stmts {
                 Self::collect_var_declared_names(stmt, &mut var_names);
             }
-            for (lex, _) in &lex_names {
+            for (lex, is_plain_func) in &lex_names {
                 if var_names.contains(lex) {
+                    if is_function_body && !self.is_strict && *is_plain_func {
+                        continue;
+                    }
                     return Err(ParseError::General(format!(
                         "Identifier '{}' has already been declared",
                         lex
@@ -212,6 +216,7 @@ impl<'a> Parser<'a> {
         match expr {
             Expression::FunctionExpr { body, .. }
             | Expression::ArrowExpr { body, .. }
+            | Expression::AsyncArrowExpr { body, .. }
             | Expression::MethodExpr { body, .. }
             | Expression::AsyncFunctionExpr { body, .. }
             | Expression::GeneratorExpr { body, .. }

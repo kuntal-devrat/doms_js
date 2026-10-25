@@ -25,7 +25,7 @@ impl<'a> Parser<'a> {
             self.in_function = true;
             self.in_static_block = false;
             let body = if self.check(&TokenKind::LBrace) {
-                self.parse_function_body(&[s.clone()], None)?
+                self.parse_arrow_function_body(&[s.clone()])?
             } else {
                 let expr = self.parse_expression(1)?;
                 vec![Statement::Return(Some(expr))]

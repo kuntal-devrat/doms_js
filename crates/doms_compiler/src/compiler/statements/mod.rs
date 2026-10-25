@@ -121,11 +121,16 @@ impl Compiler {
                 self.chunk.emit(OpCode::Return, 0);
             }
             Statement::FunctionDecl { name, params, body } => {
-                let def = Self::compile_function(
+                let def = Self::compile_function_full(
                     Some(name.clone()),
                     params.clone(),
                     body,
                     self.is_strict,
+                    false,
+                    false,
+                    false,
+                    self.chunk.imported_bindings.clone(),
+                    self.chunk.export_aliases.clone(),
                 )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
@@ -148,11 +153,16 @@ impl Compiler {
                 }
             }
             Statement::AsyncFunctionDecl { name, params, body } => {
-                let def = Self::compile_function(
+                let def = Self::compile_function_full(
                     Some(name.clone()),
                     params.clone(),
                     body,
                     self.is_strict,
+                    false,
+                    false,
+                    false,
+                    self.chunk.imported_bindings.clone(),
+                    self.chunk.export_aliases.clone(),
                 )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateAsyncFunction(const_idx), 0);
@@ -183,6 +193,8 @@ impl Compiler {
                     true,
                     false,
                     false,
+                    self.chunk.imported_bindings.clone(),
+                    self.chunk.export_aliases.clone(),
                 )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateGenerator(const_idx), 0);
@@ -213,6 +225,8 @@ impl Compiler {
                     true,
                     false,
                     false,
+                    self.chunk.imported_bindings.clone(),
+                    self.chunk.export_aliases.clone(),
                 )?;
                 let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
                 self.chunk.emit(OpCode::CreateAsyncGenerator(const_idx), 0);
@@ -249,6 +263,10 @@ impl Compiler {
                     return Err(CompileError::General(
                         "Strict mode code may not include a with statement".to_string(),
                     ));
+                }
+                if !self.is_in_function && !self.internal_statements {
+                    self.chunk.emit(OpCode::Pop, 0);
+                    self.chunk.emit(OpCode::LoadUndefined, 0);
                 }
                 self.compile_expression(object)?;
                 self.chunk.emit(OpCode::RequireObjectCoercible, 0);

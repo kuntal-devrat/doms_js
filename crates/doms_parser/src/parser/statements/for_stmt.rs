@@ -33,19 +33,25 @@ impl<'a> Parser<'a> {
         };
         self.expect(TokenKind::LParen)?;
 
-        if !is_await
-            && self.check(&TokenKind::Async)
-            && matches!(&self.peeked.kind, TokenKind::Ident(s) if s == "of")
-            && !self.peeked.has_escape
-        {
-            return Err(ParseError::UnexpectedToken(
-                TokenKind::Ident("async".into()),
-                self.current.line,
-                self.current.col,
-            ));
-        }
+        let is_let_decl = if self.check(&TokenKind::Let) {
+            if self.is_strict {
+                true
+            } else {
+                matches!(
+                    self.peeked.kind,
+                    TokenKind::Ident(_)
+                        | TokenKind::LBracket
+                        | TokenKind::LBrace
+                        | TokenKind::Undefined
+                        | TokenKind::Yield
+                        | TokenKind::Await
+                )
+            }
+        } else {
+            false
+        };
 
-        if self.check(&TokenKind::Let)
+        if is_let_decl
             || self.check(&TokenKind::Const)
             || self.check(&TokenKind::Var)
         {
@@ -387,6 +393,7 @@ impl<'a> Parser<'a> {
             }
             None
         } else {
+            let starts_with_async_token = self.check(&TokenKind::Async);
             let old_in = self.allow_in;
             self.allow_in = false;
             let expr_res = self.parse_expression(0);
@@ -432,6 +439,22 @@ impl<'a> Parser<'a> {
                 };
             }
             if self.check_ident("of") {
+                if let Expression::Identifier(ref n) = expr {
+                    if !is_await && n == "async" && starts_with_async_token {
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Ident("async".into()),
+                            self.current.line,
+                            self.current.col,
+                        ));
+                    }
+                    if n == "let" {
+                        return Err(ParseError::UnexpectedToken(
+                            TokenKind::Let,
+                            self.current.line,
+                            self.current.col,
+                        ));
+                    }
+                }
                 self.advance()?; // of
                 self.validate_assignment_pattern(&expr)?;
                 let right = self.parse_expression(1)?;

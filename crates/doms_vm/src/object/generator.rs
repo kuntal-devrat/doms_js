@@ -47,5 +47,7 @@ pub struct JsGenerator {
     pub this_val: JsValue,
     pub arguments: Option<JsValue>,
     pub mapped_arguments: Option<Vec<bool>>,
+    pub raw_args: Option<Vec<JsValue>>,
+    pub callee_val: Option<JsValue>,
     pub async_queue: Vec<AsyncGenRequest>,
 }

@@ -32,6 +32,9 @@ pub fn define_property_internal(
     prop_key: PropertyKeyVal,
     desc: JsValue,
 ) -> Result<JsValue, VmError> {
+    if Some(target) == vm.array_proto || Some(target) == vm.object_proto {
+        vm.array_proto_tainted = true;
+    }
     // 1. ToPropertyDescriptor(desc) per ECMAScript 6.2.6.5
     let has_enum = vm.has_property(desc, "enumerable")?;
     let enum_val =

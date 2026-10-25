@@ -3,6 +3,7 @@ use super::scope_analysis::{collect_lexical_names, collect_var_names, is_param_d
 use crate::bytecode::{Constant, FunctionDef, OpCode};
 use crate::compiler::CompileError;
 use doms_parser::ast::*;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 impl Compiler {
@@ -12,7 +13,17 @@ impl Compiler {
         body: &[Statement],
         outer_is_strict: bool,
     ) -> Result<FunctionDef, CompileError> {
-        Self::compile_function_full(name, params, body, outer_is_strict, false, false, false)
+        Self::compile_function_full(
+            name,
+            params,
+            body,
+            outer_is_strict,
+            false,
+            false,
+            false,
+            HashSet::new(),
+            HashMap::new(),
+        )
     }
 
     pub fn compile_function_full(
@@ -23,6 +34,8 @@ impl Compiler {
         is_generator: bool,
         is_arrow: bool,
         is_method: bool,
+        imported_bindings: HashSet<String>,
+        export_aliases: HashMap<String, Vec<String>>,
     ) -> Result<FunctionDef, CompileError> {
         Self::compile_function_internal(
             name,
@@ -34,6 +47,8 @@ impl Compiler {
             is_method,
             false,
             false,
+            imported_bindings,
+            export_aliases,
         )
     }
 
@@ -42,10 +57,67 @@ impl Compiler {
         params: Vec<String>,
         body: &[Statement],
         is_derived: bool,
+        imported_bindings: HashSet<String>,
+        export_aliases: HashMap<String, Vec<String>>,
     ) -> Result<FunctionDef, CompileError> {
         Self::compile_function_internal(
-            name, params, body, true, false, false, false, true, is_derived,
+            name,
+            params,
+            body,
+            true,
+            false,
+            false,
+            false,
+            true,
+            is_derived,
+            imported_bindings,
+            export_aliases,
         )
+    }
+
+    pub fn compile_derived_default_constructor(
+        name: Option<String>,
+        body: &[Statement],
+        imported_bindings: HashSet<String>,
+        export_aliases: HashMap<String, Vec<String>>,
+    ) -> Result<FunctionDef, CompileError> {
+        let mut compiler = Compiler::new();
+        compiler.is_strict = true;
+        compiler.is_in_function = true;
+        compiler.chunk.imported_bindings = imported_bindings;
+        compiler.chunk.export_aliases = export_aliases;
+        compiler.symbols.enter_scope();
+
+        compiler.chunk.emit(OpCode::SuperCallForward, 0);
+
+        let total = body.len();
+        for (i, stmt) in body.iter().enumerate() {
+            let is_last = i == total - 1;
+            compiler.compile_statement(stmt, is_last)?;
+        }
+
+        compiler.chunk.emit(OpCode::LoadUndefined, 0);
+        compiler.chunk.emit(OpCode::Return, 0);
+
+        let local_names_arc = std::sync::Arc::new(compiler.symbols.all_local_names);
+        compiler.chunk.local_names = std::sync::Arc::clone(&local_names_arc);
+
+        Ok(FunctionDef {
+            name,
+            params: Vec::new(),
+            length: 0,
+            self_slot: None,
+            local_names: local_names_arc,
+            lexical_local_names: Arc::new(Vec::new()),
+            chunk: compiler.chunk,
+            is_strict: true,
+            has_param_exprs: false,
+            is_generator: false,
+            is_arrow: false,
+            is_method: false,
+            is_class_constructor: true,
+            is_derived_constructor: true,
+        })
     }
 
     pub fn compile_function_internal(
@@ -58,6 +130,8 @@ impl Compiler {
         is_method: bool,
         is_class_constructor: bool,
         is_derived_constructor: bool,
+        imported_bindings: HashSet<String>,
+        export_aliases: HashMap<String, Vec<String>>,
     ) -> Result<FunctionDef, CompileError> {
         let has_directive = body.iter()
             .take_while(|s| matches!(s, Statement::Expression(Expression::Literal(Literal::String { .. }))))
@@ -67,6 +141,8 @@ impl Compiler {
         let mut compiler = Compiler::new();
         compiler.is_strict = is_strict;
         compiler.is_in_function = true;
+        compiler.chunk.imported_bindings = imported_bindings;
+        compiler.chunk.export_aliases = export_aliases;
         compiler.symbols.enter_scope();
         for p in &params {
             let local_name =
@@ -179,6 +255,13 @@ impl Compiler {
         // Default return undefined
         compiler.chunk.emit(OpCode::LoadUndefined, 0);
         compiler.chunk.emit(OpCode::Return, 0);
+        let mut is_top = vec![false; compiler.symbols.all_local_names.len()];
+        for local in &compiler.symbols.locals {
+            if (local.slot as usize) < is_top.len() {
+                is_top[local.slot as usize] = true;
+            }
+        }
+        compiler.chunk.is_top_local = std::sync::Arc::new(is_top);
         let local_names_arc = std::sync::Arc::new(compiler.symbols.all_local_names);
         let lexical_local_names_arc = std::sync::Arc::new(lexical_local_names);
         compiler.chunk.local_names = std::sync::Arc::clone(&local_names_arc);

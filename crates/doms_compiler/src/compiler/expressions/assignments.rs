@@ -19,6 +19,42 @@ impl Compiler {
             None
         };
 
+        if self.symbols.is_const(target) {
+            self.compile_expression(value)?;
+            self.chunk.emit(OpCode::Pop, 0);
+            let name_idx = self.chunk.add_constant(Constant::String(target.to_string()));
+            self.chunk.emit(OpCode::ThrowConstAssignment(name_idx), 0);
+            return Ok(());
+        }
+
+        let is_local = if self.with_depth == 0 && !self.shadowed_class_names.iter().any(|s| s == target) {
+            if let Some(slot) = self.symbols.resolve_local(target) {
+                if Some(slot) != self.self_slot {
+                    Some(slot)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let with_assign = self.with_depth > 0 && !target.starts_with('@');
+        let check_strict_lref = self.is_strict && is_local.is_none() && !target.starts_with('@');
+        let name_idx = if check_strict_lref || is_local.is_none() || with_assign {
+            self.chunk.add_constant(Constant::String(target.to_string()))
+        } else {
+            0
+        };
+
+        if with_assign {
+            self.chunk.emit(OpCode::TouchBinding(name_idx), 0);
+        } else if check_strict_lref {
+            self.chunk.emit(OpCode::CheckLRefStrict(name_idx), 0);
+        }
+
         match value {
             Expression::Conditional { condition, then_expr, else_expr }
                 if inferred_name.is_some() =>
@@ -44,21 +80,35 @@ impl Compiler {
                 }
             }
         }
-        self.chunk.emit(OpCode::Dup, 0);
-        if self.with_depth == 0 && !self.shadowed_class_names.iter().any(|s| s == target) {
-            if let Some(slot) = self.symbols.resolve_local(target) {
-                if Some(slot) == self.self_slot {
-                    let name_idx = self.chunk.add_constant(Constant::String(target.to_string()));
-                    self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
-                    self.chunk.emit(OpCode::Pop, 0);
-                    return Ok(());
-                }
-                self.chunk.emit(OpCode::SetLocal(slot), 0);
-                self.chunk.emit(OpCode::Pop, 0);
-                return Ok(());
+        if let Some(slot) = is_local {
+            self.chunk.emit(OpCode::Dup, 0);
+            self.chunk.emit(OpCode::SetLocal(slot), 0);
+            if self.chunk.export_names.iter().any(|e| e == target) {
+                self.chunk.emit(OpCode::Dup, 0);
+                let exp_idx = self.chunk.add_constant(Constant::String(target.to_string()));
+                self.chunk.emit(OpCode::Export(exp_idx), 0);
             }
+            if let Some(aliases) = self.chunk.export_aliases.get(target).cloned() {
+                for alias in aliases {
+                    self.chunk.emit(OpCode::Dup, 0);
+                    let exp_idx = self.chunk.add_constant(Constant::String(alias));
+                    self.chunk.emit(OpCode::Export(exp_idx), 0);
+                }
+            }
+            self.chunk.emit(OpCode::Pop, 0);
+            return Ok(());
         }
-        let name_idx = self.chunk.add_constant(Constant::String(target.to_string()));
+        if with_assign {
+            self.chunk.emit(OpCode::Dup, 0);
+            self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
+            self.chunk.emit(OpCode::Pop, 0);
+            return Ok(());
+        }
+        if check_strict_lref {
+            self.chunk.emit(OpCode::SetGlobalStrictResolved(name_idx), 0);
+            return Ok(());
+        }
+        self.chunk.emit(OpCode::Dup, 0);
         self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
         self.chunk.emit(OpCode::Pop, 0);
         Ok(())
@@ -111,6 +161,24 @@ impl Compiler {
         let delta_is_pos = *op == UpdateOp::Inc;
         match unwrap_grouping(expr) {
             Expression::Identifier(name) => {
+                if self.symbols.is_const(name) {
+                    if self.with_depth == 0 {
+                        if let Some(slot) = self.symbols.resolve_local(name) {
+                            self.chunk.emit(OpCode::GetLocal(slot), 0);
+                        } else {
+                            let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                            self.chunk.emit(OpCode::GetGlobal(name_idx), 0);
+                        }
+                    } else {
+                        let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                        self.chunk.emit(OpCode::GetGlobal(name_idx), 0);
+                    }
+                    self.chunk.emit(OpCode::Pop, 0);
+                    let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                    self.chunk.emit(OpCode::ThrowConstAssignment(name_idx), 0);
+                    return Ok(());
+                }
+
                 if self.with_depth == 0 {
                     if let Some(slot) = self.symbols.resolve_local(name) {
                         self.chunk.emit(OpCode::GetLocal(slot), 0);
@@ -120,6 +188,7 @@ impl Compiler {
                     }
                 } else {
                     let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                    self.chunk.emit(OpCode::TouchBinding(name_idx), 0);
                     self.chunk.emit(OpCode::GetGlobal(name_idx), 0);
                 }
 
@@ -141,7 +210,7 @@ impl Compiler {
                         }
                     } else {
                         let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                        self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                        self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
                         self.chunk.emit(OpCode::Pop, 0);
                     }
                 } else {
@@ -163,7 +232,7 @@ impl Compiler {
                         }
                     } else {
                         let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                        self.chunk.emit(OpCode::SetGlobal(name_idx), 0);
+                        self.chunk.emit(OpCode::SetGlobalDirect(name_idx), 0);
                         self.chunk.emit(OpCode::Pop, 0);
                     }
                 }

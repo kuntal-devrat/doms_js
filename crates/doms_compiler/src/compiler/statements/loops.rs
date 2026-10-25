@@ -103,6 +103,36 @@ impl Compiler {
             self.chunk.emit(OpCode::LoadUndefined, 0);
         }
 
+        let base_scope_depth = self.block_scope_depth;
+        let per_iteration_names = if let Some(init_stmt) = init {
+            match init_stmt.as_ref() {
+                Statement::VarDecl { kind, declarations } if *kind != VarKind::Var => {
+                    declarations
+                        .iter()
+                        .filter(|d| !d.name.starts_with('@') && !d.name.starts_with("__"))
+                        .map(|d| d.name.clone())
+                        .collect::<Vec<_>>()
+                }
+                _ => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        let has_per_iter = !per_iteration_names.is_empty();
+
+        if has_per_iter {
+            self.chunk.emit(OpCode::CreateObject, 0);
+            for name in &per_iteration_names {
+                self.chunk.emit(OpCode::Dup, 0);
+                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit(OpCode::LoadConst(name_idx), 0);
+                self.chunk.emit(OpCode::LoadUninitialized, 0);
+                self.chunk.emit(OpCode::SetElem, 0);
+                self.chunk.emit(OpCode::Pop, 0);
+            }
+            self.emit_push_scope();
+        }
+
         self.symbols.enter_scope();
         if let Some(init_stmt) = init {
             match init_stmt.as_ref() {
@@ -114,6 +144,19 @@ impl Compiler {
                     self.compile_statement(init_stmt, false)?;
                 }
             }
+        }
+
+        if has_per_iter {
+            self.chunk.emit(OpCode::CreateObject, 0);
+            for name in &per_iteration_names {
+                self.chunk.emit(OpCode::Dup, 0);
+                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit(OpCode::LoadConst(name_idx), 0);
+                self.chunk.emit(OpCode::GetGlobal(name_idx), 0);
+                self.chunk.emit(OpCode::SetElem, 0);
+                self.chunk.emit(OpCode::Pop, 0);
+            }
+            self.emit_push_scope();
         }
 
         let loop_start = self.chunk.instructions.len() as i32;
@@ -128,7 +171,7 @@ impl Compiler {
         self.break_targets.push(TargetScope {
             labels: loop_labels.clone(),
             jumps: Vec::new(),
-            scope_depth: self.block_scope_depth,
+            scope_depth: base_scope_depth,
             iter_slot: None,
             is_async_iter: false,
             break_depth: bd,
@@ -147,6 +190,20 @@ impl Compiler {
         self.compile_statement(body, false)?;
 
         let update_start = self.chunk.instructions.len() as i32;
+        if has_per_iter {
+            self.chunk.emit(OpCode::CreateObject, 0);
+            for name in &per_iteration_names {
+                self.chunk.emit(OpCode::Dup, 0);
+                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit(OpCode::LoadConst(name_idx), 0);
+                self.chunk.emit(OpCode::GetGlobal(name_idx), 0);
+                self.chunk.emit(OpCode::SetElem, 0);
+                self.chunk.emit(OpCode::Pop, 0);
+            }
+            self.emit_pop_scope();
+            self.emit_push_scope();
+        }
+
         if let Some(up_expr) = update {
             self.compile_expression(up_expr)?;
             self.chunk.emit(OpCode::Pop, 0);
@@ -169,6 +226,10 @@ impl Compiler {
             self.chunk.patch_jump(b, exit_target);
         }
 
+        if has_per_iter {
+            self.emit_pop_scope();
+            self.emit_pop_scope();
+        }
         self.symbols.exit_scope();
         Ok(())
     }
@@ -250,7 +311,12 @@ impl Compiler {
         } else if !is_lex {
             self.symbols.resolve_local(left)
         } else {
-            None
+            let slot = if *var_kind == Some(VarKind::Const) {
+                self.symbols.define_const(left.to_string())
+            } else {
+                self.symbols.define_local_lexical(left.to_string())
+            };
+            Some(slot)
         };
 
         let tdz_names = collect_for_lexical_names(var_kind, left, body);
@@ -266,13 +332,22 @@ impl Compiler {
                 self.chunk.emit(OpCode::Pop, 0);
             }
             self.emit_push_scope();
+            self.tdz_names.extend(tdz_names.iter().map(|s| s.to_string()));
         }
 
         self.compile_expression(right)?;
 
         if has_tdz {
+            for _ in &tdz_names {
+                self.tdz_names.pop();
+            }
             self.emit_pop_scope();
         }
+        let target_slot =
+            self.symbols.define_local(format!("@target_{}", self.chunk.instructions.len()));
+        self.chunk.emit(OpCode::Dup, 0);
+        self.chunk.emit(OpCode::SetLocal(target_slot), 0);
+        self.chunk.emit(OpCode::Pop, 0);
         self.chunk.emit(OpCode::GetKeys, 0);
         let keys_slot =
             self.symbols.define_local(format!("@keys_{}", self.chunk.instructions.len()));
@@ -294,6 +369,13 @@ impl Compiler {
         self.chunk.emit(OpCode::Lt, 0);
         let jump_exit_idx = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
 
+        self.chunk.emit(OpCode::GetLocal(keys_slot), 0);
+        self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+        self.chunk.emit(OpCode::GetElem, 0);
+        self.chunk.emit(OpCode::GetLocal(target_slot), 0);
+        self.chunk.emit(OpCode::In, 0);
+        let skip_jump_idx = self.chunk.emit(OpCode::JumpIfFalse(0), 0);
+
         if is_lex {
             self.chunk.emit(OpCode::CreateObject, 0);
             self.chunk.emit(OpCode::Dup, 0);
@@ -305,6 +387,13 @@ impl Compiler {
             self.chunk.emit(OpCode::SetElem, 0);
             self.chunk.emit(OpCode::Pop, 0);
             self.emit_push_scope();
+            if let Some(slot) = self.symbols.resolve_local(left) {
+                self.chunk.emit(OpCode::GetLocal(keys_slot), 0);
+                self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
+                self.chunk.emit(OpCode::GetElem, 0);
+                self.chunk.emit(OpCode::SetLocal(slot), 0);
+                self.chunk.emit(OpCode::Pop, 0);
+            }
         } else {
             self.chunk.emit(OpCode::GetLocal(keys_slot), 0);
             self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
@@ -347,6 +436,8 @@ impl Compiler {
         if is_lex {
             self.emit_pop_scope();
         }
+        let update_start_no_pop = self.chunk.instructions.len() as i32;
+        self.chunk.patch_jump(skip_jump_idx, update_start_no_pop);
         self.chunk.emit(OpCode::GetLocal(idx_slot), 0);
         let one_idx = self.chunk.add_constant(Constant::Number(1.0));
         self.chunk.emit(OpCode::LoadConst(one_idx), 0);
@@ -401,7 +492,12 @@ impl Compiler {
         } else if !is_lex {
             self.symbols.resolve_local(left)
         } else {
-            None
+            let slot = if *var_kind == Some(VarKind::Const) {
+                self.symbols.define_const(left.to_string())
+            } else {
+                self.symbols.define_local_lexical(left.to_string())
+            };
+            Some(slot)
         };
 
         let tdz_names = collect_for_lexical_names(var_kind, left, body);
@@ -417,11 +513,15 @@ impl Compiler {
                 self.chunk.emit(OpCode::Pop, 0);
             }
             self.emit_push_scope();
+            self.tdz_names.extend(tdz_names.iter().map(|s| s.to_string()));
         }
 
         self.compile_expression(right)?;
 
         if has_tdz {
+            for _ in &tdz_names {
+                self.tdz_names.pop();
+            }
             self.emit_pop_scope();
         }
         if is_await {
@@ -479,6 +579,11 @@ impl Compiler {
             self.chunk.emit(OpCode::SetElem, 0);
             self.chunk.emit(OpCode::Pop, 0);
             self.emit_push_scope();
+            if let Some(slot) = self.symbols.resolve_local(left) {
+                self.chunk.emit(OpCode::GetLocal(val_slot), 0);
+                self.chunk.emit(OpCode::SetLocal(slot), 0);
+                self.chunk.emit(OpCode::Pop, 0);
+            }
         } else {
             if let Some(slot) = local_slot {
                 self.chunk.emit(OpCode::SetLocal(slot), 0);

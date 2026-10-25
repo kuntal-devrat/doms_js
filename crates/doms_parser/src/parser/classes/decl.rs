@@ -29,7 +29,7 @@ impl<'a> Parser<'a> {
         }
         let super_class = if self.match_token(&TokenKind::Extends)? {
             let expr = self.parse_expression(1)?;
-            if matches!(&expr, Expression::ArrowExpr { .. }) {
+            if matches!(&expr, Expression::ArrowExpr { .. } | Expression::AsyncArrowExpr { .. }) {
                 return Err(ParseError::UnexpectedToken(
                     TokenKind::FatArrow,
                     self.current.line,

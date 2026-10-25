@@ -6,8 +6,7 @@ impl Vm {
             if current_frame.in_param_init {
                 return current_frame.scopes.clone();
             }
-            let has = current_frame.is_function
-                && (!current_frame.local_names.is_empty() || current_frame.arguments.is_some());
+            let has = !current_frame.local_names.is_empty() || current_frame.arguments.is_some();
             (has, current_frame.upvalues_count)
         } else {
             return Vec::new();
@@ -29,6 +28,14 @@ impl Vm {
                     frame.env_obj = Some(env);
                 }
                 for (i, name) in local_names.iter().enumerate() {
+                    let is_top = self
+                        .frames
+                        .last()
+                        .and_then(|f| f.chunk.is_top_local.get(i).copied())
+                        .unwrap_or(true);
+                    if !is_top {
+                        continue;
+                    }
                     let cur_env = self.temp_roots[prev_temp];
                     let val = self
                         .frames

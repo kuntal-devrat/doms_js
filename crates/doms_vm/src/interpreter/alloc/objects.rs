@@ -192,7 +192,28 @@ impl Vm {
         res
     }
     pub fn alloc_generator(&mut self, generator: JsGenerator) -> JsValue {
-        let proto = self.generator_proto.or(self.iterator_proto);
+        let is_async = generator.function.is_async;
+        let default_proto = if is_async {
+            self.async_generator_proto.or(self.generator_proto).or(self.iterator_proto)
+        } else {
+            self.generator_proto.or(self.iterator_proto)
+        };
+        let proto = if let Some(callee) = generator.callee_val {
+            let p = self.get_property(callee, "prototype");
+            if p.is_object() {
+                Some(p)
+            } else {
+                default_proto
+            }
+        } else if let Some(p) = generator.function.prototype {
+            if p.is_object() {
+                Some(p)
+            } else {
+                default_proto
+            }
+        } else {
+            default_proto
+        };
         let obj = JsObject::new_generator(ShapeRegistry::ROOT_SHAPE_ID, proto, generator);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }

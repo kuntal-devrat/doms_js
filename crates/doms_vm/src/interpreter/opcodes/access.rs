@@ -29,16 +29,69 @@ impl Vm {
                 let jsobj = unsafe { &*(ptr as *mut JsObject) };
                 if let Some(elem) = jsobj.get_private_element(&name).cloned() {
                     match elem {
-                        PrivateElement::Field(v) | PrivateElement::Method(v) => {
+                        PrivateElement::Field { value: v, brand } => {
+                            if let Some(brand_val) = brand {
+                                if !self.check_private_brand(brand_val) {
+                                    let err = VmError::TypeError(format!(
+                                        "Cannot read private member {} from an object whose class did not declare it",
+                                        name
+                                    ));
+                                    self.handle_exception_at_depth(err, target_depth)?;
+                                    return Ok(());
+                                }
+                            }
+                            self.push(v);
+                            return Ok(());
+                        }
+                        PrivateElement::Method(v) => {
+                            if let Some(v_ptr) = v.as_object_ptr() {
+                                let v_obj = unsafe { &*(v_ptr as *mut JsObject) };
+                                if let ObjectKind::Function(ref method_fn) = v_obj.kind {
+                                    if let Some(brand_obj) = method_fn.home_object {
+                                        if !self.check_private_brand(brand_obj) {
+                                            let err = VmError::TypeError(format!(
+                                                "Cannot read private member {} from an object whose class did not declare it",
+                                                name
+                                            ));
+                                            self.handle_exception_at_depth(err, target_depth)?;
+                                            return Ok(());
+                                        }
+                                    }
+                                }
+                            }
                             self.push(v);
                             return Ok(());
                         }
                         PrivateElement::Accessor(acc) => {
+                            let accessor_fn = acc.getter.or(acc.setter);
+                            if let Some(afn) = accessor_fn {
+                                if let Some(afn_ptr) = afn.as_object_ptr() {
+                                    let afn_obj = unsafe { &*(afn_ptr as *mut JsObject) };
+                                    if let ObjectKind::Function(ref f) = afn_obj.kind {
+                                        if let Some(brand_obj) = f.home_object {
+                                            if !self.check_private_brand(brand_obj) {
+                                                let err = VmError::TypeError(format!(
+                                                    "Cannot read private member {} from an object whose class did not declare it",
+                                                    name
+                                                ));
+                                                self.handle_exception_at_depth(err, target_depth)?;
+                                                return Ok(());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             if let Some(getter) = acc.getter {
-                                let val =
-                                    self.call(getter, obj, &[]).unwrap_or(JsValue::undefined());
-                                self.push(val);
-                                return Ok(());
+                                match self.call(getter, obj, &[]) {
+                                    Ok(val) => {
+                                        self.push(val);
+                                        return Ok(());
+                                    }
+                                    Err(err) => {
+                                        self.handle_exception_at_depth(err, target_depth)?;
+                                        return Ok(());
+                                    }
+                                }
                             } else {
                                 let err = VmError::TypeError(format!(
                                     "Cannot read private member {} which has no getter",
@@ -179,7 +232,17 @@ impl Vm {
                 let jsobj = unsafe { &mut *(ptr as *mut JsObject) };
                 if let Some(elem) = jsobj.get_private_element(name).cloned() {
                     match elem {
-                        PrivateElement::Field(_) => {
+                        PrivateElement::Field { brand, .. } => {
+                            if let Some(brand_val) = brand {
+                                if !self.check_private_brand(brand_val) {
+                                    let err = VmError::TypeError(format!(
+                                        "Cannot write private member {} to an object whose class did not declare it",
+                                        name
+                                    ));
+                                    self.handle_exception_at_depth(err, target_depth)?;
+                                    return Ok(());
+                                }
+                            }
                             jsobj.set_private_value(name, val);
                             self.push(val);
                             return Ok(());
@@ -193,6 +256,24 @@ impl Vm {
                             return Ok(());
                         }
                         PrivateElement::Accessor(acc) => {
+                            let accessor_fn = acc.setter.or(acc.getter);
+                            if let Some(afn) = accessor_fn {
+                                if let Some(afn_ptr) = afn.as_object_ptr() {
+                                    let afn_obj = unsafe { &*(afn_ptr as *mut JsObject) };
+                                    if let ObjectKind::Function(ref f) = afn_obj.kind {
+                                        if let Some(brand_obj) = f.home_object {
+                                            if !self.check_private_brand(brand_obj) {
+                                                let err = VmError::TypeError(format!(
+                                                    "Cannot write private member {} to an object whose class did not declare it",
+                                                    name
+                                                ));
+                                                self.handle_exception_at_depth(err, target_depth)?;
+                                                return Ok(());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             if let Some(setter) = acc.setter {
                                 if let Err(err) = self.call(setter, obj, &[val]) {
                                     self.handle_exception_at_depth(err, target_depth)?;
@@ -431,7 +512,8 @@ impl Vm {
                 if let ObjectKind::Array(elements) = &mut jsobj.kind {
                     let is_existing = idx < elements.len() && !elements[idx].is_hole();
                     let is_standard_proto =
-                        jsobj.prototype.is_none() || jsobj.prototype == self.array_proto;
+                        (jsobj.prototype.is_none() || jsobj.prototype == self.array_proto)
+                            && !self.array_proto_tainted;
                     if !has_elem_attrs
                         && (is_existing || is_standard_proto)
                         && idx < 65536

@@ -131,12 +131,12 @@ impl Vm {
         iter_obj
     }
     pub fn alloc_weak_ref(&mut self, target: JsValue) -> JsValue {
-        let obj = JsObject::new_weak_ref(ShapeRegistry::ROOT_SHAPE_ID, None, target);
+        let obj = JsObject::new_weak_ref(ShapeRegistry::ROOT_SHAPE_ID, self.weak_ref_proto, target);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }
     pub fn alloc_finalization_registry(&mut self, callback: JsValue) -> JsValue {
-        let obj = JsObject::new_finalization_registry(ShapeRegistry::ROOT_SHAPE_ID, None, callback);
+        let obj = JsObject::new_finalization_registry(ShapeRegistry::ROOT_SHAPE_ID, self.finalization_registry_proto, callback);
         let ptr = self.allocate_js_object(obj);
         unsafe { JsValue::from_object_ptr(ptr as *mut u8) }
     }

@@ -9,8 +9,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LParen)?;
         let object = self.parse_expression(0)?;
         self.expect(TokenKind::RParen)?;
-        let body = Box::new(self.parse_statement()?);
-        self.check_sub_statement(&body, false)?;
+        let body = Box::new(self.parse_sub_statement(false)?);
         Ok(Statement::With { object, body })
     }
 }

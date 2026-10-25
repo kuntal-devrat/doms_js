@@ -3,6 +3,49 @@
 use super::*;
 
 impl Vm {
+    pub(crate) fn capture_lexical_state(&self, is_arrow: bool) -> (Vec<JsValue>, bool) {
+        if let Some(frame) = self.frames.last() {
+            let mut brands = Vec::new();
+            if let Some(ref cf) = frame.callee_func {
+                brands.extend(cf.lexical_brands.iter().copied());
+            }
+            if let Some(h) = frame.home_object {
+                if !brands.contains(&h) {
+                    brands.push(h);
+                }
+            }
+            if frame.is_class_constructor {
+                if let Some(c) = frame.callee_val {
+                    if !brands.contains(&c) {
+                        brands.push(c);
+                    }
+                    if let Some(c_ptr) = c.as_object_ptr() {
+                        let c_obj = unsafe { &*(c_ptr as *mut JsObject) };
+                        if let ObjectKind::Function(ref f) = c_obj.kind {
+                            if let Some(proto) = f.prototype {
+                                if !brands.contains(&proto) {
+                                    brands.push(proto);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let in_field = if is_arrow {
+                frame.in_field_init
+                    || frame
+                        .callee_func
+                        .as_ref()
+                        .map_or(false, |func| func.lexical_in_field_init)
+            } else {
+                false
+            };
+            (brands, in_field)
+        } else {
+            (Vec::new(), false)
+        }
+    }
+
     pub(crate) fn op_create_function(
         &mut self,
         const_idx: u16,
@@ -15,12 +58,24 @@ impl Vm {
         let upvalues = self.capture_upvalues();
         let home_object =
             if def.is_arrow { self.frames.last().and_then(|f| f.home_object) } else { None };
-        let (lexical_this, lexical_new_target) = if def.is_arrow {
+        let (lexical_this, lexical_new_target, lexical_callee) = if def.is_arrow {
             let frame = self.frames.last();
-            (frame.map(|f| f.this_val), frame.and_then(|f| f.new_target))
+            (
+                frame.map(|f| f.this_val),
+                frame.and_then(|f| f.new_target),
+                frame.and_then(|f| {
+                    if f.is_arrow {
+                        f.callee_func.as_ref().and_then(|func| func.lexical_callee)
+                    } else {
+                        f.callee_val
+                    }
+                }),
+            )
         } else {
-            (None, None)
+            (None, None, None)
         };
+        let (lexical_brands, lexical_in_field_init) = self.capture_lexical_state(def.is_arrow);
+        let cur_mod = self.frames.last().and_then(|f| f.module).or(self.current_module_obj);
         let js_fn = JsFunction {
             name: def.name.clone(),
             params: def.params.clone(),
@@ -42,12 +97,26 @@ impl Vm {
             home_object,
             lexical_this,
             lexical_new_target,
+            lexical_callee,
             prototype: None,
             initial_shape: None,
             is_class_constructor: def.is_class_constructor,
             is_derived_constructor: def.is_derived_constructor,
+            module: cur_mod,
+            lexical_brands,
+            lexical_in_field_init,
         };
         let func_val = self.alloc_function(js_fn);
+        if def.is_class_constructor {
+            if let Some(f_ptr) = func_val.as_object_ptr() {
+                let f_obj = unsafe { &mut *(f_ptr as *mut JsObject) };
+                if let ObjectKind::Function(ref mut f) = f_obj.kind {
+                    if !f.lexical_brands.contains(&func_val) {
+                        f.lexical_brands.push(func_val);
+                    }
+                }
+            }
+        }
         self.push(func_val);
         Ok(())
     }
@@ -64,12 +133,23 @@ impl Vm {
         let upvalues = self.capture_upvalues();
         let home_object =
             if def.is_arrow { self.frames.last().and_then(|f| f.home_object) } else { None };
-        let (lexical_this, lexical_new_target) = if def.is_arrow {
+        let (lexical_this, lexical_new_target, lexical_callee) = if def.is_arrow {
             let frame = self.frames.last();
-            (frame.map(|f| f.this_val), frame.and_then(|f| f.new_target))
+            (
+                frame.map(|f| f.this_val),
+                frame.and_then(|f| f.new_target),
+                frame.and_then(|f| {
+                    if f.is_arrow {
+                        f.callee_func.as_ref().and_then(|func| func.lexical_callee)
+                    } else {
+                        f.callee_val
+                    }
+                }),
+            )
         } else {
-            (None, None)
+            (None, None, None)
         };
+        let cur_mod = self.frames.last().and_then(|f| f.module).or(self.current_module_obj);
         let js_fn = JsFunction {
             name: def.name.clone(),
             params: def.params.clone(),
@@ -91,10 +171,12 @@ impl Vm {
             home_object,
             lexical_this,
             lexical_new_target,
+            lexical_callee,
             prototype: None,
             initial_shape: None,
             is_class_constructor: false,
             is_derived_constructor: false,
+            module: cur_mod,
         };
         let func_val = self.alloc_function(js_fn);
         self.push(func_val);
@@ -113,12 +195,23 @@ impl Vm {
         let upvalues = self.capture_upvalues();
         let home_object =
             if def.is_arrow { self.frames.last().and_then(|f| f.home_object) } else { None };
-        let (lexical_this, lexical_new_target) = if def.is_arrow {
+        let (lexical_this, lexical_new_target, lexical_callee) = if def.is_arrow {
             let frame = self.frames.last();
-            (frame.map(|f| f.this_val), frame.and_then(|f| f.new_target))
+            (
+                frame.map(|f| f.this_val),
+                frame.and_then(|f| f.new_target),
+                frame.and_then(|f| {
+                    if f.is_arrow {
+                        f.callee_func.as_ref().and_then(|func| func.lexical_callee)
+                    } else {
+                        f.callee_val
+                    }
+                }),
+            )
         } else {
-            (None, None)
+            (None, None, None)
         };
+        let cur_mod = self.frames.last().and_then(|f| f.module).or(self.current_module_obj);
         let js_fn = JsFunction {
             name: def.name.clone(),
             params: def.params.clone(),
@@ -140,10 +233,12 @@ impl Vm {
             home_object,
             lexical_this,
             lexical_new_target,
+            lexical_callee,
             prototype: None,
             initial_shape: None,
             is_class_constructor: false,
             is_derived_constructor: false,
+            module: cur_mod,
         };
         let func_val = self.alloc_function(js_fn);
         self.push(func_val);
@@ -162,12 +257,23 @@ impl Vm {
         let upvalues = self.capture_upvalues();
         let home_object =
             if def.is_arrow { self.frames.last().and_then(|f| f.home_object) } else { None };
-        let (lexical_this, lexical_new_target) = if def.is_arrow {
+        let (lexical_this, lexical_new_target, lexical_callee) = if def.is_arrow {
             let frame = self.frames.last();
-            (frame.map(|f| f.this_val), frame.and_then(|f| f.new_target))
+            (
+                frame.map(|f| f.this_val),
+                frame.and_then(|f| f.new_target),
+                frame.and_then(|f| {
+                    if f.is_arrow {
+                        f.callee_func.as_ref().and_then(|func| func.lexical_callee)
+                    } else {
+                        f.callee_val
+                    }
+                }),
+            )
         } else {
-            (None, None)
+            (None, None, None)
         };
+        let cur_mod = self.frames.last().and_then(|f| f.module).or(self.current_module_obj);
         let js_fn = JsFunction {
             name: def.name.clone(),
             params: def.params.clone(),
@@ -189,10 +295,12 @@ impl Vm {
             home_object,
             lexical_this,
             lexical_new_target,
+            lexical_callee,
             prototype: None,
             initial_shape: None,
             is_class_constructor: false,
             is_derived_constructor: false,
+            module: cur_mod,
         };
         let func_val = self.alloc_function(js_fn);
         self.push(func_val);

@@ -24,8 +24,12 @@ pub struct JsFunction {
     pub home_object: Option<JsValue>,
     pub lexical_this: Option<JsValue>,
     pub lexical_new_target: Option<JsValue>,
+    pub lexical_callee: Option<JsValue>,
     pub prototype: Option<JsValue>,
     pub initial_shape: Option<ShapeId>,
     pub is_class_constructor: bool,
     pub is_derived_constructor: bool,
+    pub module: Option<JsValue>,
+    pub lexical_brands: Vec<JsValue>,
+    pub lexical_in_field_init: bool,
 }

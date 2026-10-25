@@ -7,6 +7,7 @@ pub struct Local {
     pub slot: u16,
     pub is_lexical: bool,
     pub is_declared: bool,
+    pub is_const: bool,
 }
 
 /// Information about a captured upvalue in lexical scoping.
@@ -58,6 +59,7 @@ impl SymbolTable {
             slot,
             is_lexical,
             is_declared: true,
+            is_const: false,
         });
         slot
     }
@@ -72,6 +74,7 @@ impl SymbolTable {
             slot,
             is_lexical,
             is_declared: false,
+            is_const: false,
         });
         slot
     }
@@ -85,14 +88,45 @@ impl SymbolTable {
             slot,
             is_lexical: true,
             is_declared: true,
+            is_const: false,
         });
         slot
+    }
+
+    pub fn define_const(&mut self, name: String) -> u16 {
+        let is_lexical = self.scope_depth > 1;
+        let slot = self.all_local_names.len() as u16;
+        self.all_local_names.push(name.clone());
+        self.locals.push(Local {
+            name,
+            depth: self.scope_depth,
+            slot,
+            is_lexical,
+            is_declared: true,
+            is_const: true,
+        });
+        slot
+    }
+
+    pub fn mark_const(&mut self, name: &str) {
+        if let Some(local) = self.locals.iter_mut().rev().find(|l| l.name == name) {
+            local.is_const = true;
+        }
+    }
+
+    pub fn is_const(&self, name: &str) -> bool {
+        for local in self.locals.iter().rev() {
+            if local.name == name {
+                return local.is_const;
+            }
+        }
+        false
     }
 
     pub fn define_local_at_depth(&mut self, name: String, depth: usize) -> u16 {
         let slot = self.all_local_names.len() as u16;
         self.all_local_names.push(name.clone());
-        self.locals.push(Local { name, depth, slot, is_lexical: false, is_declared: true });
+        self.locals.push(Local { name, depth, slot, is_lexical: false, is_declared: true, is_const: false });
         slot
     }
 

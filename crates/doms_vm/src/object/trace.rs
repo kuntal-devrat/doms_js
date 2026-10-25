@@ -79,7 +79,17 @@ impl Trace for JsObject {
         if let Some(privs) = &self.private_elements {
             for v in privs.values() {
                 match v {
-                    PrivateElement::Field(val) | PrivateElement::Method(val) => {
+                    PrivateElement::Field { value: val, brand } => {
+                        if let Some(p) = val.as_heap_ptr() {
+                            tracer.trace_ref(p);
+                        }
+                        if let Some(b) = brand {
+                            if let Some(p) = b.as_heap_ptr() {
+                                tracer.trace_ref(p);
+                            }
+                        }
+                    }
+                    PrivateElement::Method(val) => {
                         if let Some(p) = val.as_heap_ptr() {
                             tracer.trace_ref(p);
                         }
@@ -133,6 +143,16 @@ impl Trace for JsObject {
                 }
                 if let Some(lnt) = f.lexical_new_target {
                     if let Some(p) = lnt.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+                if let Some(lc) = f.lexical_callee {
+                    if let Some(p) = lc.as_heap_ptr() {
+                        tracer.trace_ref(p);
+                    }
+                }
+                for &b in &f.lexical_brands {
+                    if let Some(p) = b.as_heap_ptr() {
                         tracer.trace_ref(p);
                     }
                 }
@@ -445,7 +465,13 @@ impl JsObject {
         if let Some(privs) = &mut self.private_elements {
             for element in privs.values_mut() {
                 match element {
-                    PrivateElement::Field(v) | PrivateElement::Method(v) => visitor(v),
+                    PrivateElement::Field { value: v, brand } => {
+                        visitor(v);
+                        if let Some(b) = brand {
+                            visitor(b);
+                        }
+                    }
+                    PrivateElement::Method(v) => visitor(v),
                     PrivateElement::Accessor(acc) => {
                         if let Some(g) = &mut acc.getter {
                             visitor(g);
@@ -542,6 +568,12 @@ impl JsObject {
                 }
                 if let Some(ref mut lnt) = f.lexical_new_target {
                     visitor(lnt);
+                }
+                if let Some(ref mut lc) = f.lexical_callee {
+                    visitor(lc);
+                }
+                for b in &mut f.lexical_brands {
+                    visitor(b);
                 }
                 if let Some(ref mut proto) = f.prototype {
                     visitor(proto);

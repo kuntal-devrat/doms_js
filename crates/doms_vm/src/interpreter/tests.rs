@@ -139,10 +139,12 @@ fn test_jit_hot_loop_tiering() {
         home_object: None,
         lexical_this: None,
         lexical_new_target: None,
+        lexical_callee: None,
         prototype: None,
         initial_shape: None,
         is_class_constructor: false,
         is_derived_constructor: false,
+        module: None,
     };
     let fn_val = vm.alloc_function(js_fn);
 

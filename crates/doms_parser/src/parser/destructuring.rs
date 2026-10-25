@@ -148,7 +148,6 @@ fn build_iterator_close_expr(iter_name: &str) -> Expression {
 fn build_iterator_rest_expr(
     iter_name: &str,
     prev_step_done: Option<&str>,
-    step_active_var: Option<&str>,
 ) -> Expression {
     let mut body = Vec::new();
     body.push(Statement::VarDecl {
@@ -160,12 +159,6 @@ fn build_iterator_rest_expr(
     });
 
     let mut loop_body = Vec::new();
-    if let Some(active) = step_active_var {
-        loop_body.push(Statement::Expression(Expression::Assignment {
-            target: active.to_string(),
-            value: Box::new(Expression::Literal(Literal::Boolean(true))),
-        }));
-    }
     loop_body.push(Statement::Expression(Expression::Assignment {
         target: "s".to_string(),
         value: Box::new(Expression::Call {
@@ -176,12 +169,6 @@ fn build_iterator_rest_expr(
             args: vec![],
         }),
     }));
-    if let Some(active) = step_active_var {
-        loop_body.push(Statement::Expression(Expression::Assignment {
-            target: active.to_string(),
-            value: Box::new(Expression::Literal(Literal::Boolean(false))),
-        }));
-    }
     loop_body.push(Statement::If {
         condition: Expression::Member {
             object: Box::new(Expression::Identifier("s".to_string())),
@@ -269,7 +256,7 @@ impl<'a> Parser<'a> {
 
             if self.match_token(&TokenKind::DotDotDot)? {
                 has_rest = true;
-                let rest_init = build_iterator_rest_expr(&iter_name, prev_step.as_deref(), None);
+                let rest_init = build_iterator_rest_expr(&iter_name, prev_step.as_deref());
                 if self.check(&TokenKind::LBracket) {
                     self.advance()?;
                     let nested_tmp = format!("@destruct_{}", self.destruct_counter);
@@ -393,6 +380,11 @@ impl<'a> Parser<'a> {
                     None
                 };
                 let final_init = if let Some(def_expr) = def {
+                    declarations.push(VarDeclarator {
+                        name: format!("@touch_{}", self.destruct_counter),
+                        init: Some(Expression::TouchBinding(id.clone())),
+                    });
+                    self.destruct_counter += 1;
                     let val_var = format!("@val_{}", self.destruct_counter);
                     self.destruct_counter += 1;
                     declarations
@@ -621,6 +613,11 @@ impl<'a> Parser<'a> {
                     None
                 };
                 let prop_init = if let Some(def_expr) = def {
+                    declarations.push(VarDeclarator {
+                        name: format!("@touch_{}", self.destruct_counter),
+                        init: Some(Expression::TouchBinding(target.clone())),
+                    });
+                    self.destruct_counter += 1;
                     let val_var = format!("@val_{}", self.destruct_counter);
                     self.destruct_counter += 1;
                     declarations
@@ -808,20 +805,92 @@ impl<'a> Parser<'a> {
                                 }
                                 other => other.clone(),
                             };
-                            let rest_rhs = build_iterator_rest_expr(
-                                &iter_name,
-                                prev_step.as_deref(),
-                                Some(&step_active_var),
-                            );
                             let rest_val_var = format!("@rest_val_{}", self.destruct_counter);
                             self.destruct_counter += 1;
                             try_stmts.push(Statement::VarDecl {
                                 kind: VarKind::Let,
                                 declarations: vec![VarDeclarator {
                                     name: rest_val_var.clone(),
-                                    init: Some(rest_rhs),
+                                    init: Some(Expression::Array(vec![])),
                                 }],
                             });
+
+                            let s_var = format!("@rest_step_{}", self.destruct_counter);
+                            self.destruct_counter += 1;
+                            try_stmts.push(Statement::VarDecl {
+                                kind: VarKind::Let,
+                                declarations: vec![VarDeclarator {
+                                    name: s_var.clone(),
+                                    init: None,
+                                }],
+                            });
+
+                            let make_step_call = |active: &str, s: &str, it: &str| -> Vec<Statement> {
+                                vec![
+                                    Statement::Expression(Expression::Assignment {
+                                        target: active.to_string(),
+                                        value: Box::new(Expression::Literal(Literal::Boolean(true))),
+                                    }),
+                                    Statement::Expression(Expression::Assignment {
+                                        target: s.to_string(),
+                                        value: Box::new(Expression::Call {
+                                            callee: Box::new(Expression::Member {
+                                                object: Box::new(Expression::Identifier(it.to_string())),
+                                                property: "next".to_string(),
+                                            }),
+                                            args: vec![],
+                                        }),
+                                    }),
+                                    Statement::Expression(Expression::Assignment {
+                                        target: active.to_string(),
+                                        value: Box::new(Expression::Literal(Literal::Boolean(false))),
+                                    }),
+                                ]
+                            };
+
+                            let mut loop_body = Vec::new();
+                            loop_body.push(Statement::Expression(Expression::Call {
+                                callee: Box::new(Expression::Member {
+                                    object: Box::new(Expression::Identifier(rest_val_var.clone())),
+                                    property: "push".to_string(),
+                                }),
+                                args: vec![Expression::Member {
+                                    object: Box::new(Expression::Identifier(s_var.clone())),
+                                    property: "value".to_string(),
+                                }],
+                            }));
+                            loop_body.extend(make_step_call(&step_active_var, &s_var, &iter_name));
+
+                            let mut run_stmts = make_step_call(&step_active_var, &s_var, &iter_name);
+                            run_stmts.push(Statement::While {
+                                condition: Expression::Unary {
+                                    op: UnaryOp::Not,
+                                    expr: Box::new(Expression::Member {
+                                        object: Box::new(Expression::Identifier(s_var.clone())),
+                                        property: "done".to_string(),
+                                    }),
+                                },
+                                body: Box::new(Statement::Block(loop_body)),
+                            });
+
+                            let extraction_block = Statement::Block(run_stmts);
+
+                            if let Some(ref p) = prev_step {
+                                try_stmts.push(Statement::If {
+                                    condition: Expression::Unary {
+                                        op: UnaryOp::Not,
+                                        expr: Box::new(Expression::Member {
+                                            object: Box::new(Expression::Identifier(p.clone())),
+                                            property: "done".to_string(),
+                                        }),
+                                    },
+                                    then_branch: Box::new(extraction_block),
+                                    else_branch: None,
+                                });
+                            } else {
+                                try_stmts.push(extraction_block);
+                            }
+
                             try_stmts.push(Statement::Expression(Expression::Assignment {
                                 target: done_var.clone(),
                                 value: Box::new(Expression::Literal(Literal::Boolean(true))),

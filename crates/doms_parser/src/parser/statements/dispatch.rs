@@ -10,10 +10,6 @@ impl<'a> Parser<'a> {
                 if !self.is_strict {
                     if self.peeked.kind == TokenKind::LBracket {
                         self.parse_var_decl(VarKind::Let)
-                    } else if self.peeked.has_preceding_line_terminator {
-                        let expr = self.parse_expression(0)?;
-                        self.consume_semicolon()?;
-                        Ok(Statement::Expression(expr))
                     } else if self.in_single_statement_context {
                         let expr = self.parse_expression(0)?;
                         self.consume_semicolon()?;
@@ -21,12 +17,27 @@ impl<'a> Parser<'a> {
                     } else if matches!(
                         self.peeked.kind,
                         TokenKind::Ident(_)
+                            | TokenKind::Undefined
+                            | TokenKind::As
+                            | TokenKind::From
                             | TokenKind::LBrace
                             | TokenKind::Async
                             | TokenKind::Await
                             | TokenKind::Yield
+                            | TokenKind::Implements
+                            | TokenKind::Interface
+                            | TokenKind::Package
+                            | TokenKind::Private
+                            | TokenKind::Protected
+                            | TokenKind::Public
+                            | TokenKind::Static
+                            | TokenKind::Let
                     ) {
                         self.parse_var_decl(VarKind::Let)
+                    } else if self.peeked.has_preceding_line_terminator {
+                        let expr = self.parse_expression(0)?;
+                        self.consume_semicolon()?;
+                        Ok(Statement::Expression(expr))
                     } else {
                         let expr = self.parse_expression(0)?;
                         self.consume_semicolon()?;
@@ -47,8 +58,16 @@ impl<'a> Parser<'a> {
                 self.parse_using_decl()
             }
             TokenKind::Interface => {
-                self.parse_typescript_type_or_interface_decl()?;
-                Ok(Statement::Empty)
+                if !self.peeked.has_preceding_line_terminator
+                    && matches!(self.peeked.kind, TokenKind::Ident(_))
+                {
+                    self.parse_typescript_type_or_interface_decl()?;
+                    Ok(Statement::Empty)
+                } else {
+                    let expr = self.parse_expression(0)?;
+                    self.consume_semicolon()?;
+                    Ok(Statement::Expression(expr))
+                }
             }
             TokenKind::Ident(ref id)
                 if (id == "type" || id == "interface")
@@ -172,7 +191,7 @@ impl<'a> Parser<'a> {
                     TokenKind::Ident(s) => s.clone(),
                     other => other.as_prop_name().unwrap_or_default(),
                 };
-                if lbl == "let" {
+                if lbl == "let" || crate::lexer::is_reserved_word(&lbl) {
                     return Err(ParseError::UnexpectedToken(
                         self.current.kind.clone(),
                         self.current.line,

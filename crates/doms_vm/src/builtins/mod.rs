@@ -147,6 +147,10 @@ pub fn register_builtins(vm: &mut Vm) {
         vm.string_iterator_proto,
         vm.regexp_string_iterator_proto,
         vm.generator_proto,
+        vm.generator_function_proto,
+        vm.async_iterator_proto,
+        vm.async_generator_proto,
+        vm.async_generator_function_proto,
         vm.wrap_for_valid_iterator_proto,
         vm.iterator_helper_proto,
     ] {

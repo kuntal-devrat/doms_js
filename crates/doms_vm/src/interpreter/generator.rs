@@ -54,6 +54,8 @@ impl Vm {
             this_val,
             args_obj,
             mapped_args,
+            raw_args,
+            callee_val,
         ) = {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
@@ -69,6 +71,8 @@ impl Vm {
                     g.this_val,
                     g.arguments,
                     g.mapped_arguments.clone(),
+                    g.raw_args.clone(),
+                    g.callee_val,
                 ),
                 _ => return Err(VmError::TypeError("Not a generator".into())),
             }
@@ -136,8 +140,9 @@ impl Vm {
                 scopes,
                 upvalues_count: gen_fn.upvalues.len(),
                 env_obj,
+                param_env_obj: None,
                 arguments: args_obj,
-                raw_args: None,
+                raw_args,
                 is_strict: gen_fn.is_strict,
                 new_target: None,
                 is_function: true,
@@ -147,9 +152,11 @@ impl Vm {
                 in_param_init: false,
                 is_indirect_eval: false,
                 callee_func: Some(gen_fn.clone()),
-                callee_val: None,
+                callee_val,
                 mapped_arguments: mapped_args,
                 home_object: gen_fn.home_object,
+                module: gen_fn.module,
+                in_field_init: false,
             });
 
             let mut found_h = false;
@@ -214,6 +221,8 @@ impl Vm {
             this_val,
             args_obj,
             mapped_args,
+            raw_args,
+            callee_val,
         ) = {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
@@ -229,6 +238,8 @@ impl Vm {
                     g.this_val,
                     g.arguments,
                     g.mapped_arguments.clone(),
+                    g.raw_args.clone(),
+                    g.callee_val,
                 ),
                 _ => return Err(VmError::TypeError("Not a generator".into())),
             }
@@ -287,8 +298,9 @@ impl Vm {
             scopes,
             upvalues_count: gen_fn.upvalues.len(),
             env_obj,
+            param_env_obj: None,
             arguments: args_obj,
-            raw_args: None,
+            raw_args,
             is_strict: gen_fn.is_strict,
             new_target: None,
             is_function: true,
@@ -298,9 +310,11 @@ impl Vm {
             in_param_init: false,
             is_indirect_eval: false,
             callee_func: Some(gen_fn.clone()),
-            callee_val: None,
+            callee_val,
             mapped_arguments: mapped_args,
             home_object: gen_fn.home_object,
+            module: gen_fn.module,
+            in_field_init: false,
         });
 
         for h in catch_handlers {
@@ -379,6 +393,8 @@ impl Vm {
             this_val,
             args_obj,
             mapped_args,
+            raw_args,
+            callee_val,
         ) = {
             let obj = unsafe { &*(ptr as *mut JsObject) };
             match &obj.kind {
@@ -394,6 +410,8 @@ impl Vm {
                     g.this_val,
                     g.arguments,
                     g.mapped_arguments.clone(),
+                    g.raw_args.clone(),
+                    g.callee_val,
                 ),
                 _ => return Err(VmError::TypeError("Not a generator".into())),
             }
@@ -428,14 +446,15 @@ impl Vm {
         }
 
         // Tiered native Cranelift execution for generator resumption
-        if gen_fn.jit_entry.is_none() && !gen_fn.jit_attempted {
+        if !gen_fn.is_async && gen_fn.jit_entry.is_none() && !gen_fn.jit_attempted {
             let can_jit = crate::jit::JitCompiler::can_compile_native(&gen_fn.chunk);
             if can_jit {
                 gen_fn.jit_attempted = true;
                 gen_fn.jit_entry = crate::jit::JitCompiler::compile_native(&gen_fn.chunk);
             }
         }
-        if let Some(jit) = &gen_fn.jit_entry {
+        if !gen_fn.is_async {
+            if let Some(jit) = &gen_fn.jit_entry {
             if let crate::jit::JitCode::Native { func_ptr, num_locals, .. } = &jit.code {
                 let locals_count = *num_locals;
                 let mut raw_locals = vec![crate::value::TAG_UNDEFINED; locals_count];
@@ -490,6 +509,7 @@ impl Vm {
                 }
             }
         }
+        }
 
         let mut current_stack = stack;
         if state == crate::object::GeneratorState::SuspendedYield {
@@ -522,8 +542,9 @@ impl Vm {
             scopes,
             upvalues_count: gen_fn.upvalues.len(),
             env_obj,
+            param_env_obj: None,
             arguments: args_obj,
-            raw_args: None,
+            raw_args,
             is_strict: gen_fn.is_strict,
             new_target: None,
             is_function: true,
@@ -533,9 +554,11 @@ impl Vm {
             in_param_init: false,
             is_indirect_eval: false,
             callee_func: Some(gen_fn.clone()),
-            callee_val: None,
+            callee_val,
             mapped_arguments: mapped_args,
             home_object: gen_fn.home_object,
+            module: gen_fn.module,
+            in_field_init: false,
         });
 
         for h in catch_handlers {
@@ -566,7 +589,73 @@ impl Vm {
         }
         if gen_fn.is_async {
             let res_promise = match res {
-                Ok(val) => {
+                Ok(mut val) => {
+                    let is_done = self.get_property(val, "done").is_truthy();
+                    if !is_done {
+                        let inner_val = self.get_property(val, "value");
+                        if let Some(ptr) = inner_val.as_object_ptr() {
+                            let obj = unsafe { &*(ptr as *mut JsObject) };
+                            if let ObjectKind::Promise(ref p) = obj.kind {
+                                match p.state {
+                                    crate::object::PromiseState::Rejected => {
+                                        let reason = p.result;
+                                        let _ = self.generator_throw(cur_gen, reason);
+                                        let promise = self.alloc_promise(
+                                            crate::object::PromiseState::Pending,
+                                            JsValue::undefined(),
+                                        );
+                                        self.reject_promise(promise, reason);
+                                        let _ = self.drain_microtasks();
+                                        self.drain_async_generator_queue(cur_gen)?;
+                                        return Ok(promise);
+                                    }
+                                    crate::object::PromiseState::Fulfilled => {
+                                        val = self.make_iter_result(p.result, false);
+                                    }
+                                    crate::object::PromiseState::Pending => {
+                                        let cur_p = self.alloc_promise(
+                                            crate::object::PromiseState::Pending,
+                                            JsValue::undefined(),
+                                        );
+                                        let cg = cur_gen;
+                                        let p_res = cur_p;
+                                        let fulfill_cb = self.alloc_closure_native_function(
+                                            "async_gen_fulfill",
+                                            1,
+                                            Arc::new(move |vm, _, args| {
+                                                let r = args
+                                                    .first()
+                                                    .copied()
+                                                    .unwrap_or(JsValue::undefined());
+                                                let iter_res = vm.make_iter_result(r, false);
+                                                vm.resolve_promise(p_res, iter_res);
+                                                Ok(JsValue::undefined())
+                                            }),
+                                        );
+                                        let reject_cb = self.alloc_closure_native_function(
+                                            "async_gen_reject",
+                                            1,
+                                            Arc::new(move |vm, _, args| {
+                                                let r = args
+                                                    .first()
+                                                    .copied()
+                                                    .unwrap_or(JsValue::undefined());
+                                                let _ = vm.generator_throw(cg, r);
+                                                vm.reject_promise(p_res, r);
+                                                Ok(JsValue::undefined())
+                                            }),
+                                        );
+                                        let then_fn = self.get_property(inner_val, "then");
+                                        let _ = self
+                                            .call(then_fn, inner_val, &[fulfill_cb, reject_cb]);
+                                        let _ = self.drain_microtasks();
+                                        self.drain_async_generator_queue(cur_gen)?;
+                                        return Ok(cur_p);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let promise = self
                         .alloc_promise(crate::object::PromiseState::Pending, JsValue::undefined());
                     self.resolve_promise(promise, val);

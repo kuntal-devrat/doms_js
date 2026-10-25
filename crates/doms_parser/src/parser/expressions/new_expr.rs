@@ -35,7 +35,6 @@ impl<'a> Parser<'a> {
                 if prop.starts_with('#') {
                     prop = match self.resolve_private_name(&prop) {
                         Some(scoped) => scoped,
-                        None if self.is_eval => prop,
                         None => {
                             return Err(ParseError::UnexpectedToken(
                                 prop_tok.kind,

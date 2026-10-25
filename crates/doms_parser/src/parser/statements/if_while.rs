@@ -7,12 +7,9 @@ impl<'a> Parser<'a> {
         let condition = self.parse_expression(0)?;
         self.expect(TokenKind::RParen)?;
 
-        let then_branch = Box::new(self.parse_statement()?);
-        self.check_sub_statement(&then_branch, true)?;
+        let then_branch = Box::new(self.parse_sub_statement(true)?);
         let else_branch = if self.match_token(&TokenKind::Else)? {
-            let eb = Box::new(self.parse_statement()?);
-            self.check_sub_statement(&eb, true)?;
-            Some(eb)
+            Some(Box::new(self.parse_sub_statement(true)?))
         } else {
             None
         };
@@ -26,8 +23,7 @@ impl<'a> Parser<'a> {
         let condition = self.parse_expression(0)?;
         self.expect(TokenKind::RParen)?;
 
-        let body = Box::new(self.parse_statement()?);
-        self.check_sub_statement(&body, false)?;
+        let body = Box::new(self.parse_sub_statement(false)?);
         Ok(Statement::While { condition, body })
     }
 }

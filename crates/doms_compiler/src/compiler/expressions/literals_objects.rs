@@ -49,7 +49,10 @@ impl Compiler {
                 return Ok(());
             }
         }
-        if self.with_depth == 0 && !self.shadowed_class_names.iter().any(|s| s == name) {
+        if self.with_depth == 0
+            && !self.shadowed_class_names.iter().any(|s| s == name)
+            && !self.tdz_names.iter().any(|s| s == name)
+        {
             if let Some(slot) = self.symbols.resolve_local(name) {
                 self.chunk.emit(OpCode::GetLocal(slot), 0);
                 return Ok(());

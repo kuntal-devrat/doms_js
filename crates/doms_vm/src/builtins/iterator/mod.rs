@@ -317,6 +317,142 @@ pub fn register_iterator_builtins(vm: &mut Vm) {
         vm.set_property_non_writable(gen_proto, key_name);
     }
 
+    let gen_next_fn = vm.alloc_native_function("next", 1, |vm, this, args| {
+        let send_val = args.first().copied().unwrap_or(JsValue::undefined());
+        vm.generator_next(this, send_val)
+    });
+    vm.set_property(gen_proto, "next", gen_next_fn);
+    vm.set_property_non_enumerable(gen_proto, "next".to_string());
+
+    let gen_return_fn = vm.alloc_native_function("return", 1, |vm, this, args| {
+        let ret_val = args.first().copied().unwrap_or(JsValue::undefined());
+        vm.generator_return(this, ret_val)
+    });
+    vm.set_property(gen_proto, "return", gen_return_fn);
+    vm.set_property_non_enumerable(gen_proto, "return".to_string());
+
+    let gen_throw_fn = vm.alloc_native_function("throw", 1, |vm, this, args| {
+        let err_val = args.first().copied().unwrap_or(JsValue::undefined());
+        vm.generator_throw(this, err_val)
+    });
+    vm.set_property(gen_proto, "throw", gen_throw_fn);
+    vm.set_property_non_enumerable(gen_proto, "throw".to_string());
+
+    // %GeneratorFunction.prototype%
+    let gen_fn_proto = vm.alloc_object_with_exact_proto(vm.function_proto);
+    vm.generator_function_proto = Some(gen_fn_proto);
+    vm.set_property(gen_fn_proto, "prototype", gen_proto);
+    vm.set_property_non_enumerable(gen_fn_proto, "prototype".to_string());
+    vm.set_property_non_writable(gen_fn_proto, "prototype".to_string());
+
+    if let Some(sym_tag) = vm.symbol_to_string_tag {
+        let tag_str = vm.alloc_string("GeneratorFunction".into());
+        vm.set_symbol_property(gen_fn_proto, sym_tag, tag_str);
+        let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
+        vm.set_property_non_enumerable(gen_fn_proto, key_name.clone());
+        vm.set_property_non_writable(gen_fn_proto, key_name);
+    }
+
+    // %GeneratorPrototype%.constructor -> %GeneratorFunction.prototype%
+    vm.set_property(gen_proto, "constructor", gen_fn_proto);
+    vm.set_property_non_enumerable(gen_proto, "constructor".to_string());
+    vm.set_property_non_writable(gen_proto, "constructor".to_string());
+
+    let gen_ctor = vm.alloc_native_function("GeneratorFunction", 1, |vm, _this, args| {
+        crate::builtins::function::create_dynamic_function(vm, "function*", args)
+    });
+    if let Some(fn_proto) = vm.function_proto {
+        if let Some(ptr) = gen_ctor.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            obj.prototype = Some(fn_proto);
+        }
+    }
+    vm.set_property(gen_ctor, "prototype", gen_fn_proto);
+    vm.set_property_non_enumerable(gen_ctor, "prototype".to_string());
+    vm.set_property_non_writable(gen_ctor, "prototype".to_string());
+    vm.set_property(gen_fn_proto, "constructor", gen_ctor);
+    vm.set_property_non_enumerable(gen_fn_proto, "constructor".to_string());
+    vm.set_property_non_writable(gen_fn_proto, "constructor".to_string());
+
+    // %AsyncIteratorPrototype%
+    let async_iter_proto = vm.alloc_object_with_exact_proto(vm.object_proto);
+    vm.async_iterator_proto = Some(async_iter_proto);
+    if let Some(sym_async) = vm.symbol_async_iterator {
+        let ret_this = vm.alloc_native_function("[Symbol.asyncIterator]", 0, |_vm, this, _args| Ok(this));
+        vm.set_symbol_property(async_iter_proto, sym_async, ret_this);
+        let key_name = format!("[Symbol:{:x}]", sym_async.raw_bits());
+        vm.set_property_non_enumerable(async_iter_proto, key_name.clone());
+        vm.set_property_non_writable(async_iter_proto, key_name);
+    }
+
+    // %AsyncGeneratorPrototype%
+    let async_gen_proto = vm.alloc_object_with_exact_proto(Some(async_iter_proto));
+    vm.async_generator_proto = Some(async_gen_proto);
+    if let Some(sym_tag) = vm.symbol_to_string_tag {
+        let tag_str = vm.alloc_string("AsyncGenerator".into());
+        vm.set_symbol_property(async_gen_proto, sym_tag, tag_str);
+        let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
+        vm.set_property_non_enumerable(async_gen_proto, key_name.clone());
+        vm.set_property_non_writable(async_gen_proto, key_name);
+    }
+
+    let async_gen_next_fn = vm.alloc_native_function("next", 1, |vm, this, args| {
+        let send_val = args.first().copied().unwrap_or(JsValue::undefined());
+        vm.generator_next(this, send_val)
+    });
+    vm.set_property(async_gen_proto, "next", async_gen_next_fn);
+    vm.set_property_non_enumerable(async_gen_proto, "next".to_string());
+
+    let async_gen_return_fn = vm.alloc_native_function("return", 1, |vm, this, args| {
+        let ret_val = args.first().copied().unwrap_or(JsValue::undefined());
+        vm.generator_return(this, ret_val)
+    });
+    vm.set_property(async_gen_proto, "return", async_gen_return_fn);
+    vm.set_property_non_enumerable(async_gen_proto, "return".to_string());
+
+    let async_gen_throw_fn = vm.alloc_native_function("throw", 1, |vm, this, args| {
+        let err_val = args.first().copied().unwrap_or(JsValue::undefined());
+        vm.generator_throw(this, err_val)
+    });
+    vm.set_property(async_gen_proto, "throw", async_gen_throw_fn);
+    vm.set_property_non_enumerable(async_gen_proto, "throw".to_string());
+
+    // %AsyncGeneratorFunction.prototype%
+    let async_gen_fn_proto = vm.alloc_object_with_exact_proto(vm.function_proto);
+    vm.async_generator_function_proto = Some(async_gen_fn_proto);
+    vm.set_property(async_gen_fn_proto, "prototype", async_gen_proto);
+    vm.set_property_non_enumerable(async_gen_fn_proto, "prototype".to_string());
+    vm.set_property_non_writable(async_gen_fn_proto, "prototype".to_string());
+
+    if let Some(sym_tag) = vm.symbol_to_string_tag {
+        let tag_str = vm.alloc_string("AsyncGeneratorFunction".into());
+        vm.set_symbol_property(async_gen_fn_proto, sym_tag, tag_str);
+        let key_name = format!("[Symbol:{:x}]", sym_tag.raw_bits());
+        vm.set_property_non_enumerable(async_gen_fn_proto, key_name.clone());
+        vm.set_property_non_writable(async_gen_fn_proto, key_name);
+    }
+
+    // %AsyncGeneratorPrototype%.constructor -> %AsyncGeneratorFunction.prototype%
+    vm.set_property(async_gen_proto, "constructor", async_gen_fn_proto);
+    vm.set_property_non_enumerable(async_gen_proto, "constructor".to_string());
+    vm.set_property_non_writable(async_gen_proto, "constructor".to_string());
+
+    let async_gen_ctor = vm.alloc_native_function("AsyncGeneratorFunction", 1, |vm, _this, args| {
+        crate::builtins::function::create_dynamic_function(vm, "async function*", args)
+    });
+    if let Some(fn_proto) = vm.function_proto {
+        if let Some(ptr) = async_gen_ctor.as_object_ptr() {
+            let obj = unsafe { &mut *(ptr as *mut JsObject) };
+            obj.prototype = Some(fn_proto);
+        }
+    }
+    vm.set_property(async_gen_ctor, "prototype", async_gen_fn_proto);
+    vm.set_property_non_enumerable(async_gen_ctor, "prototype".to_string());
+    vm.set_property_non_writable(async_gen_ctor, "prototype".to_string());
+    vm.set_property(async_gen_fn_proto, "constructor", async_gen_ctor);
+    vm.set_property_non_enumerable(async_gen_fn_proto, "constructor".to_string());
+    vm.set_property_non_writable(async_gen_fn_proto, "constructor".to_string());
+
     // 9. Iterator Constructor
     let iter_ctor = vm.alloc_native_function("Iterator", 0, |vm, this, _args| {
         if !vm.is_constructing {

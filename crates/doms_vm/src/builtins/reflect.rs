@@ -149,7 +149,7 @@ pub(super) fn register_reflect(vm: &mut Vm) {
                         return vm.proxy_get(target, &prop_key, receiver);
                     }
                 }
-                vm.get_symbol_property_result(receiver, sym)
+                vm.get_symbol_property_with_receiver_result(target, sym, receiver)
             }
         }
     });

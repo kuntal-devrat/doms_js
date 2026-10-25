@@ -477,10 +477,12 @@ mod tests {
             home_object: None,
             lexical_this: None,
             lexical_new_target: None,
+            lexical_callee: None,
             prototype: None,
             initial_shape: None,
             is_class_constructor: false,
             is_derived_constructor: false,
+            module: None,
         });
 
         let call_res = jit_caller

@@ -45,6 +45,7 @@ pub struct PropertyInfo {
 pub enum ShapeTransition {
     Root,
     Add { key: String, offset: u32, attributes: PropertyAttributes },
+    Redefine { key: String, offset: u32, attributes: PropertyAttributes },
     Remove { key: String },
 }
 
@@ -104,7 +105,8 @@ impl ShapeRegistry {
         let mut deleted: Option<Vec<&str>> = None;
         while let Some(shape) = self.shapes.get(shape_id as usize) {
             match &shape.transition {
-                ShapeTransition::Add { key: prop_key, offset, attributes } => {
+                ShapeTransition::Add { key: prop_key, offset, attributes }
+                | ShapeTransition::Redefine { key: prop_key, offset, attributes } => {
                     if prop_key == key {
                         if let Some(del) = &deleted {
                             if del.iter().any(|d| *d == key) {
@@ -193,7 +195,7 @@ impl ShapeRegistry {
         let new_shape = Shape {
             id: new_id,
             parent: Some(current_shape_id),
-            transition: ShapeTransition::Add { key: key.to_string(), offset, attributes },
+            transition: ShapeTransition::Redefine { key: key.to_string(), offset, attributes },
             next_offset: parent.next_offset,
             num_properties: parent.num_properties,
             transitions: HashMap::new(),
@@ -235,18 +237,26 @@ impl ShapeRegistry {
     pub fn all_property_entries(&self, mut shape_id: ShapeId) -> Vec<(String, u32)> {
         let mut entries = Vec::new();
         let mut seen = HashSet::new();
-        let mut deleted: Option<HashSet<String>> = None;
+        let mut deleted = HashSet::new();
+        let mut latest_offsets: HashMap<String, u32> = HashMap::new();
 
         while let Some(shape) = self.shapes.get(shape_id as usize) {
             match &shape.transition {
                 ShapeTransition::Add { key, offset, .. } => {
-                    let is_deleted = deleted.as_ref().map(|d| d.contains(key)).unwrap_or(false);
-                    if !is_deleted && seen.insert(key.clone()) {
-                        entries.push((key.clone(), *offset));
+                    if !deleted.contains(key) {
+                        latest_offsets.entry(key.clone()).or_insert(*offset);
+                        if seen.insert(key.clone()) {
+                            entries.push(key.clone());
+                        }
+                    }
+                }
+                ShapeTransition::Redefine { key, offset, .. } => {
+                    if !deleted.contains(key) {
+                        latest_offsets.entry(key.clone()).or_insert(*offset);
                     }
                 }
                 ShapeTransition::Remove { key } => {
-                    deleted.get_or_insert_with(HashSet::new).insert(key.clone());
+                    deleted.insert(key.clone());
                 }
                 ShapeTransition::Root => break,
             }
@@ -258,6 +268,9 @@ impl ShapeRegistry {
 
         entries.reverse();
         entries
+            .into_iter()
+            .filter_map(|k| latest_offsets.get(&k).map(|&off| (k, off)))
+            .collect()
     }
 
     /// Return all property (key, offset, attributes) defined in this shape in insertion order.
@@ -267,18 +280,26 @@ impl ShapeRegistry {
     ) -> Vec<(String, u32, PropertyAttributes)> {
         let mut entries = Vec::new();
         let mut seen = HashSet::new();
-        let mut deleted: Option<HashSet<String>> = None;
+        let mut deleted = HashSet::new();
+        let mut latest_info: HashMap<String, (u32, PropertyAttributes)> = HashMap::new();
 
         while let Some(shape) = self.shapes.get(shape_id as usize) {
             match &shape.transition {
                 ShapeTransition::Add { key, offset, attributes } => {
-                    let is_deleted = deleted.as_ref().map(|d| d.contains(key)).unwrap_or(false);
-                    if !is_deleted && seen.insert(key.clone()) {
-                        entries.push((key.clone(), *offset, *attributes));
+                    if !deleted.contains(key) {
+                        latest_info.entry(key.clone()).or_insert((*offset, *attributes));
+                        if seen.insert(key.clone()) {
+                            entries.push(key.clone());
+                        }
+                    }
+                }
+                ShapeTransition::Redefine { key, offset, attributes } => {
+                    if !deleted.contains(key) {
+                        latest_info.entry(key.clone()).or_insert((*offset, *attributes));
                     }
                 }
                 ShapeTransition::Remove { key } => {
-                    deleted.get_or_insert_with(HashSet::new).insert(key.clone());
+                    deleted.insert(key.clone());
                 }
                 ShapeTransition::Root => break,
             }
@@ -290,6 +311,9 @@ impl ShapeRegistry {
 
         entries.reverse();
         entries
+            .into_iter()
+            .filter_map(|k| latest_info.get(&k).map(|&(off, attrs)| (k, off, attrs)))
+            .collect()
     }
 
     /// Return all property names defined in this shape in insertion order.

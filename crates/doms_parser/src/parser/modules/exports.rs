@@ -172,6 +172,19 @@ impl<'a> Parser<'a> {
         }
 
         let stmt = self.parse_statement()?;
+        match &stmt {
+            Statement::VarDecl { .. }
+            | Statement::FunctionDecl { .. }
+            | Statement::AsyncFunctionDecl { .. }
+            | Statement::GeneratorDecl { .. }
+            | Statement::AsyncGeneratorDecl { .. }
+            | Statement::ClassDecl { .. } => {}
+            _ => {
+                return Err(ParseError::General(
+                    "export without default must be followed by a declaration".to_string(),
+                ));
+            }
+        }
         Ok(Statement::Export {
             decl: Some(Box::new(stmt)),
             is_default: false,

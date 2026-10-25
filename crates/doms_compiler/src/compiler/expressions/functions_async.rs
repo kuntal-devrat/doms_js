@@ -11,7 +11,18 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function(name.clone(), params.to_vec(), body, self.is_strict)?;
+        let mut def = Self::compile_function_full(
+            name.clone(),
+            params.to_vec(),
+            body,
+            self.is_strict,
+            false,
+            false,
+            false,
+            self.chunk.imported_bindings.clone(),
+            self.chunk.export_aliases.clone(),
+        )?;
+        def.chunk.private_names = self.private_names.clone();
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
         Ok(())
@@ -22,7 +33,7 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function_full(
+        let mut def = Self::compile_function_full(
             None,
             params.to_vec(),
             body,
@@ -30,9 +41,34 @@ impl Compiler {
             false,
             true,
             false,
+            self.chunk.imported_bindings.clone(),
+            self.chunk.export_aliases.clone(),
         )?;
+        def.chunk.private_names = self.private_names.clone();
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
+        Ok(())
+    }
+
+    pub(crate) fn compile_async_arrow_expr(
+        &mut self,
+        params: &[String],
+        body: &[Statement],
+    ) -> Result<(), CompileError> {
+        let mut def = Self::compile_function_full(
+            None,
+            params.to_vec(),
+            body,
+            self.is_strict,
+            false,
+            true,
+            false,
+            self.chunk.imported_bindings.clone(),
+            self.chunk.export_aliases.clone(),
+        )?;
+        def.chunk.private_names = self.private_names.clone();
+        let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
+        self.chunk.emit(OpCode::CreateAsyncFunction(const_idx), 0);
         Ok(())
     }
 
@@ -42,7 +78,7 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function_full(
+        let mut def = Self::compile_function_full(
             name.clone(),
             params.to_vec(),
             body,
@@ -50,7 +86,10 @@ impl Compiler {
             false,
             false,
             true,
+            self.chunk.imported_bindings.clone(),
+            self.chunk.export_aliases.clone(),
         )?;
+        def.chunk.private_names = self.private_names.clone();
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateFunction(const_idx), 0);
         Ok(())
@@ -62,7 +101,18 @@ impl Compiler {
         params: &[String],
         body: &[Statement],
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function(name.clone(), params.to_vec(), body, self.is_strict)?;
+        let mut def = Self::compile_function_full(
+            name.clone(),
+            params.to_vec(),
+            body,
+            self.is_strict,
+            false,
+            false,
+            false,
+            self.chunk.imported_bindings.clone(),
+            self.chunk.export_aliases.clone(),
+        )?;
+        def.chunk.private_names = self.private_names.clone();
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateAsyncFunction(const_idx), 0);
         Ok(())
@@ -84,7 +134,7 @@ impl Compiler {
         body: &[Statement],
         is_method: bool,
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function_full(
+        let mut def = Self::compile_function_full(
             name.clone(),
             params.to_vec(),
             body,
@@ -92,7 +142,10 @@ impl Compiler {
             true,
             false,
             is_method,
+            self.chunk.imported_bindings.clone(),
+            self.chunk.export_aliases.clone(),
         )?;
+        def.chunk.private_names = self.private_names.clone();
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateGenerator(const_idx), 0);
         Ok(())
@@ -114,7 +167,7 @@ impl Compiler {
         body: &[Statement],
         is_method: bool,
     ) -> Result<(), CompileError> {
-        let def = Self::compile_function_full(
+        let mut def = Self::compile_function_full(
             name.clone(),
             params.to_vec(),
             body,
@@ -122,7 +175,10 @@ impl Compiler {
             true,
             false,
             is_method,
+            self.chunk.imported_bindings.clone(),
+            self.chunk.export_aliases.clone(),
         )?;
+        def.chunk.private_names = self.private_names.clone();
         let const_idx = self.chunk.add_constant(Constant::Function(Arc::new(def)));
         self.chunk.emit(OpCode::CreateAsyncGenerator(const_idx), 0);
         Ok(())
