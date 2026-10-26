@@ -229,22 +229,23 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         self.symbols.enter_scope();
         let mut block_lex_names = Vec::new();
+        let mut block_lex_names_set = std::collections::HashSet::new();
         for stmt in stmts {
             match stmt {
                 Statement::VarDecl { kind, declarations } if *kind != VarKind::Var => {
                     for d in declarations {
                         if !d.name.starts_with('@')
                             && !d.name.starts_with("__")
-                            && !block_lex_names.contains(&d.name)
+                            && block_lex_names_set.insert(d.name.as_str())
                         {
-                            block_lex_names.push(d.name.clone());
+                            block_lex_names.push(&d.name);
                         }
                     }
                 }
                 Statement::ClassDecl(c) => {
                     if let Some(ref n) = c.name {
-                        if !block_lex_names.contains(n) {
-                            block_lex_names.push(n.clone());
+                        if block_lex_names_set.insert(n.as_str()) {
+                            block_lex_names.push(n);
                         }
                     }
                 }
@@ -252,15 +253,15 @@ impl Compiler {
                 | Statement::AsyncFunctionDecl { name, .. }
                 | Statement::GeneratorDecl { name, .. }
                 | Statement::AsyncGeneratorDecl { name, .. } => {
-                    if !name.is_empty() && !block_lex_names.contains(name) {
-                        block_lex_names.push(name.clone());
+                    if !name.is_empty() && block_lex_names_set.insert(name.as_str()) {
+                        block_lex_names.push(name);
                     }
                 }
                 _ => {}
             }
         }
         for name in &block_lex_names {
-            self.symbols.define_pre_declared(name.clone());
+            self.symbols.define_pre_declared(name.to_string());
         }
 
         let has_lex_scope = !block_lex_names.is_empty();
@@ -268,7 +269,7 @@ impl Compiler {
             self.chunk.emit(OpCode::CreateObject, 0);
             for name in &block_lex_names {
                 self.chunk.emit(OpCode::Dup, 0);
-                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
                 self.chunk.emit(OpCode::LoadConst(name_idx), 0);
                 self.chunk.emit(OpCode::LoadUninitialized, 0);
                 self.chunk.emit(OpCode::SetElem, 0);
